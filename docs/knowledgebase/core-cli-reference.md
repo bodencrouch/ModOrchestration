@@ -77,7 +77,7 @@ Install selected mods from an instruction file.
 | `--concurrent` | No | Parallel downloads |
 | `-y` / `--yes` | No | Auto-confirm prompts |
 | `--skip-validation` | No | Skip pre-install checks (not recommended) |
-| `--no-checkpoint` | No | Disable checkpointing |
+| `--no-checkpoint` | No | Disable Git checkpoint commits during install; `install_session.json` resume still works |
 | `--best-effort` | No | Continue on missing sources and mod failures; implies `-y`; without Nexus key, **deselects Nexus-only mods** |
 | `--continue-on-missing-sources` | No | Partial install when archives missing |
 | `--continue-on-mod-failure` | No | Continue after per-mod failure |

@@ -78,7 +78,9 @@ flowchart TD
 
 `[REPO]` **`InstallCoordinator`** owns **`GitCheckpointService`** for the KOTOR destination directory. After each successful component install, a checkpoint commit may be created; failures to checkpoint are logged as warnings and do not abort the install.
 
-CLI: **`--no-checkpoint`** disables the checkpoint system (`ModBuildConverter` install options). Default is checkpoints **enabled**.
+CLI: **`--no-checkpoint`** disables **Git** checkpoint commits (`enableGitCheckpoints: false` on `InstallationService` / `InstallCoordinator`). Session resume via `install_session.json` remains available. Default is Git checkpoints **enabled**.
+
+**InstallStartPage** runs a fast Environment readiness check (`ValidationPipelineOptions.InstallStartReadiness`) and may offer **Resume previous install** vs **Start over** when an incomplete session exists for the destination. **InstallingPage** surfaces healthy/failed/cancelled states and in-session Resume/Retry; it does not promise full-folder pristine rollback.
 
 ## Continue-on-failure flags
 

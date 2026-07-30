@@ -258,8 +258,11 @@ Widescreen-only pages are added dynamically after the base install when needed.
 - `DownloadsExplainPage`
   - background downloads continue while the wizard advances
 - `InstallStartPage`
-  - review page before the real install begins
-
+  - Environment readiness summary (`InstallStartReadiness`); Next blocked on critical failures
+  - Optional **Resume previous install** / **Start over** when `install_session.json` has incomplete selected work
+- `InstallingPage`
+  - Honest success / failed / cancelled states; Resume/Retry continues remaining mods (not pristine undo)
+  - Review/progress page before Next is allowed after a successful install
 ## Full-build workflow expectation
 
 For `KOTOR1_Full.toml` / `KOTOR2_Full.toml` tests:
