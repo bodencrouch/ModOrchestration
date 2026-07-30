@@ -819,6 +819,111 @@ Name = ""Paste Cascade Toml Mod""
 
         #endregion
 
+        #region Guide ingest port (IGuideIngestService / GuideIngestResult content sections)
+
+        [Test]
+        public void IngestFromText_MarkdownWithPreambleEpilogueWidescreen_PopulatesPortContentSections()
+        {
+            // U6: GuideIngestService now calls MarkdownParser directly for markdown content instead of the
+            // generic deserializer, so preamble/epilogue/widescreen/trace survive onto GuideIngestResult
+            // instead of being dropped at the port boundary.
+            const string markdown = @"This is the preamble text before the mod list.
+
+## Mod List
+
+### First Mod
+**Name:** First Mod
+**Author:** TestAuthor
+**Description:** A basic mod.
+
+___
+
+## Optional Widescreen
+
+This section describes widescreen-only fixes.
+
+### Widescreen Mod
+**Name:** Widescreen Mod
+**Author:** TestAuthor
+**Description:** A widescreen-only fix.
+
+___
+
+## Misc. Basegame Issues & Fixes
+
+This is epilogue content after the widescreen section.
+";
+
+            GuideIngestResult result = GuideIngestService.Instance.IngestFromText(markdown, formatHint: null, parseDirections: false);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Components, Is.Not.Empty);
+                Assert.That(result.DetectedFormat, Is.EqualTo("markdown"));
+                Assert.That(result.PreambleContent, Does.Contain("preamble text before the mod list"));
+                Assert.That(result.EpilogueContent, Does.Contain("Misc. Basegame Issues"));
+                Assert.That(result.WidescreenWarningContent, Does.Contain("Optional Widescreen"));
+                Assert.That(result.Trace, Is.Not.Null, "Markdown ingest should populate a parse trace");
+            });
+        }
+
+        [Test]
+        public void IngestFromText_MarkdownWithUndraftableDirections_SurfacesGapsOnPortResult()
+        {
+            // Integration: U2's unparsed-gap reporting must surface through the port's DraftResults too,
+            // not only when calling MarkdownParser/DraftInstructionService directly.
+            const string markdown = @"### Gap Mod
+**Name:** Gap Mod
+**Author:** TestAuthor
+**Description:** A mod whose directions cannot be fully drafted.
+**Installation Instructions:** Select whichever seems best for your taste, honestly.
+
+___";
+
+            GuideIngestResult result = GuideIngestService.Instance.IngestFromText(markdown, formatHint: "markdown", parseDirections: true);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Components, Has.Count.EqualTo(1));
+                Assert.That(result.DraftResults, Has.Count.EqualTo(1));
+                Assert.That(result.DraftResults[0].UnparsedGaps, Is.Not.Empty,
+                    "The port must surface unparsed gaps, not only direct MarkdownParser/DraftInstructionService callers");
+            });
+        }
+
+        [Test]
+        public void IngestFromText_NonMarkdownFormat_ContentSectionsRemainNullAndComponentsUnaffected()
+        {
+            // Edge case: the markdown-specific rewiring must not regress other formats - TOML ingest
+            // continues through the generic deserializer exactly as before, with no content sections
+            // (those have no TOML equivalent).
+            var component = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "TOML Round Trip Mod",
+                Author = "TestAuthor",
+                Description = "A TOML-only component.",
+            };
+
+            string toml = ModComponentSerializationService.SerializeModComponentAsTomlString(new[] { component });
+
+            GuideIngestResult result = GuideIngestService.Instance.IngestFromText(toml, formatHint: "toml", parseDirections: false);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Components, Has.Count.EqualTo(1));
+                Assert.That(result.Components[0].Name, Is.EqualTo("TOML Round Trip Mod"));
+                Assert.That(result.DetectedFormat, Is.EqualTo("toml"));
+                Assert.That(result.PreambleContent, Is.Null);
+                Assert.That(result.EpilogueContent, Is.Null);
+                Assert.That(result.WidescreenWarningContent, Is.Null);
+                Assert.That(result.AspyrExclusiveWarningContent, Is.Null);
+                Assert.That(result.Trace, Is.Null, "Non-markdown formats never go through MarkdownParser, so there is no trace");
+            });
+        }
+
+        #endregion
+
         #region Guide emission (GenerateModDocumentation)
 
         [Test]
