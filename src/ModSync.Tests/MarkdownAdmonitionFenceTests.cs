@@ -8,26 +8,26 @@ using NUnit.Framework;
 
 namespace ModSync.Tests
 {
-	/// <summary>
-	/// Covers U1 of docs/plans/2026-07-30-001-feat-lossless-roundtrip-universal-pipeline-plan.md:
-	/// generalized admonition-fence (:::note/:::warning/:::tip) parsing across any guide field,
-	/// matching the live mod-builds guide format (used since 2025-10-20/21) rather than only the
-	/// two previously-hardcoded field names.
-	/// </summary>
-	[TestFixture]
-	public class MarkdownAdmonitionFenceTests
-	{
-		private static MarkdownParserResult Parse(string markdown)
-		{
-			var profile = MarkdownImportProfile.CreateDefault();
-			var parser = new MarkdownParser(profile);
-			return parser.Parse(markdown);
-		}
+    /// <summary>
+    /// Covers U1 of docs/plans/2026-07-30-001-feat-lossless-roundtrip-universal-pipeline-plan.md:
+    /// generalized admonition-fence (:::note/:::warning/:::tip) parsing across any guide field,
+    /// matching the live mod-builds guide format (used since 2025-10-20/21) rather than only the
+    /// two previously-hardcoded field names.
+    /// </summary>
+    [TestFixture]
+    public class MarkdownAdmonitionFenceTests
+    {
+        private static MarkdownParserResult Parse(string markdown)
+        {
+            var profile = MarkdownImportProfile.CreateDefault();
+            var parser = new MarkdownParser(profile);
+            return parser.Parse(markdown);
+        }
 
-		[Test]
-		public void FenceStyle_InstallationInstructions_ParsesSameAsBoldInline()
-		{
-			const string fenced = @"## Mod List
+        [Test]
+        public void FenceStyle_InstallationInstructions_ParsesSameAsBoldInline()
+        {
+            const string fenced = @"## Mod List
 
 ### Fenced Mod
 **Name:** Fenced Mod
@@ -41,7 +41,7 @@ Installation Instructions
 
 ___";
 
-			const string boldInline = @"## Mod List
+            const string boldInline = @"## Mod List
 
 ### Bold Mod
 **Name:** Bold Mod
@@ -51,19 +51,19 @@ ___";
 
 ___";
 
-			MarkdownParserResult fencedResult = Parse(fenced);
-			MarkdownParserResult boldResult = Parse(boldInline);
+            MarkdownParserResult fencedResult = Parse(fenced);
+            MarkdownParserResult boldResult = Parse(boldInline);
 
-			Assert.That(fencedResult.Components, Has.Count.EqualTo(1));
-			Assert.That(boldResult.Components, Has.Count.EqualTo(1));
-			Assert.That(fencedResult.Components[0].Directions, Is.EqualTo(boldResult.Components[0].Directions));
-			Assert.That(fencedResult.Components[0].Directions, Is.EqualTo("Move the file to your Override folder."));
-		}
+            Assert.That(fencedResult.Components, Has.Count.EqualTo(1));
+            Assert.That(boldResult.Components, Has.Count.EqualTo(1));
+            Assert.That(fencedResult.Components[0].Directions, Is.EqualTo(boldResult.Components[0].Directions));
+            Assert.That(fencedResult.Components[0].Directions, Is.EqualTo("Move the file to your Override folder."));
+        }
 
-		[Test]
-		public void FenceStyle_MultiLineBody_StripsDefinitionListPrefixFromEveryLine()
-		{
-			const string markdown = @"## Mod List
+        [Test]
+        public void FenceStyle_MultiLineBody_StripsDefinitionListPrefixFromEveryLine()
+        {
+            const string markdown = @"## Mod List
 
 ### Multiline Fence Mod
 **Name:** Multiline Fence Mod
@@ -78,20 +78,20 @@ Installation Instructions
 
 ___";
 
-			MarkdownParserResult result = Parse(markdown);
+            MarkdownParserResult result = Parse(markdown);
 
-			Assert.That(result.Components, Has.Count.EqualTo(1));
-			string directions = result.Components[0].Directions;
-			Assert.That(directions, Does.Not.Contain(":   "));
-			Assert.That(directions, Does.Contain("Move everything from the Straight Fixes folder to your Override."));
-			Assert.That(directions, Does.Contain("Delete the old .tpc files first if present."));
-		}
+            Assert.That(result.Components, Has.Count.EqualTo(1));
+            string directions = result.Components[0].Directions;
+            Assert.That(directions, Does.Not.Contain(":   "));
+            Assert.That(directions, Does.Contain("Move everything from the Straight Fixes folder to your Override."));
+            Assert.That(directions, Does.Contain("Delete the old .tpc files first if present."));
+        }
 
-		[Test]
-		public void FenceStyle_AppliesToPreviouslyUnsupportedField()
-		{
-			// Description never had a hardcoded fence alternative before this generalization.
-			const string markdown = @"## Mod List
+        [Test]
+        public void FenceStyle_AppliesToPreviouslyUnsupportedField()
+        {
+            // Description never had a hardcoded fence alternative before this generalization.
+            const string markdown = @"## Mod List
 
 ### Description Fence Mod
 **Name:** Description Fence Mod
@@ -104,19 +104,19 @@ Description
 
 ___";
 
-			MarkdownParserResult result = Parse(markdown);
+            MarkdownParserResult result = Parse(markdown);
 
-			Assert.That(result.Components, Has.Count.EqualTo(1));
-			Assert.That(result.Components[0].Description, Is.EqualTo("High-resolution retexture of the Ebon Hawk interior."));
-		}
+            Assert.That(result.Components, Has.Count.EqualTo(1));
+            Assert.That(result.Components[0].Description, Is.EqualTo("High-resolution retexture of the Ebon Hawk interior."));
+        }
 
-		[Test]
-		public void FenceStyle_KnownBugsAcceptsAnyAdmonitionType()
-		{
-			// The original hardcode paired :::warning with Known Bugs specifically; confirm a
-			// mismatched admonition type (e.g. :::note wrapping Known Bugs) still parses,
-			// since guide authors are not guaranteed to follow that pairing consistently.
-			const string markdown = @"## Mod List
+        [Test]
+        public void FenceStyle_KnownBugsAcceptsAnyAdmonitionType()
+        {
+            // The original hardcode paired :::warning with Known Bugs specifically; confirm a
+            // mismatched admonition type (e.g. :::note wrapping Known Bugs) still parses,
+            // since guide authors are not guaranteed to follow that pairing consistently.
+            const string markdown = @"## Mod List
 
 ### Any Admonition Mod
 **Name:** Any Admonition Mod
@@ -130,16 +130,16 @@ Known Bugs
 
 ___";
 
-			MarkdownParserResult result = Parse(markdown);
+            MarkdownParserResult result = Parse(markdown);
 
-			Assert.That(result.Components, Has.Count.EqualTo(1));
-			Assert.That(result.Components[0].KnownBugs, Is.EqualTo("Some texture seams may be visible in bright lighting."));
-		}
+            Assert.That(result.Components, Has.Count.EqualTo(1));
+            Assert.That(result.Components[0].KnownBugs, Is.EqualTo("Some texture seams may be visible in bright lighting."));
+        }
 
-		[Test]
-		public void MixedDocument_FenceAndBoldInlineFieldsBothParseInSameComponent()
-		{
-			const string markdown = @"## Mod List
+        [Test]
+        public void MixedDocument_FenceAndBoldInlineFieldsBothParseInSameComponent()
+        {
+            const string markdown = @"## Mod List
 
 ### Mixed Style Mod
 **Name:** Mixed Style Mod
@@ -153,17 +153,17 @@ Installation Instructions
 
 ___";
 
-			MarkdownParserResult result = Parse(markdown);
+            MarkdownParserResult result = Parse(markdown);
 
-			Assert.That(result.Components, Has.Count.EqualTo(1));
-			Assert.That(result.Components[0].Description, Is.EqualTo("Bold-inline description, fenced instructions"));
-			Assert.That(result.Components[0].Directions, Is.EqualTo("Run the patcher twice, selecting Option A both times."));
-		}
+            Assert.That(result.Components, Has.Count.EqualTo(1));
+            Assert.That(result.Components[0].Description, Is.EqualTo("Bold-inline description, fenced instructions"));
+            Assert.That(result.Components[0].Directions, Is.EqualTo("Run the patcher twice, selecting Option A both times."));
+        }
 
-		[Test]
-		public void UnclosedFence_DoesNotThrow_DegradesToUnrecognizedField()
-		{
-			const string markdown = @"## Mod List
+        [Test]
+        public void UnclosedFence_DoesNotThrow_DegradesToUnrecognizedField()
+        {
+            const string markdown = @"## Mod List
 
 ### Unclosed Fence Mod
 **Name:** Unclosed Fence Mod
@@ -176,7 +176,7 @@ Installation Instructions
 
 ___";
 
-			Assert.DoesNotThrow(() => Parse(markdown));
-		}
-	}
+            Assert.DoesNotThrow(() => Parse(markdown));
+        }
+    }
 }

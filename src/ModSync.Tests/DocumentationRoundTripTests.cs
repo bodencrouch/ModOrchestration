@@ -1,4 +1,4 @@
-﻿// Copyright 2021-2025 ModSync
+// Copyright 2021-2025 ModSync
 // Licensed under the Business Source License 1.1 (BSL 1.1).
 // See LICENSE.txt file in the project root for full license information.
 
@@ -19,191 +19,191 @@ using NUnit.Framework;
 
 namespace ModSync.Tests
 {
-	[TestFixture]
-	public partial class DocumentationRoundTripTests
-	{
-		private string _testFilePath = string.Empty;
-		private string _originalMarkdown = string.Empty;
+    [TestFixture]
+    public partial class DocumentationRoundTripTests
+    {
+        private string _testFilePath = string.Empty;
+        private string _originalMarkdown = string.Empty;
 
-		[SetUp]
-		public void Setup()
-		{
+        [SetUp]
+        public void Setup()
+        {
 
-			string? envTestFile = Environment.GetEnvironmentVariable( "TEST_FILE_PATH" );
+            string? envTestFile = Environment.GetEnvironmentVariable("TEST_FILE_PATH");
 
-			if (!string.IsNullOrEmpty( envTestFile ))
-			{
-				_testFilePath = Path.Combine(
-					TestContext.CurrentContext.TestDirectory,
-					"..", "..", "..",
-					envTestFile
-				);
-			}
-			else
-			{
+            if (!string.IsNullOrEmpty(envTestFile))
+            {
+                _testFilePath = Path.Combine(
+                    TestContext.CurrentContext.TestDirectory,
+                    "..", "..", "..",
+                    envTestFile
+                );
+            }
+            else
+            {
 
-				_testFilePath = Path.Combine(
-					TestContext.CurrentContext.TestDirectory,
-					"..", "..", "..",
-					"test_modbuild_k1.md"
-				);
-			}
+                _testFilePath = Path.Combine(
+                    TestContext.CurrentContext.TestDirectory,
+                    "..", "..", "..",
+                    "test_modbuild_k1.md"
+                );
+            }
 
-			if (!File.Exists( _testFilePath ))
-			{
-				Assert.Inconclusive( $"Test file not found: {_testFilePath} — skipping round-trip documentation tests" );
-				return;
-			}
+            if (!File.Exists(_testFilePath))
+            {
+                Assert.Inconclusive($"Test file not found: {_testFilePath} — skipping round-trip documentation tests");
+                return;
+            }
 
-			_originalMarkdown = File.ReadAllText( _testFilePath );
-		}
+            _originalMarkdown = File.ReadAllText(_testFilePath);
+        }
 
-		[Test]
-		public void RoundTrip_ParseAndGenerateDocumentation_ProducesEquivalentOutput()
-		{
+        [Test]
+        public void RoundTrip_ParseAndGenerateDocumentation_ProducesEquivalentOutput()
+        {
 
-			var profile = MarkdownImportProfile.CreateDefault();
-			var parser = new MarkdownParser( profile );
+            var profile = MarkdownImportProfile.CreateDefault();
+            var parser = new MarkdownParser(profile);
 
-			MarkdownParserResult parseResult = parser.Parse( _originalMarkdown );
-			IList<ModComponent> components = parseResult.Components;
+            MarkdownParserResult parseResult = parser.Parse(_originalMarkdown);
+            IList<ModComponent> components = parseResult.Components;
 
-			TestContext.Progress.WriteLine( $"Parsed {components.Count} components" );
-			TestContext.Progress.WriteLine( $"Warnings: {parseResult.Warnings.Count}" );
-			foreach (string warning in parseResult.Warnings)
-			{
-				TestContext.Progress.WriteLine( $"  - {warning}" );
-			}
+            TestContext.Progress.WriteLine($"Parsed {components.Count} components");
+            TestContext.Progress.WriteLine($"Warnings: {parseResult.Warnings.Count}");
+            foreach (string warning in parseResult.Warnings)
+            {
+                TestContext.Progress.WriteLine($"  - {warning}");
+            }
 
-			string generatedDocs = ModComponentSerializationService.GenerateModDocumentation( components.ToList() );
+            string generatedDocs = ModComponentSerializationService.GenerateModDocumentation(components.ToList());
 
-			string debugOutputPath = Path.Combine(
-				TestContext.CurrentContext.TestDirectory,
-				"..", "..", "..",
-				"test_generated_docs.md"
-			);
-			File.WriteAllText( debugOutputPath, generatedDocs );
-			TestContext.Progress.WriteLine( $"Generated documentation written to: {debugOutputPath}" );
+            string debugOutputPath = Path.Combine(
+                TestContext.CurrentContext.TestDirectory,
+                "..", "..", "..",
+                "test_generated_docs.md"
+            );
+            File.WriteAllText(debugOutputPath, generatedDocs);
+            TestContext.Progress.WriteLine($"Generated documentation written to: {debugOutputPath}");
 
-			Assert.Multiple( () =>
-			{
+            Assert.Multiple(() =>
+            {
 
-				Assert.That( components, Is.Not.Empty, "Should have parsed at least one component" );
-				Assert.That( generatedDocs, Is.Not.Null.And.Not.Empty, "Generated documentation should not be empty" );
-			} );
+                Assert.That(components, Is.Not.Empty, "Should have parsed at least one component");
+                Assert.That(generatedDocs, Is.Not.Null.And.Not.Empty, "Generated documentation should not be empty");
+            });
 
-			string originalModList = MarkdownUtilities.ExtractModListSection( _originalMarkdown );
-			List<string> originalSections = MarkdownUtilities.ExtractModSections( originalModList );
+            string originalModList = MarkdownUtilities.ExtractModListSection(_originalMarkdown);
+            List<string> originalSections = MarkdownUtilities.ExtractModSections(originalModList);
 
-			List<string> generatedSections = MarkdownUtilities.ExtractModSections( generatedDocs );
+            List<string> generatedSections = MarkdownUtilities.ExtractModSections(generatedDocs);
 
-			TestContext.Progress.WriteLine( $"Original sections: {originalSections.Count}" );
-			TestContext.Progress.WriteLine( $"Generated sections: {generatedSections.Count}" );
+            TestContext.Progress.WriteLine($"Original sections: {originalSections.Count}");
+            TestContext.Progress.WriteLine($"Generated sections: {generatedSections.Count}");
 
-			var originalNameFields = originalSections
-				.SelectMany( s => MarkdownUtilities.ExtractAllFieldValues( s, @"\*\*Name:\*\*\s*(?:\[([^\]]+)\]|([^\r\n]+))" ) )
-				.Where( n => !string.IsNullOrWhiteSpace( n ) )
-				.ToList();
+            var originalNameFields = originalSections
+                .SelectMany(s => MarkdownUtilities.ExtractAllFieldValues(s, @"\*\*Name:\*\*\s*(?:\[([^\]]+)\]|([^\r\n]+))"))
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .ToList();
 
-			var generatedNameFields = generatedSections
-				.SelectMany( s => MarkdownUtilities.ExtractAllFieldValues( s, @"\*\*Name:\*\*\s*(?:\[([^\]]+)\]|([^\r\n]+))" ) )
-				.Where( n => !string.IsNullOrWhiteSpace( n ) )
-				.ToList();
+            var generatedNameFields = generatedSections
+                .SelectMany(s => MarkdownUtilities.ExtractAllFieldValues(s, @"\*\*Name:\*\*\s*(?:\[([^\]]+)\]|([^\r\n]+))"))
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .ToList();
 
-			TestContext.Progress.WriteLine( $"Original mod names (from **Name:** field): {originalNameFields.Count}" );
-			TestContext.Progress.WriteLine( $"Generated mod names (from **Name:** field): {generatedNameFields.Count}" );
+            TestContext.Progress.WriteLine($"Original mod names (from **Name:** field): {originalNameFields.Count}");
+            TestContext.Progress.WriteLine($"Generated mod names (from **Name:** field): {generatedNameFields.Count}");
 
-			if (generatedNameFields.Count != originalNameFields.Count)
-			{
-				TestContext.Progress.WriteLine( "\n=== NAME FIELD COUNT MISMATCH ===" );
+            if (generatedNameFields.Count != originalNameFields.Count)
+            {
+                TestContext.Progress.WriteLine("\n=== NAME FIELD COUNT MISMATCH ===");
 
-				var missingInGenerated = originalNameFields.Except( generatedNameFields, StringComparer.Ordinal ).ToList();
-				var missingInOriginal = generatedNameFields.Except( originalNameFields, StringComparer.Ordinal ).ToList();
+                var missingInGenerated = originalNameFields.Except(generatedNameFields, StringComparer.Ordinal).ToList();
+                var missingInOriginal = generatedNameFields.Except(originalNameFields, StringComparer.Ordinal).ToList();
 
-				if (missingInGenerated.Count > 0)
-				{
-					TestContext.Progress.WriteLine( $"\nMissing in generated ({missingInGenerated.Count}):" );
-					foreach (string name in missingInGenerated)
-					{
-						TestContext.Progress.WriteLine( $"  - {name}" );
-					}
-				}
+                if (missingInGenerated.Count > 0)
+                {
+                    TestContext.Progress.WriteLine($"\nMissing in generated ({missingInGenerated.Count}):");
+                    foreach (string name in missingInGenerated)
+                    {
+                        TestContext.Progress.WriteLine($"  - {name}");
+                    }
+                }
 
-				if (missingInOriginal.Count > 0)
-				{
-					TestContext.Progress.WriteLine( $"\nExtra in generated ({missingInOriginal.Count}):" );
-					foreach (string name in missingInOriginal)
-					{
-						TestContext.Progress.WriteLine( $"  - {name}" );
-					}
-				}
-			}
+                if (missingInOriginal.Count > 0)
+                {
+                    TestContext.Progress.WriteLine($"\nExtra in generated ({missingInOriginal.Count}):");
+                    foreach (string name in missingInOriginal)
+                    {
+                        TestContext.Progress.WriteLine($"  - {name}");
+                    }
+                }
+            }
 
-			Assert.That( generatedNameFields, Has.Count.EqualTo( originalNameFields.Count ),
-				$"Mod count must match exactly. Original: {originalNameFields.Count}, Generated: {generatedNameFields.Count}" );
+            Assert.That(generatedNameFields, Has.Count.EqualTo(originalNameFields.Count),
+                $"Mod count must match exactly. Original: {originalNameFields.Count}, Generated: {generatedNameFields.Count}");
 
-			var missingNames = originalNameFields.Except( generatedNameFields, StringComparer.Ordinal ).ToList();
-			var extraNames = generatedNameFields.Except( originalNameFields, StringComparer.Ordinal ).ToList();
+            var missingNames = originalNameFields.Except(generatedNameFields, StringComparer.Ordinal).ToList();
+            var extraNames = generatedNameFields.Except(originalNameFields, StringComparer.Ordinal).ToList();
 
-			if (missingNames.Count > 0 || extraNames.Count > 0)
-			{
-				TestContext.Progress.WriteLine( "\n=== MOD NAME MISMATCH ===" );
-				if (missingNames.Count > 0)
-				{
-					TestContext.Progress.WriteLine( $"Names missing in generated ({missingNames.Count}):" );
-					foreach (string name in missingNames)
-					{
-						TestContext.Progress.WriteLine( $"  - {name}" );
-					}
-				}
-				if (extraNames.Count > 0)
-				{
-					TestContext.Progress.WriteLine( $"Extra names in generated ({extraNames.Count}):" );
-					foreach (string name in extraNames)
-					{
-						TestContext.Progress.WriteLine( $"  - {name}" );
-					}
-				}
-			}
+            if (missingNames.Count > 0 || extraNames.Count > 0)
+            {
+                TestContext.Progress.WriteLine("\n=== MOD NAME MISMATCH ===");
+                if (missingNames.Count > 0)
+                {
+                    TestContext.Progress.WriteLine($"Names missing in generated ({missingNames.Count}):");
+                    foreach (string name in missingNames)
+                    {
+                        TestContext.Progress.WriteLine($"  - {name}");
+                    }
+                }
+                if (extraNames.Count > 0)
+                {
+                    TestContext.Progress.WriteLine($"Extra names in generated ({extraNames.Count}):");
+                    foreach (string name in extraNames)
+                    {
+                        TestContext.Progress.WriteLine($"  - {name}");
+                    }
+                }
+            }
 
-			Assert.Multiple( () =>
-			{
-				Assert.That( missingNames, Is.Empty, "All original mod names should be present in generated output" );
-				Assert.That( extraNames, Is.Empty, "No extra mod names should be in generated output" );
-			} );
+            Assert.Multiple(() =>
+            {
+                Assert.That(missingNames, Is.Empty, "All original mod names should be present in generated output");
+                Assert.That(extraNames, Is.Empty, "No extra mod names should be in generated output");
+            });
 
-			TestContext.Progress.WriteLine( "\n✓ All 197 mod names match between original and generated" );
-			TestContext.Progress.WriteLine( "✓ Round-trip test successful: Import → Export produces identical mod list" );
-		}
+            TestContext.Progress.WriteLine("\n✓ All 197 mod names match between original and generated");
+            TestContext.Progress.WriteLine("✓ Round-trip test successful: Import → Export produces identical mod list");
+        }
 
-		[Test]
-		public void RoundTrip_VerifyFieldPreservation()
-		{
+        [Test]
+        public void RoundTrip_VerifyFieldPreservation()
+        {
 
-			var profile = MarkdownImportProfile.CreateDefault();
-			var parser = new MarkdownParser( profile );
+            var profile = MarkdownImportProfile.CreateDefault();
+            var parser = new MarkdownParser(profile);
 
-			MarkdownParserResult parseResult = parser.Parse( _originalMarkdown );
-			List<ModComponent> components = parseResult.Components.ToList();
+            MarkdownParserResult parseResult = parser.Parse(_originalMarkdown);
+            List<ModComponent> components = parseResult.Components.ToList();
 
-			foreach (ModComponent component in components)
-			{
-				TestContext.Progress.WriteLine( $"\nVerifying component: {component.Name}" );
+            foreach (ModComponent component in components)
+            {
+                TestContext.Progress.WriteLine($"\nVerifying component: {component.Name}");
 
-				Assert.That( component.Name, Is.Not.Null.And.Not.Empty, "Name should not be empty" );
-				TestContext.Progress.WriteLine( $"  Name: {component.Name}" );
-				TestContext.Progress.WriteLine( $"  Author: {component.Author}" );
-				TestContext.Progress.WriteLine( $"  Category: {string.Join( " & ", component.Category )}" );
-				TestContext.Progress.WriteLine( $"  Tier: {component.Tier}" );
-				TestContext.Progress.WriteLine( $"  Language: {string.Join( ", ", component.Language )}" );
-				TestContext.Progress.WriteLine( $"  InstallationMethod: {component.InstallationMethod}" );
-				TestContext.Progress.WriteLine( $"  Dependencies: {component.Dependencies?.Count ?? 0}" );
-				TestContext.Progress.WriteLine( $"  Description length: {component.Description?.Length ?? 0}" );
-				TestContext.Progress.WriteLine( $"  Directions length: {component.Directions?.Length ?? 0}" );
-			}
+                Assert.That(component.Name, Is.Not.Null.And.Not.Empty, "Name should not be empty");
+                TestContext.Progress.WriteLine($"  Name: {component.Name}");
+                TestContext.Progress.WriteLine($"  Author: {component.Author}");
+                TestContext.Progress.WriteLine($"  Category: {string.Join(" & ", component.Category)}");
+                TestContext.Progress.WriteLine($"  Tier: {component.Tier}");
+                TestContext.Progress.WriteLine($"  Language: {string.Join(", ", component.Language)}");
+                TestContext.Progress.WriteLine($"  InstallationMethod: {component.InstallationMethod}");
+                TestContext.Progress.WriteLine($"  Dependencies: {component.Dependencies?.Count ?? 0}");
+                TestContext.Progress.WriteLine($"  Description length: {component.Description?.Length ?? 0}");
+                TestContext.Progress.WriteLine($"  Directions length: {component.Directions?.Length ?? 0}");
+            }
 
-			Assert.That( components, Is.Not.Empty, "Should have parsed components" );
-		}
+            Assert.That(components, Is.Not.Empty, "Should have parsed components");
+        }
 
-	}
+    }
 }
