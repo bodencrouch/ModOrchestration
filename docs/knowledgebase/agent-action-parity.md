@@ -67,6 +67,7 @@ Wizard order from `src/ModSync.GUI/Dialogs/InstallWizardDialog.axaml.cs` and `AG
 | GUI UX smoke | `GuiSmokeHeadlessTests` | Paste-import button + `LoadInstructionTextAsync` markdown (no clipboard), Welcome→ValidatePage key controls, compact ScrollViewer layout, ValidatePage log splitter |
 | Guide ingest | `GuideIngestionTests` | `--stdin` / `--parse-directions` draft + sandboxed paths |
 | Profile CLI | `ProfileCliTests` | `profile` verb CRUD + activate persists `activeProfileName` |
+| Settings CLI | `SettingsCliTests` | `settings list|get|set` merges into `settings.json` |
 | Wizard validation UX | `WizardValidationStagePresenter`, `ValidationPipelineDialogMapper` | Stage cards / dialog mapper parity ([PR #110](https://github.com/th3w1zard1/ModSync/pull/110)) |
 | Version alignment | `ReleaseVersionAlignmentTests` | Release metadata consistency |
 

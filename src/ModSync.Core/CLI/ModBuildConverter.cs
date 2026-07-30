@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -713,6 +714,28 @@ namespace ModSync.Core.CLI
             public bool Json { get; set; }
         }
 
+        [Verb("settings", HelpText = "Get, set, or list persisted settings.json values")]
+        public class SettingsOptions : BaseOptions
+        {
+            [Option('a', "action", Required = true, HelpText = "list|get|set")]
+            public string Action { get; set; }
+
+            [Option('k', "key", Required = false, HelpText = "Setting key (required for get/set)")]
+            public string Key { get; set; }
+
+            [Option("value", Required = false, HelpText = "Value for set (omit or empty to remove key). Supports true/false, numbers, and JSON literals.")]
+            public string Value { get; set; }
+
+            [Option("settings-dir", Required = false, HelpText = "ModSync settings directory (default: AppData/ModSync)")]
+            public string SettingsDirectory { get; set; }
+
+            [Option("json", Required = false, Default = false, HelpText = "Emit JSON for list/get/set results")]
+            public bool Json { get; set; }
+
+            [Option("reveal-secrets", Required = false, Default = false, HelpText = "Include sensitive values such as nexusModsApiKey in list/get output")]
+            public bool RevealSecrets { get; set; }
+        }
+
         public static int Run(string[] args)
         {
             // Disable keyring BEFORE any Python initialization to prevent pip hanging
@@ -724,7 +747,7 @@ namespace ModSync.Core.CLI
 
             var parser = new Parser(with => with.HelpWriter = Console.Out);
 
-            return parser.ParseArguments<ConvertOptions, MergeOptions, ValidateOptions, InstallOptions, SetNexusApiKeyOptions, InstallPythonDepsOptions, HolopatcherOptions, ProfileOptions>(args)
+            return parser.ParseArguments<ConvertOptions, MergeOptions, ValidateOptions, InstallOptions, SetNexusApiKeyOptions, InstallPythonDepsOptions, HolopatcherOptions, ProfileOptions, SettingsOptions>(args)
             .MapResult(
                 (ConvertOptions opts) => RunConvertAsync(opts).GetAwaiter().GetResult(),
                 (MergeOptions opts) => RunMergeAsync(opts).GetAwaiter().GetResult(),
@@ -734,6 +757,7 @@ namespace ModSync.Core.CLI
                 (InstallPythonDepsOptions opts) => RunInstallPythonDepsAsync(opts).GetAwaiter().GetResult(),
                 (HolopatcherOptions opts) => RunHolopatcherAsync(opts).GetAwaiter().GetResult(),
                 (ProfileOptions opts) => RunProfileAsync(opts),
+                (SettingsOptions opts) => RunSettingsAsync(opts),
                 errs => 1);
         }
 
@@ -3463,6 +3487,48 @@ componentName: null,
             }
         }
 
+        private static int RunSettingsAsync(SettingsOptions opts)
+        {
+            SetVerboseMode(opts.Verbose);
+
+            try
+            {
+                string action = (opts.Action ?? string.Empty).Trim().ToLowerInvariant();
+                string settingsDirectory = SettingsFileStore.ResolveSettingsDirectory(opts.SettingsDirectory);
+
+                switch (action)
+                {
+                    case "list":
+                        return SettingsCliList(settingsDirectory, opts.Json, opts.RevealSecrets);
+                    case "get":
+                        return SettingsCliGet(
+                            settingsDirectory,
+                            RequireSettingsKey(opts.Key, "get"),
+                            opts.Json,
+                            opts.RevealSecrets);
+                    case "set":
+                        return SettingsCliSet(
+                            settingsDirectory,
+                            RequireSettingsKey(opts.Key, "set"),
+                            opts.Value,
+                            opts.Json);
+                    default:
+                        Logger.LogError($"Unknown settings action '{opts.Action}'. Use list|get|set.");
+                        return 1;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Settings command failed: {ex.Message}");
+                if (opts.Verbose)
+                {
+                    Logger.LogException(ex);
+                }
+
+                return 1;
+            }
+        }
+
         [NotNull]
         private static string RequireProfileName([CanBeNull] string name, [NotNull] string action, [CanBeNull] string flagHint = null)
         {
@@ -3473,6 +3539,17 @@ componentName: null,
 
             string hint = string.IsNullOrWhiteSpace(flagHint) ? "--name" : flagHint;
             throw new ArgumentException($"Profile action '{action}' requires {hint}.");
+        }
+
+        [NotNull]
+        private static string RequireSettingsKey([CanBeNull] string key, [NotNull] string action)
+        {
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                return key.Trim();
+            }
+
+            throw new ArgumentException($"Settings action '{action}' requires --key.");
         }
 
         private static int ProfileCliList([NotNull] ProfileService profileService, [NotNull] string settingsDirectory, bool json)
@@ -3514,6 +3591,40 @@ componentName: null,
             if (!string.IsNullOrWhiteSpace(active))
             {
                 Logger.LogAsync($"Active profile (settings.json): {active}").GetAwaiter().GetResult();
+            }
+
+            return 0;
+        }
+
+        private static int SettingsCliList([NotNull] string settingsDirectory, bool json, bool revealSecrets)
+        {
+            JsonObject root = SettingsFileStore.LoadRoot(settingsDirectory);
+            JsonObject outputRoot = SettingsFileStore.CloneForOutput(root, revealSecrets);
+
+            if (json)
+            {
+                var payload = new
+                {
+                    settingsDirectory,
+                    settingsFile = SettingsFileStore.ResolveSettingsFilePath(settingsDirectory),
+                    values = outputRoot,
+                };
+                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                return 0;
+            }
+
+            IReadOnlyList<string> keys = SettingsFileStore.ListKeys(outputRoot);
+            if (keys.Count == 0)
+            {
+                Logger.LogAsync($"No settings found in {SettingsFileStore.ResolveSettingsFilePath(settingsDirectory)}").GetAwaiter().GetResult();
+                return 0;
+            }
+
+            Logger.LogAsync($"Settings ({keys.Count}):").GetAwaiter().GetResult();
+            foreach (string key in keys)
+            {
+                string rendered = FormatSettingsValueForText(outputRoot[key]);
+                Logger.LogAsync($"  {key}={rendered}").GetAwaiter().GetResult();
             }
 
             return 0;
@@ -3607,6 +3718,91 @@ componentName: null,
             Profile renamed = profileService.RenameProfile(fromName, toName);
             Logger.LogAsync($"Renamed profile '{fromName}' to '{renamed.Name}'.").GetAwaiter().GetResult();
             return 0;
+        }
+
+        private static int SettingsCliGet(
+            [NotNull] string settingsDirectory,
+            [NotNull] string key,
+            bool json,
+            bool revealSecrets)
+        {
+            JsonObject root = SettingsFileStore.LoadRoot(settingsDirectory);
+            if (!SettingsFileStore.TryGetValue(root, key, out JsonNode value))
+            {
+                Logger.LogError($"Setting '{key}' was not found.");
+                return 1;
+            }
+
+            if (!revealSecrets && SettingsFileStore.SensitiveKeys.Contains(key, StringComparer.OrdinalIgnoreCase))
+            {
+                value = JsonValue.Create("***");
+            }
+
+            if (json)
+            {
+                var payload = new
+                {
+                    key,
+                    value,
+                    settingsFile = SettingsFileStore.ResolveSettingsFilePath(settingsDirectory),
+                };
+                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                return 0;
+            }
+
+            Console.WriteLine(FormatSettingsValueForText(value));
+            return 0;
+        }
+
+        private static int SettingsCliSet(
+            [NotNull] string settingsDirectory,
+            [NotNull] string key,
+            [CanBeNull] string rawValue,
+            bool json)
+        {
+            JsonObject root = SettingsFileStore.LoadRoot(settingsDirectory);
+            SettingsFileStore.SetValue(root, key, rawValue);
+            SettingsFileStore.SaveRoot(settingsDirectory, root);
+
+            if (json)
+            {
+                JsonObject outputRoot = SettingsFileStore.CloneForOutput(root, revealSecrets: false);
+                var payload = new
+                {
+                    key,
+                    value = outputRoot.TryGetPropertyValue(key, out JsonNode node) ? node : null,
+                    settingsFile = SettingsFileStore.ResolveSettingsFilePath(settingsDirectory),
+                };
+                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                return 0;
+            }
+
+            Logger.LogAsync($"Updated setting '{key}' in {SettingsFileStore.ResolveSettingsFilePath(settingsDirectory)}").GetAwaiter().GetResult();
+            return 0;
+        }
+
+        [NotNull]
+        private static string FormatSettingsValueForText([CanBeNull] JsonNode value)
+        {
+            if (value is null)
+            {
+                return string.Empty;
+            }
+
+            if (value is JsonValue jsonValue)
+            {
+                if (jsonValue.TryGetValue(out string stringValue))
+                {
+                    return stringValue;
+                }
+
+                if (jsonValue.TryGetValue(out bool boolValue))
+                {
+                    return boolValue ? "true" : "false";
+                }
+            }
+
+            return value.ToJsonString();
         }
 
         private static async Task<int> RunSetNexusApiKeyAsync(SetNexusApiKeyOptions opts)
