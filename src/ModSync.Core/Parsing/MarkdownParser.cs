@@ -779,10 +779,39 @@ namespace ModSync.Core.Parsing
                         ComponentIndex = _currentComponentIndex,
                         WasUsed = true,
                     });
-                    return group.Value.Trim();
+                    return StripDefinitionListPrefix(group.Value.Trim());
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// Strips the Docusaurus admonition-fence definition-list prefix (a leading <c>:</c> plus
+        /// one optional space) from each line of a captured field value. A no-op for values that
+        /// were captured from a plain bold-inline field, since those never have lines starting
+        /// with a bare colon.
+        /// </summary>
+        [NotNull]
+        private static string StripDefinitionListPrefix([NotNull] string value)
+        {
+            if (value.IndexOf(':') < 0)
+            {
+                return value;
+            }
+
+            string[] lines = value.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            bool anyStripped = false;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string trimmedLine = lines[i].TrimStart();
+                if (trimmedLine.Length > 0 && trimmedLine[0] == ':' && (trimmedLine.Length == 1 || trimmedLine[1] != ':'))
+                {
+                    lines[i] = trimmedLine.Substring(1).TrimStart();
+                    anyStripped = true;
+                }
+            }
+
+            return anyStripped ? string.Join("\n", lines).Trim() : value;
         }
 
         [CanBeNull]
