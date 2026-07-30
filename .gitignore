@@ -437,3 +437,6 @@ pnpm-lock.yaml
 clutter/
 .compound-engineering/
 .claude/
+
+# Cursor hook runtime state (machine-local)
+.cursor/hooks/state/
