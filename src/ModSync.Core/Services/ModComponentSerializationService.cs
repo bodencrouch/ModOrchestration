@@ -229,6 +229,8 @@ namespace ModSync.Core.Services
         }
 
         #region Loading Functions
+        /// <param name="tomlContent">The raw TOML content to deserialize.</param>
+        /// <param name="requireName">See <see cref="DeserializeComponent"/>.</param>
         [NotNull]
         [ItemNotNull]
         public static IReadOnlyList<ModComponent> DeserializeModComponentFromTomlString([NotNull] string tomlContent, bool requireName = true)
@@ -1129,48 +1131,22 @@ namespace ModSync.Core.Services
                     Logger.LogVerbose("ProcessInstructionsAndOptions: No KeyValuePair instruction items, processing individually");
                     var processedInstructions = new List<object>();
 
-                    var currentInstruction = new Dictionary<string, object>(StringComparer.Ordinal);
-
                     foreach (object item in instructionsList)
                     {
                         Logger.LogVerbose($"ProcessInstructionsAndOptions: Processing instruction item of type {item.GetType().Name}");
 
-                        if (item is KeyValuePair<string, object> kvp)
-                        {
-                            Logger.LogVerbose($"ProcessInstructionsAndOptions: KeyValuePair - {kvp.Key} = {kvp.Value}");
-
-                            // A repeated key means the flat KeyValuePair stream has wrapped around to
-                            // the next instruction (field order varies - e.g. Guid may precede or follow
-                            // Action), so use key repetition rather than a hardcoded field name as the
-                            // boundary signal.
-                            if (currentInstruction.ContainsKey(kvp.Key))
-                            {
-                                processedInstructions.Add(new Dictionary<string, object>(currentInstruction, StringComparer.Ordinal));
-                                currentInstruction.Clear();
-                            }
-                            currentInstruction[kvp.Key] = kvp.Value;
-                        }
-                        else if (item is Dictionary<string, object> dict)
+                        // This branch only runs when hasKeyValuePairs is false, so no item here can
+                        // be a KeyValuePair<string, object> (its GetType().Name always starts with
+                        // "KeyValuePair", which would have made hasKeyValuePairs true above).
+                        if (item is Dictionary<string, object> dict)
                         {
                             Logger.LogVerbose($"ProcessInstructionsAndOptions: Dictionary with {dict.Count} keys: {string.Join(", ", dict.Keys)}");
-                            if (currentInstruction.Count > 0)
-
-                            {
-                                processedInstructions.Add(new Dictionary<string, object>(currentInstruction, StringComparer.Ordinal));
-                                currentInstruction.Clear();
-                            }
                             processedInstructions.Add(dict);
                         }
                         else
                         {
                             Logger.LogVerbose($"ProcessInstructionsAndOptions: Unknown item type {item.GetType().Name}: {item}");
                         }
-                    }
-
-                    if (currentInstruction.Count > 0)
-
-                    {
-                        processedInstructions.Add(new Dictionary<string, object>(currentInstruction, StringComparer.Ordinal));
                     }
 
                     Logger.LogVerbose($"ProcessInstructionsAndOptions: Processed {processedInstructions.Count} instructions");
@@ -1199,48 +1175,22 @@ namespace ModSync.Core.Services
                     Logger.LogVerbose("ProcessInstructionsAndOptions: No KeyValuePair option items, processing individually");
                     var processedOptions = new List<object>();
 
-                    var currentOption = new Dictionary<string, object>(StringComparer.Ordinal);
-
                     foreach (object item in optionsList)
                     {
                         Logger.LogVerbose($"ProcessInstructionsAndOptions: Processing option item of type {item.GetType().Name}");
 
-                        if (item is KeyValuePair<string, object> kvp)
-                        {
-                            Logger.LogVerbose($"ProcessInstructionsAndOptions: KeyValuePair - {kvp.Key} = {kvp.Value}");
-
-                            // A repeated key means the flat KeyValuePair stream has wrapped around to
-                            // the next option (field order varies - e.g. Guid may precede or follow
-                            // Name), so use key repetition rather than a hardcoded field name as the
-                            // boundary signal.
-                            if (currentOption.ContainsKey(kvp.Key))
-                            {
-                                processedOptions.Add(new Dictionary<string, object>(currentOption, StringComparer.Ordinal));
-                                currentOption.Clear();
-                            }
-                            currentOption[kvp.Key] = kvp.Value;
-                        }
-                        else if (item is Dictionary<string, object> dict)
+                        // This branch only runs when hasKeyValuePairs is false, so no item here can
+                        // be a KeyValuePair<string, object> (its GetType().Name always starts with
+                        // "KeyValuePair", which would have made hasKeyValuePairs true above).
+                        if (item is Dictionary<string, object> dict)
                         {
                             Logger.LogVerbose($"ProcessInstructionsAndOptions: Dictionary with {dict.Count} keys: {string.Join(", ", dict.Keys)}");
-                            if (currentOption.Count > 0)
-
-                            {
-                                processedOptions.Add(new Dictionary<string, object>(currentOption, StringComparer.Ordinal));
-                                currentOption.Clear();
-                            }
                             processedOptions.Add(dict);
                         }
                         else
                         {
                             Logger.LogVerbose($"ProcessInstructionsAndOptions: Unknown item type {item.GetType().Name}: {item}");
                         }
-                    }
-
-                    if (currentOption.Count > 0)
-
-                    {
-                        processedOptions.Add(new Dictionary<string, object>(currentOption, StringComparer.Ordinal));
                     }
 
                     Logger.LogVerbose($"ProcessInstructionsAndOptions: Processed {processedOptions.Count} options");
@@ -3652,6 +3602,8 @@ namespace ModSync.Core.Services
             return result;
         }
 
+        /// <param name="yamlString">The raw YAML content to deserialize.</param>
+        /// <param name="requireName">See <see cref="DeserializeComponent"/>.</param>
         [CanBeNull]
         public static ModComponent DeserializeYamlComponent([NotNull] string yamlString, bool requireName = true)
         {

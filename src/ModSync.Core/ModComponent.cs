@@ -807,6 +807,8 @@ namespace ModSync.Core
             return Services.ModComponentSerializationService.SerializeSingleComponentAsTomlString(this);
         }
 
+        /// <param name="tomlString">The raw TOML content to deserialize.</param>
+        /// <param name="requireName">See <see cref="Services.ModComponentSerializationService.DeserializeComponent"/>.</param>
         [CanBeNull]
         public static ModComponent DeserializeTomlComponent([NotNull] string tomlString, bool requireName = true)
         {
