@@ -2,6 +2,9 @@
 // Licensed under the Business Source License 1.1 (BSL 1.1).
 // See LICENSE.txt file in the project root for full license information.
 
+using System;
+using System.IO;
+using System.Linq;
 using System.Text;
 
 using ModSync.Core;
@@ -9,6 +12,8 @@ using ModSync.Core.Parsing;
 using ModSync.Core.Utility;
 
 using Newtonsoft.Json;
+
+using NUnit.Framework;
 
 namespace ModSync.Tests
 {
@@ -44,23 +49,23 @@ namespace ModSync.Tests
 **Installation Instructions:** Run TSLPatcher and select destination
 
 <!--<<ModSync>>
-Guid: {B3525945-BDBD-45D8-A324-AAF328A5E13E}
+Guid: B3525945-BDBD-45D8-A324-AAF328A5E13E
 Instructions:
-  - Guid: {11111111-1111-1111-1111-111111111111}
-Action: Extract
-Source:
-  - Example Dantooine Enhancement High Resolution - TPC Version-1103-2-1-1670680013.rar
-  - Guid: {22222222-2222-2222-2222-222222222222}
-Action: Delete
-Source:
-  - DAN_wall03.tpc
-  - DAN_NEW1.tpc
-  - Guid: {33333333-3333-3333-3333-333333333333}
-Action: Move
-Source:
-  - dantooine_files
-Destination: <<kotorDirectory>>\Override
-Overwrite: true
+  - Guid: 11111111-1111-1111-1111-111111111111
+    Action: Extract
+    Source:
+      - Example Dantooine Enhancement High Resolution - TPC Version-1103-2-1-1670680013.rar
+  - Guid: 22222222-2222-2222-2222-222222222222
+    Action: Delete
+    Source:
+      - DAN_wall03.tpc
+      - DAN_NEW1.tpc
+  - Guid: 33333333-3333-3333-3333-333333333333
+    Action: Move
+    Source:
+      - dantooine_files
+    Destination: <<kotorDirectory>>\Override
+    Overwrite: true
 -->
 
 ### Name: Example Tweak Pack
@@ -71,17 +76,17 @@ Overwrite: true
 **Tier:** Recommended
 
 <!--<<ModSync>>
-Guid: {C5418549-6B7E-4A8C-8B8E-4AA1BC63C732}
+Guid: C5418549-6B7E-4A8C-8B8E-4AA1BC63C732
 Instructions:
-  - Guid: {44444444-4444-4444-4444-444444444444}
-Action: Extract
-Source:
-  - URCMTP 1.3.rar
-  - Guid: {55555555-5555-5555-5555-555555555555}
-Action: Patcher
-Source:
-  - tslpatchdata
-Destination: <<kotorDirectory>>
+  - Guid: 44444444-4444-4444-4444-444444444444
+    Action: Extract
+    Source:
+      - URCMTP 1.3.rar
+  - Guid: 55555555-5555-5555-5555-555555555555
+    Action: Patcher
+    Source:
+      - tslpatchdata
+    Destination: <<kotorDirectory>>
 -->
 ";
 
@@ -404,12 +409,12 @@ This is after the mod list.
 				Assert.That(profile, Is.Not.Null, "Markdown import profile should not be null");
 				Assert.That(parser, Is.Not.Null, "Markdown parser should not be null");
 				Assert.That(result, Is.Not.Null, "Parse result should not be null");
-				Assert.That(result.BeforeModListContent, Is.Not.Null, "Before mod list content should not be null");
-				Assert.That(result.BeforeModListContent, Is.Not.Empty, "Before mod list content should not be empty");
-				Assert.That(result.BeforeModListContent, Does.Contain("Introduction"), "Before mod list content should contain introduction section");
-				Assert.That(result.AfterModListContent, Is.Not.Null, "After mod list content should not be null");
-				Assert.That(result.AfterModListContent, Is.Not.Empty, "After mod list content should not be empty");
-				Assert.That(result.AfterModListContent, Does.Contain("Appendix"), "After mod list content should contain appendix section");
+				Assert.That(result.PreambleContent, Is.Not.Null, "Preamble content should not be null");
+				Assert.That(result.PreambleContent, Is.Not.Empty, "Preamble content should not be empty");
+				Assert.That(result.PreambleContent, Does.Contain("Introduction"), "Preamble content should contain introduction section");
+				Assert.That(result.EpilogueContent, Is.Not.Null, "Epilogue content should not be null");
+				Assert.That(result.EpilogueContent, Is.Not.Empty, "Epilogue content should not be empty");
+				Assert.That(result.EpilogueContent, Does.Contain("Appendix"), "Epilogue content should contain appendix section");
 			});
 		}
 
