@@ -242,7 +242,7 @@ ___";
 					new Instruction
 					{
 						Action = Instruction.ActionType.Move,
-						Source = new List<string> { "<<modDirectory>>\\optionA.tpc" },
+						Source = new List<string> { "<<modDirectory>>/optionA.tpc" },
 						Destination = "<<kotorDirectory>>\\Override",
 					},
 				},
@@ -258,7 +258,7 @@ ___";
 					new Instruction
 					{
 						Action = Instruction.ActionType.Delete,
-						Source = new List<string> { "<<modDirectory>>\\optionB_conflict.tpc" },
+						Source = new List<string> { "<<modDirectory>>/optionB_conflict.tpc" },
 					},
 				},
 			};
@@ -329,7 +329,7 @@ ___";
 					new Instruction
 					{
 						Action = Instruction.ActionType.Extract,
-						Source = new List<string> { "<<modDirectory>>\\archive.7z" },
+						Source = new List<string> { "<<modDirectory>>/archive.7z" },
 					},
 				},
 			};
@@ -343,7 +343,7 @@ ___";
 					new Instruction
 					{
 						Action = Instruction.ActionType.Move,
-						Source = new List<string> { "<<modDirectory>>\\only.tpc" },
+						Source = new List<string> { "<<modDirectory>>/only.tpc" },
 						Destination = "<<kotorDirectory>>\\Override",
 					},
 				},
