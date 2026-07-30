@@ -131,7 +131,7 @@
                                 <TextBlock
                                     FontSize="13"
                                     Opacity="0.8"
-                                    Text="Your installation is checkpointed - you can always roll back if needed"
+                                    Text="Git checkpoints may be available for individual restore points — they are not a full game-folder undo"
                                     TextWrapping="Wrap" />
                             </StackPanel>
                         </StackPanel>

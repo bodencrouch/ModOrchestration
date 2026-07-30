@@ -18,7 +18,7 @@
                 <StackPanel Spacing="8">
                     <TextBlock HorizontalAlignment="Center" Text="🎮 Next Steps:" TextAlignment="Center" />
                     <TextBlock Text="• Launch the game and enjoy your modded experience!" TextWrapping="Wrap" />
-                    <TextBlock Text="• If you encounter issues, you can rollback to previous checkpoints." TextWrapping="Wrap" />
+                    <TextBlock Text="• If you encounter issues, use the checkpoint browser for scoped restore points — not a full pristine undo." TextWrapping="Wrap" />
                     <TextBlock Text="• Check the output log for detailed installation information." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>

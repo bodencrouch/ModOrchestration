@@ -10,6 +10,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using JetBrains.Annotations;
@@ -42,15 +43,32 @@ namespace ModSync.Dialogs.WizardPages
         private TextBlock _directionsText;
         private TextBlock _checkpointStatusText;
         private TextBlock _checkpointsCreatedText;
+        private TextBlock _runStateText;
+        private Border _failurePanel;
+        private TextBlock _failureSummaryText;
+        private Button _resumeRetryButton;
 
         private bool _isInstalling;
-        private bool _installationComplete;
+        private bool _installationSucceeded;
+        private bool _runFinished;
         private bool _canNavigateForward;
         private int _installedCount;
         private int _warningCount;
         private int _errorCount;
         private int _checkpointsCreated;
         private Stopwatch _stopwatch;
+        private CancellationToken _pageCancellationToken;
+
+        /// <summary>
+        /// Optional install runner for tests. Defaults to <see cref="InstallationService.InstallAllSelectedComponentsAsync"/>.
+        /// </summary>
+        [CanBeNull]
+        internal Func<
+            List<ModComponent>,
+            Action<int, int, string>,
+            CancellationToken,
+            Task<ModComponent.InstallExitCode>> InstallRunner
+        { get; set; }
 
         public InstallingPage()
             : this(new List<ModComponent>(), new MainConfig(), new CancellationTokenSource())
@@ -78,27 +96,54 @@ namespace ModSync.Dialogs.WizardPages
             InitializeDefaults();
         }
 
+        /// <summary>True after a successful install exit (Next is allowed).</summary>
+        public bool InstallationSucceeded => _installationSucceeded;
+
+        /// <summary>Exposes resume button visibility for headless tests.</summary>
+        public bool IsResumeRetryVisible => _resumeRetryButton?.IsVisible == true;
+
+        /// <summary>Exposes failure panel visibility for headless tests.</summary>
+        public bool IsFailurePanelVisible => _failurePanel?.IsVisible == true;
+
+        public string RunStateDisplayText => _runStateText?.Text ?? string.Empty;
+
+        public string FailureSummaryDisplayText => _failureSummaryText?.Text ?? string.Empty;
+
         public override Task OnNavigatedToAsync(CancellationToken cancellationToken)
         {
-            if (_isInstalling || _installationComplete)
+            _pageCancellationToken = cancellationToken;
+
+            if (_isInstalling || _installationSucceeded)
             {
                 return Task.CompletedTask;
             }
 
-            _isInstalling = true;
-            _stopwatch = Stopwatch.StartNew();
-            Logger.Logged += OnLogMessage;
-            Logger.ExceptionLogged += OnException;
+            // Do not auto-restart after a finished failure/cancel — user must Resume/Retry.
+            if (_runFinished)
+            {
+                return Task.CompletedTask;
+            }
 
-            _ = Task.Run(async () => await RunInstallation(cancellationToken).ConfigureAwait(false), cancellationToken);
+            StartInstallation(cancellationToken);
             return Task.CompletedTask;
         }
 
         public override Task<(bool isValid, string errorMessage)> ValidateAsync(CancellationToken cancellationToken)
         {
-            if (!_installationComplete)
+            if (!_installationSucceeded)
             {
-                return Task.FromResult((false, "Installation is still in progress. Please wait for it to complete."));
+                if (_isInstalling)
+                {
+                    return Task.FromResult((false, "Installation is still in progress. Please wait for it to complete."));
+                }
+
+                if (_runFinished)
+                {
+                    return Task.FromResult((false,
+                        "Installation did not complete successfully. Use Resume / Retry to continue remaining mods, or cancel the wizard."));
+                }
+
+                return Task.FromResult((false, "Installation has not finished yet."));
             }
 
             return Task.FromResult((true, (string)null));
@@ -124,6 +169,15 @@ namespace ModSync.Dialogs.WizardPages
             _directionsText = this.FindControl<TextBlock>("DirectionsText");
             _checkpointStatusText = this.FindControl<TextBlock>("CheckpointStatusText");
             _checkpointsCreatedText = this.FindControl<TextBlock>("CheckpointsCreatedText");
+            _runStateText = this.FindControl<TextBlock>("RunStateText");
+            _failurePanel = this.FindControl<Border>("FailurePanel");
+            _failureSummaryText = this.FindControl<TextBlock>("FailureSummaryText");
+            _resumeRetryButton = this.FindControl<Button>("ResumeRetryButton");
+
+            if (_resumeRetryButton != null)
+            {
+                _resumeRetryButton.Click += ResumeRetryButton_Click;
+            }
         }
 
         private void InitializeDefaults()
@@ -146,6 +200,11 @@ namespace ModSync.Dialogs.WizardPages
             if (_currentOperationText != null)
             {
                 _currentOperationText.Text = "Initializing...";
+            }
+
+            if (_runStateText != null)
+            {
+                _runStateText.Text = "Status: ready";
             }
 
             if (_elapsedTimeText != null)
@@ -193,6 +252,37 @@ namespace ModSync.Dialogs.WizardPages
             {
                 _checkpointsCreatedText.Text = "0";
             }
+
+            HideFailureUi();
+        }
+
+        private void StartInstallation(CancellationToken cancellationToken)
+        {
+            _isInstalling = true;
+            _runFinished = false;
+            _installationSucceeded = false;
+            _canNavigateForward = false;
+            _stopwatch = Stopwatch.StartNew();
+            Logger.Logged += OnLogMessage;
+            Logger.ExceptionLogged += OnException;
+
+            HideFailureUi();
+            if (_runStateText != null)
+            {
+                _runStateText.Text = "Status: installing (healthy)";
+            }
+
+            _ = Task.Run(async () => await RunInstallation(cancellationToken).ConfigureAwait(false), cancellationToken);
+        }
+
+        private void ResumeRetryButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isInstalling)
+            {
+                return;
+            }
+
+            StartInstallation(_pageCancellationToken);
         }
 
         private async Task RunInstallation(CancellationToken cancellationToken)
@@ -202,7 +292,6 @@ namespace ModSync.Dialogs.WizardPages
                 var selectedMods = _allComponents.Where(c => c.IsSelected && !c.WidescreenOnly).ToList();
                 int totalMods = selectedMods.Count;
 
-                // Progress callback for InstallAllSelectedComponentsAsync
                 void ProgressCallback(int currentIndex, int total, string componentName)
                 {
                     if (cancellationToken.IsCancellationRequested)
@@ -233,7 +322,6 @@ namespace ModSync.Dialogs.WizardPages
                             _currentModText.Text = $"Installing: {componentName}";
                         }
 
-                        // Find component to get directions
                         ModComponent component = selectedMods.FirstOrDefault(c => string.Equals(c.Name, componentName, StringComparison.Ordinal));
                         if (_directionsText != null && component != null)
                         {
@@ -243,15 +331,18 @@ namespace ModSync.Dialogs.WizardPages
                         _installedCount = currentIndex;
                         UpdateMetrics(total);
 
-                        // Update checkpoint creation status
                         if (_checkpointStatusText != null)
                         {
                             _checkpointStatusText.Text = $"Creating checkpoint for '{componentName}'...";
                         }
+
+                        if (_runStateText != null)
+                        {
+                            _runStateText.Text = "Status: installing (healthy)";
+                        }
                     });
                 }
 
-                // Listen for checkpoint creation via log messages
                 void CheckpointLogHandler(string message)
                 {
                     if (message != null && NetFrameworkCompatibility.Contains(message, "✓ Checkpoint created:", StringComparison.OrdinalIgnoreCase))
@@ -286,63 +377,17 @@ namespace ModSync.Dialogs.WizardPages
                         }
                     });
 
-                    // Use the unified installation service with checkpoint support
-                    ModComponent.InstallExitCode exitCode = await InstallationService.InstallAllSelectedComponentsAsync(
+                    Func<List<ModComponent>, Action<int, int, string>, CancellationToken, Task<ModComponent.InstallExitCode>> runner =
+                        InstallRunner ?? ((components, progress, token) =>
+                            InstallationService.InstallAllSelectedComponentsAsync(components, progress, token));
+
+                    ModComponent.InstallExitCode exitCode = await runner(
                         _allComponents,
                         ProgressCallback,
                         cancellationToken
-                    );
+                    ).ConfigureAwait(false);
 
-                    _installedCount = selectedMods.Count;
-                    _installationComplete = true;
-
-                    await UpdateUIAsync(() =>
-                    {
-                        if (_mainProgressBar != null)
-                        {
-                            _mainProgressBar.Value = 1;
-                        }
-
-                        if (_percentText != null)
-                        {
-                            _percentText.Text = "100%";
-                        }
-
-                        if (_countText != null)
-                        {
-                            _countText.Text = $"{selectedMods.Count}/{selectedMods.Count} mods installed";
-                        }
-
-                        if (_currentModText != null)
-                        {
-                            _currentModText.Text = "✅ Installation complete!";
-                        }
-
-                        if (_currentOperationText != null)
-                        {
-                            _currentOperationText.Text = "Complete";
-                        }
-
-                        if (_currentModProgress != null)
-                        {
-                            _currentModProgress.IsIndeterminate = false;
-                            _currentModProgress.Value = 1;
-                        }
-
-                        if (_checkpointStatusText != null)
-                        {
-                            _checkpointStatusText.Text = $"✓ {_checkpointsCreated} checkpoints created";
-                        }
-
-                        UpdateMetrics(selectedMods.Count);
-                    });
-
-                    _canNavigateForward = true;
-
-                    if (exitCode != ModComponent.InstallExitCode.Success)
-                    {
-                        await Logger.LogErrorAsync($"Installation completed with exit code: {UtilityHelper.GetEnumDescription(exitCode)}");
-                    }
+                    await ApplyTerminalOutcomeAsync(exitCode, selectedMods, wasCancelled: false).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -351,41 +396,183 @@ namespace ModSync.Dialogs.WizardPages
             }
             catch (OperationCanceledException)
             {
-                await UpdateUIAsync(() =>
-                {
-                    if (_currentModText != null)
-                    {
-                        _currentModText.Text = "Installation cancelled by user";
-                    }
-
-                    if (_currentOperationText != null)
-                    {
-                        _currentOperationText.Text = "Cancelled";
-                    }
-
-                    if (_checkpointStatusText != null)
-                    {
-                        _checkpointStatusText.Text = "Installation was cancelled";
-                    }
-                });
+                var selectedMods = _allComponents.Where(c => c.IsSelected && !c.WidescreenOnly).ToList();
+                await ApplyTerminalOutcomeAsync(
+                    ModComponent.InstallExitCode.UserCancelledInstall,
+                    selectedMods,
+                    wasCancelled: true).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 await Logger.LogExceptionAsync(ex, "Error during installation");
-                await UpdateUIAsync(() =>
-                {
-                    if (_checkpointStatusText != null)
-                    {
-                        _checkpointStatusText.Text = "Error during installation";
-                    }
-                });
+                var selectedMods = _allComponents.Where(c => c.IsSelected && !c.WidescreenOnly).ToList();
+                await ApplyTerminalOutcomeAsync(
+                    ModComponent.InstallExitCode.UnknownError,
+                    selectedMods,
+                    wasCancelled: false,
+                    exceptionMessage: ex.Message).ConfigureAwait(false);
             }
             finally
             {
                 _isInstalling = false;
+                _runFinished = true;
                 _stopwatch?.Stop();
                 Logger.Logged -= OnLogMessage;
                 Logger.ExceptionLogged -= OnException;
+            }
+        }
+
+        private async Task ApplyTerminalOutcomeAsync(
+            ModComponent.InstallExitCode exitCode,
+            [NotNull] List<ModComponent> selectedMods,
+            bool wasCancelled,
+            [CanBeNull] string exceptionMessage = null)
+        {
+            int completed = selectedMods.Count(c =>
+                c.InstallState == ModComponent.ComponentInstallState.Completed ||
+                c.InstallState == ModComponent.ComponentInstallState.Skipped);
+            int remaining = selectedMods.Count - completed;
+            bool success = !wasCancelled && exitCode == ModComponent.InstallExitCode.Success;
+
+            _installationSucceeded = success;
+            _canNavigateForward = success;
+
+            await UpdateUIAsync(() =>
+            {
+                if (_currentModProgress != null)
+                {
+                    _currentModProgress.IsIndeterminate = false;
+                    _currentModProgress.Value = success ? 1 : Math.Max(0, completed / (double)Math.Max(1, selectedMods.Count));
+                }
+
+                if (_countText != null)
+                {
+                    _countText.Text = $"{completed}/{selectedMods.Count} mods completed";
+                }
+
+                if (success)
+                {
+                    if (_mainProgressBar != null)
+                    {
+                        _mainProgressBar.Value = 1;
+                    }
+
+                    if (_percentText != null)
+                    {
+                        _percentText.Text = "100%";
+                    }
+
+                    if (_currentModText != null)
+                    {
+                        _currentModText.Text = "Installation complete!";
+                    }
+
+                    if (_currentOperationText != null)
+                    {
+                        _currentOperationText.Text = "Complete";
+                    }
+
+                    if (_runStateText != null)
+                    {
+                        _runStateText.Text = "Status: succeeded";
+                    }
+
+                    if (_checkpointStatusText != null)
+                    {
+                        _checkpointStatusText.Text = $"✓ {_checkpointsCreated} checkpoints created";
+                    }
+
+                    HideFailureUi();
+                }
+                else
+                {
+                    string outcomeLabel = wasCancelled || exitCode == ModComponent.InstallExitCode.UserCancelledInstall
+                        ? "cancelled"
+                        : "failed";
+
+                    if (_currentModText != null)
+                    {
+                        _currentModText.Text = wasCancelled || exitCode == ModComponent.InstallExitCode.UserCancelledInstall
+                            ? "Installation cancelled"
+                            : "Installation did not complete";
+                    }
+
+                    if (_currentOperationText != null)
+                    {
+                        _currentOperationText.Text = wasCancelled ? "Cancelled" : "Failed";
+                    }
+
+                    if (_runStateText != null)
+                    {
+                        _runStateText.Text = $"Status: {outcomeLabel}";
+                    }
+
+                    if (_checkpointStatusText != null)
+                    {
+                        _checkpointStatusText.Text = wasCancelled
+                            ? "Installation was cancelled"
+                            : $"Stopped: {UtilityHelper.GetEnumDescription(exitCode)}";
+                    }
+
+                    string summary =
+                        $"{completed} of {selectedMods.Count} selected mods completed; {remaining} remaining. " +
+                        $"Exit: {UtilityHelper.GetEnumDescription(exitCode)}.";
+                    if (!string.IsNullOrWhiteSpace(exceptionMessage))
+                    {
+                        summary += $" {exceptionMessage}";
+                    }
+
+                    if (remaining <= 0 && !success)
+                    {
+                        summary += " Session resume may be unavailable for further work.";
+                    }
+
+                    summary += " Resume continues remaining mods; it does not restore a pristine game folder.";
+
+                    if (_failurePanel != null)
+                    {
+                        _failurePanel.IsVisible = true;
+                    }
+
+                    if (_failureSummaryText != null)
+                    {
+                        _failureSummaryText.Text = summary;
+                    }
+
+                    if (_resumeRetryButton != null)
+                    {
+                        _resumeRetryButton.IsVisible = remaining > 0 || !success;
+                        _resumeRetryButton.Content = remaining > 0 ? "Resume / Retry" : "Retry";
+                    }
+                }
+
+                UpdateMetrics(selectedMods.Count);
+            }).ConfigureAwait(false);
+
+            if (!success)
+            {
+                await Logger.LogErrorAsync(
+                    $"Installation ended with exit code: {UtilityHelper.GetEnumDescription(exitCode)} " +
+                    $"({completed} completed, {remaining} remaining)."
+                ).ConfigureAwait(false);
+            }
+        }
+
+        private void HideFailureUi()
+        {
+            if (_failurePanel != null)
+            {
+                _failurePanel.IsVisible = false;
+            }
+
+            if (_resumeRetryButton != null)
+            {
+                _resumeRetryButton.IsVisible = false;
+            }
+
+            if (_failureSummaryText != null)
+            {
+                _failureSummaryText.Text = string.Empty;
             }
         }
 
@@ -478,5 +665,3 @@ namespace ModSync.Dialogs.WizardPages
         }
     }
 }
-
-
