@@ -556,6 +556,13 @@ namespace ModSync.Services
 
             foreach (DraftInstructionResult draftResult in draftResults)
             {
+                // DraftResults now includes components whose Directions produced zero drafts (U2 gap
+                // reporting) - only flag components that actually drafted instructions.
+                if (draftResult.DraftInstructionCount == 0)
+                {
+                    continue;
+                }
+
                 // ApplyReviewFlag runs inside GenerateDraftInstructions; re-apply is idempotent and keeps
                 // InstallationWarning aligned with CLI ReviewFlagMessage / validation-issue text.
                 DraftInstructionService.ApplyReviewFlag(draftResult.Component);

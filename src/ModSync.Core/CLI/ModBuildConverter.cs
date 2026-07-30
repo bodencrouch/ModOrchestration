@@ -1959,7 +1959,8 @@ componentName: null,
 
                     if (opts.ParseDirections)
                     {
-                        msg = $"Drafted instructions for {ingestResult.DraftResults.Count} component(s) - all drafts are flagged for review";
+                        int draftedCount = ingestResult.DraftResults.Count(r => r.DraftInstructionCount > 0);
+                        msg = $"Drafted instructions for {draftedCount} component(s) - all drafts are flagged for review";
                         if (s_progressDisplay != null)
                         {
                             s_progressDisplay.WriteScrollingLog(msg);
@@ -2149,11 +2150,18 @@ componentName: null,
                 // Create validation context to track issues for serialization
                 var validationContext = new ComponentValidationContext();
 
-                // Flag prose-drafted instructions for review in the serialized output (never auto-trusted)
+                // Flag prose-drafted instructions for review in the serialized output (never auto-trusted).
+                // DraftResults now includes components whose Directions produced zero drafts (U2 gap
+                // reporting) - only flag components that actually drafted instructions.
                 if (draftResults != null)
                 {
                     foreach (Parsing.DraftInstructionResult draftResult in draftResults)
                     {
+                        if (draftResult.DraftInstructionCount == 0)
+                        {
+                            continue;
+                        }
+
                         validationContext.AddModComponentIssue(
                             draftResult.Component.Guid,
                             Parsing.DraftInstructionService.ReviewFlagMessage);

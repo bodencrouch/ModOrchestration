@@ -1038,6 +1038,84 @@ ___";
         }
 
         [Test]
+        public void CliConvert_StdinWithParseDirections_DoesNotReviewFlagZeroDraftComponent()
+        {
+            // Regression guard (found by code review): GenerateDraftInstructions' return list includes
+            // one result per component with Directions prose, even when zero instructions were drafted
+            // (U2 gap reporting). The CLI must only attach the review-flag validation issue to components
+            // that actually drafted something - not every component that merely has Directions text.
+            const string twoComponentGuide = MarkdownGuide + @"
+### Commentary Only Mod
+**Name:** Commentary Only Mod
+**Author:** Test Author
+**Description:** A mod whose directions are pure commentary and draft nothing.
+**Installation Instructions:** This mod is a fan favorite. Many players enjoy the improvements.
+
+___
+";
+
+            string outputToml = Path.Combine(_testDirectory, "zero-draft.toml");
+
+            TextReader previousIn = Console.In;
+            try
+            {
+                Console.SetIn(new StringReader(twoComponentGuide));
+
+                int exitCode = ModBuildConverter.Run(new[]
+                {
+                    "convert",
+                    "--stdin",
+                    "--parse-directions",
+                    "-f", "toml",
+                    "-o", outputToml,
+                    "--plaintext",
+                });
+
+                Assert.That(exitCode, Is.EqualTo(0));
+            }
+            finally
+            {
+                Console.SetIn(previousIn);
+            }
+
+            string tomlOutput = File.ReadAllText(outputToml);
+            var reloaded = ModComponentSerializationService
+                .DeserializeModComponentFromString(tomlOutput, "toml")
+                .ToList();
+
+            Assert.That(reloaded, Has.Count.EqualTo(2));
+
+            ModComponent drafted = reloaded.Single(c => c.Name == "Guide Ingestion Test Mod");
+            ModComponent zeroDraft = reloaded.Single(c => c.Name == "Commentary Only Mod");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(drafted.Instructions, Is.Not.Empty);
+                Assert.That(zeroDraft.Instructions, Is.Empty);
+
+                // The validation-issues header should mention the drafted component's GUID, not the
+                // zero-draft component's - assert via the per-component InstallationWarning instead,
+                // since that's what actually carries the review flag through the TOML round-trip.
+                Assert.That(tomlOutput, Does.Contain(DraftInstructionService.ReviewFlagMessage));
+            });
+
+            string zeroDraftSection = ExtractComponentTomlSection(tomlOutput, "Commentary Only Mod");
+            Assert.That(zeroDraftSection, Does.Not.Contain(DraftInstructionService.ReviewFlagMessage),
+                "A component that drafted zero instructions must not be flagged for review");
+        }
+
+        private static string ExtractComponentTomlSection(string tomlOutput, string componentName)
+        {
+            int nameIndex = tomlOutput.IndexOf($"Name = \"{componentName}\"", StringComparison.Ordinal);
+            Assert.That(nameIndex, Is.GreaterThanOrEqualTo(0), $"Component '{componentName}' not found in TOML output");
+
+            int nextSectionIndex = tomlOutput.IndexOf("[[thisMod]]", nameIndex + 1, StringComparison.Ordinal);
+            return nextSectionIndex >= 0
+                ? tomlOutput.Substring(nameIndex, nextSectionIndex - nameIndex)
+                : tomlOutput.Substring(nameIndex);
+        }
+
+        [Test]
         public void CliConvert_StdinCombinedWithInput_Fails()
         {
             TextReader previousIn = Console.In;

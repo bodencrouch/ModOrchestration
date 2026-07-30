@@ -37,19 +37,25 @@ namespace ModSync.Core.Ports.Guides
             string format = string.IsNullOrWhiteSpace(formatHint) ? null : formatHint.Trim().ToLowerInvariant();
             bool isMarkdown = format != null && ModComponentSerializationService.MarkdownFormatAliases.Contains(format);
 
-            if (format is null)
-            {
-                string detected = ModComponentSerializationService.DetectFormatFromContent(content);
-                if (string.Equals(detected, "markdown", StringComparison.OrdinalIgnoreCase))
-                {
-                    format = detected;
-                    isMarkdown = true;
-                }
-            }
-
             if (isMarkdown)
             {
                 return IngestMarkdown(content, parseDirections);
+            }
+
+            if (format is null)
+            {
+                // Preserve DetectFormatFromContent's TOML-before-markdown cascade order, but without its
+                // full re-parse-from-scratch cost for the markdown case: try TOML first (cheap, fails fast
+                // on non-TOML content), then attempt markdown directly and keep the parsed result instead
+                // of detecting "markdown" and parsing the same content a second time.
+                if (!TryParsesAsToml(content))
+                {
+                    GuideIngestResult markdownAttempt = IngestMarkdown(content, parseDirections);
+                    if (markdownAttempt.Components.Count > 0)
+                    {
+                        return markdownAttempt;
+                    }
+                }
             }
 
             IReadOnlyList<ModComponent> components =
@@ -62,6 +68,24 @@ namespace ModSync.Core.Ports.Guides
             }
 
             return new GuideIngestResult(components ?? Array.Empty<ModComponent>(), drafts, format);
+        }
+
+        /// <summary>
+        /// Cheap TOML membership check (parses and discards the result) used only to preserve
+        /// <see cref="ModComponentSerializationService.DetectFormatFromContent"/>'s TOML-before-markdown
+        /// precedence when no format hint is given, without paying for a second full markdown parse.
+        /// </summary>
+        private static bool TryParsesAsToml([NotNull] string content)
+        {
+            try
+            {
+                IReadOnlyList<ModComponent> parsed = ModComponentSerializationService.DeserializeModComponentFromTomlString(content);
+                return parsed != null && parsed.Count > 0;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
 
         [NotNull]
