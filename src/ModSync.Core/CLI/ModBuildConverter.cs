@@ -3307,7 +3307,8 @@ componentName: null,
                     },
                     cancellationToken: default,
                     profileOverride: profileOverride,
-                    managedDeploymentOverride: managedOverride
+                    managedDeploymentOverride: managedOverride,
+                    enableGitCheckpoints: !opts.NoCheckpoint
                 ).ConfigureAwait(false);
 
                 if (InstallationService.LastManagedInstallResult != null)

@@ -1048,7 +1048,8 @@ Exception Type: {ex.GetType().FullName}";
             [CanBeNull] Action<int, int, string> progressCallback = null,
             CancellationToken cancellationToken = default,
             [CanBeNull] string profileOverride = null,
-            bool? managedDeploymentOverride = null)
+            bool? managedDeploymentOverride = null,
+            bool enableGitCheckpoints = true)
         {
             if (allComponents is null)
             {
@@ -1056,7 +1057,11 @@ Exception Type: {ex.GetType().FullName}";
             }
 
             return await RunWithManagedInstallSessionAsync(
-                () => InstallAllSelectedComponentsCoreAsync(allComponents, progressCallback, cancellationToken),
+                () => InstallAllSelectedComponentsCoreAsync(
+                    allComponents,
+                    progressCallback,
+                    cancellationToken,
+                    enableGitCheckpoints),
                 profileOverride,
                 managedDeploymentOverride).ConfigureAwait(false);
         }
@@ -1064,7 +1069,8 @@ Exception Type: {ex.GetType().FullName}";
         private static async Task<ModComponent.InstallExitCode> InstallAllSelectedComponentsCoreAsync(
             [NotNull][ItemNotNull] List<ModComponent> allComponents,
             [CanBeNull] Action<int, int, string> progressCallback,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool enableGitCheckpoints = true)
         {
             if (allComponents is null)
             {
@@ -1105,7 +1111,11 @@ Exception Type: {ex.GetType().FullName}";
             {
                 DirectoryInfo destination = MainConfig.DestinationPath
                                             ?? throw new InvalidOperationException("DestinationPath must be set before installing.");
-                ResumeResult resume = await coordinator.InitializeAsync(allComponents, destination, cancellationToken).ConfigureAwait(false);
+                ResumeResult resume = await coordinator.InitializeAsync(
+                    allComponents,
+                    destination,
+                    cancellationToken,
+                    enableGitCheckpoints).ConfigureAwait(false);
                 var orderedComponents = resume.OrderedComponents.Where(component => component.IsSelected).ToList();
                 int total = orderedComponents.Count;
                 ModComponent.InstallExitCode exitCode = ModComponent.InstallExitCode.Success;
@@ -1143,22 +1153,25 @@ Exception Type: {ex.GetType().FullName}";
                     {
                         await Logger.LogAsync($"Install of '{component.Name}' succeeded.").ConfigureAwait(false);
 
-                        // Create checkpoint after successful installation
-                        try
+                        // Create checkpoint after successful installation (when Git checkpoints are enabled)
+                        if (coordinator.CheckpointService != null)
                         {
-                            CheckpointInfo checkpoint = await coordinator.CheckpointService.CreateCheckpointAsync(
-                                component,
-                                index + 1,
-                                total,
-                                cancellationToken
-                            ).ConfigureAwait(false);
+                            try
+                            {
+                                CheckpointInfo checkpoint = await coordinator.CheckpointService.CreateCheckpointAsync(
+                                    component,
+                                    index + 1,
+                                    total,
+                                    cancellationToken
+                                ).ConfigureAwait(false);
 
-                            coordinator.CheckpointManager.State.ComponentCheckpoints[component.Guid] = checkpoint.CommitId;
-                            await Logger.LogAsync($"✓ Checkpoint created: {checkpoint.ShortCommitId}").ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            await Logger.LogWarningAsync($"Failed to create checkpoint for '{component.Name}': {ex.Message}").ConfigureAwait(false);
+                                coordinator.CheckpointManager.State.ComponentCheckpoints[component.Guid] = checkpoint.CommitId;
+                                await Logger.LogAsync($"✓ Checkpoint created: {checkpoint.ShortCommitId}").ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                await Logger.LogWarningAsync($"Failed to create checkpoint for '{component.Name}': {ex.Message}").ConfigureAwait(false);
+                            }
                         }
 
                         await coordinator.CheckpointManager.PromoteSnapshotAsync(destination, cancellationToken).ConfigureAwait(false);
@@ -1236,7 +1249,8 @@ Exception Type: {ex.GetType().FullName}";
             [CanBeNull] Action<int, int, string> progressCallback = null,
             CancellationToken cancellationToken = default,
             [CanBeNull] string profileOverride = null,
-            bool? managedDeploymentOverride = null)
+            bool? managedDeploymentOverride = null,
+            bool enableGitCheckpoints = true)
         {
             if (allComponents is null)
             {
@@ -1248,7 +1262,8 @@ Exception Type: {ex.GetType().FullName}";
                 progressCallback,
                 cancellationToken,
                 profileOverride,
-                managedDeploymentOverride);
+                managedDeploymentOverride,
+                enableGitCheckpoints);
         }
 
     }

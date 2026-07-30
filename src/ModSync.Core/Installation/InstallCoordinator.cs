@@ -31,12 +31,29 @@ namespace ModSync.Core.Installation
         public CheckpointManager CheckpointManager { get; }
         public Services.GitCheckpointService CheckpointService { get; private set; }
 
-        public async Task<ResumeResult> InitializeAsync([NotNull] IList<ModComponent> components, [NotNull] DirectoryInfo destinationPath, CancellationToken cancellationToken)
+        public Task<ResumeResult> InitializeAsync(
+            [NotNull] IList<ModComponent> components,
+            [NotNull] DirectoryInfo destinationPath,
+            CancellationToken cancellationToken) =>
+            InitializeAsync(components, destinationPath, cancellationToken, enableGitCheckpoints: true);
+
+        public async Task<ResumeResult> InitializeAsync(
+            [NotNull] IList<ModComponent> components,
+            [NotNull] DirectoryInfo destinationPath,
+            CancellationToken cancellationToken,
+            bool enableGitCheckpoints)
         {
             await CheckpointManager.InitializeAsync(components, destinationPath).ConfigureAwait(false);
             await CheckpointManager.EnsureSnapshotAsync(destinationPath, cancellationToken).ConfigureAwait(false);
 
             ReleaseCheckpointService();
+
+            if (!enableGitCheckpoints)
+            {
+                await CheckpointManager.SaveAsync().ConfigureAwait(false);
+                List<ModComponent> orderedWithoutGit = GetOrderedInstallList(components);
+                return new ResumeResult(CheckpointManager.State.SessionId, orderedWithoutGit);
+            }
 
             // Initialize Git-based checkpoint system
             CheckpointService = new Services.GitCheckpointService(destinationPath.FullName);

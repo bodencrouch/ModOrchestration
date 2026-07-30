@@ -151,6 +151,107 @@ namespace ModSync.Core.Services.Checkpoints
             }
         }
 
+        /// <summary>
+        /// Deletes <c>install_session.json</c> for a destination without initializing a manager instance.
+        /// Does not remove Git checkpoint history under <c>.modsync/checkpoints</c>.
+        /// </summary>
+        public static Task DeleteSessionFileAsync([NotNull] DirectoryInfo destinationPath)
+        {
+            if (destinationPath is null)
+            {
+                throw new ArgumentNullException(nameof(destinationPath));
+            }
+
+            string sessionPath = GetSessionFilePath(destinationPath);
+            if (File.Exists(sessionPath))
+            {
+                File.Delete(sessionPath);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Probes an existing install session for incomplete selected work that can be resumed.
+        /// Identity is destination path plus overlapping component GUIDs (no build fingerprint required).
+        /// </summary>
+        [NotNull]
+        public static async Task<ResumableSessionInfo> ProbeResumableSessionAsync(
+            [NotNull] DirectoryInfo destinationPath,
+            [NotNull] IEnumerable<ModComponent> selectedComponents)
+        {
+            if (destinationPath is null)
+            {
+                throw new ArgumentNullException(nameof(destinationPath));
+            }
+
+            if (selectedComponents is null)
+            {
+                throw new ArgumentNullException(nameof(selectedComponents));
+            }
+
+            string sessionPath = GetSessionFilePath(destinationPath);
+            if (!File.Exists(sessionPath))
+            {
+                return ResumableSessionInfo.None;
+            }
+
+            string json = await NetFrameworkCompatibility.ReadAllTextAsync(sessionPath, Encoding.UTF8).ConfigureAwait(false);
+            InstallSessionState state = JsonConvert.DeserializeObject<InstallSessionState>(json, s_serializerSettings);
+            if (state is null || !ValidateLoadedState(state))
+            {
+                return ResumableSessionInfo.None;
+            }
+
+            if (!string.IsNullOrWhiteSpace(state.DestinationPath) &&
+                !PathsEqual(state.DestinationPath, destinationPath.FullName))
+            {
+                return ResumableSessionInfo.None;
+            }
+
+            var selected = selectedComponents
+                .Where(c => c != null && c.IsSelected && !c.WidescreenOnly)
+                .ToList();
+            if (selected.Count == 0)
+            {
+                return ResumableSessionInfo.None;
+            }
+
+            int overlapping = 0;
+            int completed = 0;
+            int remaining = 0;
+
+            foreach (ModComponent component in selected)
+            {
+                if (!state.Components.TryGetValue(component.Guid, out ComponentSessionEntry entry))
+                {
+                    continue;
+                }
+
+                overlapping++;
+                if (entry.State == ModComponent.ComponentInstallState.Completed ||
+                    entry.State == ModComponent.ComponentInstallState.Skipped)
+                {
+                    completed++;
+                }
+                else
+                {
+                    remaining++;
+                }
+            }
+
+            // Need overlap with the prior session and at least one incomplete selected component.
+            bool isResumable = overlapping > 0 && remaining > 0;
+            return new ResumableSessionInfo(isResumable, completed, remaining, overlapping);
+        }
+
+        private static bool PathsEqual(string left, string right)
+        {
+            string a = Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string b = Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+
         [NotNull]
         public ComponentSessionEntry GetComponentEntry(Guid componentId)
         {

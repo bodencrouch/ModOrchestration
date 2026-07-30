@@ -41,6 +41,12 @@ namespace ModSync.Core.Services.Validation
         /// <summary>Skip FOMOD configured-only gate (tests without FOMOD fixtures).</summary>
         public bool SkipFomodConfigurationGate { get; set; }
 
+        /// <summary>
+        /// Skip Conflicts and InstallOrder stages under <see cref="FullValidation"/>.
+        /// Used by install-start readiness so Environment can re-run without a second full validate.
+        /// </summary>
+        public bool SkipConflictAndOrderValidation { get; set; }
+
         [CanBeNull]
         public MainConfig MainConfig { get; set; }
 
@@ -55,6 +61,20 @@ namespace ModSync.Core.Services.Validation
             FullValidation = true,
             DryRun = true,
             UseFileSelection = true,
+        };
+
+        /// <summary>
+        /// Install-start readiness: Environment only (no DryRun / archives / conflicts / order).
+        /// FOMOD remains gated on InstallStartPage via <c>FomodConfigurationGate</c>.
+        /// </summary>
+        public static ValidationPipelineOptions InstallStartReadiness => new ValidationPipelineOptions
+        {
+            FullValidation = true,
+            DryRun = false,
+            UseFileSelection = true,
+            SkipComponentArchiveValidation = true,
+            SkipFomodConfigurationGate = true,
+            SkipConflictAndOrderValidation = true,
         };
 
         /// <summary>Legacy Getting Started validate: dry-run on selected mods only.</summary>
