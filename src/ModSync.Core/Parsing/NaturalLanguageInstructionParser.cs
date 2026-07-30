@@ -24,6 +24,12 @@ namespace ModSync.Core.Parsing
 
         // Core instruction detection patterns - ordered by specificity (most specific first)
         // These patterns cover ALL variations found in KOTOR mod build documentation
+        //
+        // Note on `\.(?=\s|$)` boundary alternatives: a bare `\.` here would also match the extension
+        // separator inside a filename mid-clause (e.g. "keblastore.utm"), truncating the capture right
+        // after the base name. Requiring the period be followed by whitespace or end-of-string keeps it
+        // matching only a genuine clause-ending period (surviving trailing periods are always followed by
+        // whitespace/EOL by the time SplitIntoProcessingUnits hands a unit here).
         private static readonly List<InstructionPattern> s_instructionPatterns = new List<InstructionPattern>
         {
 			// === HIGHLY SPECIFIC MOVE/COPY PATTERNS (must come first) ===
@@ -59,13 +65,13 @@ namespace ModSync.Core.Parsing
             ),
 			// "Move only X" / "Only move X"
 			new InstructionPattern(
-                @"(?:(?:move|copy|install)\s+(?:only|just|specifically)|(?:only|just)\s+(?:move|copy|install))\s+(?:the\s+)?(?<source>[\w\s\-_.&/\\()""']+?)(?:\s+to\s+(?:your\s+)?(?<destination>[\w\s\-_/\\]+?))?(?:\.|$|,)",
+                @"(?:(?:move|copy|install)\s+(?:only|just|specifically)|(?:only|just)\s+(?:move|copy|install))\s+(?:the\s+)?(?<source>[\w\s\-_.&/\\()""']+?)(?:\s+to\s+(?:your\s+)?(?<destination>[\w\s\-_/\\]+?))?(?:\.(?=\s|$)|$|,)",
                 Instruction.ActionType.Move,
                 RegexOptions.IgnoreCase
             ),
 			// "Move ONLY X and Y (file list)"
 			new InstructionPattern(
-                @"move\s+ONLY\s+(?<source>[\w\s\-_.&/\\()]+?)(?:\s+to\s+(?<destination>[\w\s\-_/\\]+?))?(?:\.|$)",
+                @"move\s+ONLY\s+(?<source>[\w\s\-_.&/\\()]+?)(?:\s+to\s+(?<destination>[\w\s\-_/\\]+?))?(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Move,
                 RegexOptions.IgnoreCase
             ),
@@ -109,13 +115,13 @@ namespace ModSync.Core.Parsing
             ),
 			// "Delete X, Y, and Z" (list)
 			new InstructionPattern(
-                @"(?:delete|remove)\s+(?<source>(?:[\w\-_.]+(?:\s+&\s+\.[\w]+)?(?:,\s*|\s+and\s+|\s+&\s+|\s+plus\s+))+[\w\-_.]+)(?:\s+before|\s+after|\.|\s+from|$)",
+                @"(?:delete|remove)\s+(?<source>(?:[\w\-_.]+(?:\s+&\s+\.[\w]+)?(?:,\s*|\s+and\s+|\s+&\s+|\s+plus\s+))+[\w\-_.]+)(?:\s+before|\s+after|\.(?=\s|$)|\s+from|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
 			// "Delete everything inside X except Y"
 			new InstructionPattern(
-                @"delete\s+everything\s+inside\s+(?:the\s+)?(?<source>[\w\s\-_/\\]+?)\s+except\s+(?<exceptions>.+?)(?:\.|$)",
+                @"delete\s+everything\s+inside\s+(?:the\s+)?(?<source>[\w\s\-_/\\]+?)\s+except\s+(?<exceptions>.+?)(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -127,7 +133,7 @@ namespace ModSync.Core.Parsing
             ),
 			// General delete
 			new InstructionPattern(
-                @"(?:delete|remove)\s+(?:the\s+)?(?:file\s+)?(?<source>[\w\s\-_/\\*.,()&""']+?)(?:\s+before|\s+after|\s+from|\.|\s+in\s+your|$)",
+                @"(?:delete|remove)\s+(?:the\s+)?(?:file\s+)?(?<source>[\w\s\-_/\\*.,()&""']+?)(?:\s+before|\s+after|\s+from|\.(?=\s|$)|\s+in\s+your|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -155,7 +161,7 @@ namespace ModSync.Core.Parsing
             ),
 			// "Install the main mod, then re-run and select X"
 			new InstructionPattern(
-                @"install\s+(?:the\s+)?(?:main\s+mod|base\s+mod),?\s+then\s+re-run\s+(?:the\s+)?(?:patcher|installer)\s+and\s+select\s+(?<option>.+?)(?:\.|$|,\s+if)",
+                @"install\s+(?:the\s+)?(?:main\s+mod|base\s+mod),?\s+then\s+re-run\s+(?:the\s+)?(?:patcher|installer)\s+and\s+select\s+(?<option>.+?)(?:\.(?=\s|$)|$|,\s+if)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
@@ -185,7 +191,7 @@ namespace ModSync.Core.Parsing
             ),
 			// "Install X, then re-run for Y"
 			new InstructionPattern(
-                @"install\s+(?<option1>.+?),?\s+then\s+re-run\s+(?:it\s+)?(?:once\s+more|twice\s+more|again)?(?:,?\s+(?:once\s+)?for\s+(?:each\s+of\s+)?(?:the\s+)?)?(?<option2>.+?)(?:\.|$)",
+                @"install\s+(?<option1>.+?),?\s+then\s+re-run\s+(?:it\s+)?(?:once\s+more|twice\s+more|again)?(?:,?\s+(?:once\s+)?for\s+(?:each\s+of\s+)?(?:the\s+)?)?(?<option2>.+?)(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
@@ -227,7 +233,7 @@ namespace ModSync.Core.Parsing
             ),
 			// "Re-run the patcher"
 			new InstructionPattern(
-                @"re-run\s+(?:the\s+)?(?:patcher|installer)(?:\s+(?:and|to))?\s+(?:select|install|apply)?\s*(?<option>[\w\s\-_/\\.,&()""']*?)(?:\s+option)?(?:\.|$|,)",
+                @"re-run\s+(?:the\s+)?(?:patcher|installer)(?:\s+(?:and|to))?\s+(?:select|install|apply)?\s*(?<option>[\w\s\-_/\\.,&()""']*?)(?:\s+option)?(?:\.(?=\s|$)|$|,)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
@@ -273,7 +279,7 @@ namespace ModSync.Core.Parsing
 			// === DELETE PATTERNS (exhaustive) ===
 			// "Before moving ... delete / be sure to delete ..."
 			new InstructionPattern(
-                @"before\s+moving(?:\s+the\s+files?)?(?:\s+to\s+(?:your\s+)?(?:override|game).*?)?,?\s+(?:be\s+sure\s+to\s+)?delete\s+(?:the\s+following(?:\s+files?)?:?\s*)?(?<source>.+?)(?:\.|$)",
+                @"before\s+moving(?:\s+the\s+files?)?(?:\s+to\s+(?:your\s+)?(?:override|game).*?)?,?\s+(?:be\s+sure\s+to\s+)?delete\s+(?:the\s+following(?:\s+files?)?:?\s*)?(?<source>.+?)(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -297,7 +303,7 @@ namespace ModSync.Core.Parsing
             ),
 			// "Delete the following files: X, Y, Z" / "delete the following: X, Y"
 			new InstructionPattern(
-                @"delete\s+the\s+following(?:\s+files?)?:?\s+(?<source>.+?)(?:\.|$)",
+                @"delete\s+the\s+following(?:\s+files?)?:?\s+(?<source>.+?)(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -309,7 +315,7 @@ namespace ModSync.Core.Parsing
             ),
 			// Generic delete with file list
 			new InstructionPattern(
-                @"(?:delete|remove)\s+(?<source>[\w\s\-_/\\*.,()&""']+?)(?:\s+before|\s+after|\.|\s+from)",
+                @"(?:delete|remove)\s+(?<source>[\w\s\-_/\\*.,()&""']+?)(?:\s+before|\s+after|\.(?=\s|$)|\s+from)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -329,12 +335,12 @@ namespace ModSync.Core.Parsing
 			// === PATCHER/INSTALLER ===
 			// Must cover all variations
 			new InstructionPattern(
-                @"(?:when\s+)?installing,?\s+(?:select|use|choose)\s+(?<option>.+?)(?:\.|;|$)",
+                @"(?:when\s+)?installing,?\s+(?:select|use|choose)\s+(?<option>.+?)(?:\.(?=\s|$)|;|$)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
             new InstructionPattern(
-                @"re-run\s+the\s+(?:patcher|installer)(?:\s+and)?\s+(?:select|install)?\s*(?<option>.*?)(?:\.|$|,\s+if)",
+                @"re-run\s+the\s+(?:patcher|installer)(?:\s+and)?\s+(?:select|install)?\s*(?<option>.*?)(?:\.(?=\s|$)|$|,\s+if)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
@@ -406,8 +412,8 @@ namespace ModSync.Core.Parsing
             // Wildcards and patterns
             ["wildcard"] = new Regex(@"(?<pattern>[\w\-_*?]+\*[\w\-_*?]*)", RegexOptions.IgnoreCase),
             // Exclusions
-            ["except"] = new Regex(@"(?:except|excluding|but\s+not|not\s+including)(?:\s+(?:for|the))?\s+(?:the\s+)?(?<exceptions>.+?)(?:\s*(?:\(|:|;|\.|$))", RegexOptions.IgnoreCase | RegexOptions.Singleline),
-            ["ignore"] = new Regex(@"(?:ignore|skip|don't\s+(?:install|move|use))\s+(?:the\s+)?(?<ignore>.+?)(?:\.|;|,\s+you|\s+unless|$)", RegexOptions.IgnoreCase),
+            ["except"] = new Regex(@"(?:except|excluding|but\s+not|not\s+including)(?:\s+(?:for|the))?\s+(?:the\s+)?(?<exceptions>.+?)(?:\s*(?:\(|:|;|\.(?=\s|$)|$))", RegexOptions.IgnoreCase | RegexOptions.Singleline),
+            ["ignore"] = new Regex(@"(?:ignore|skip|don't\s+(?:install|move|use))\s+(?:the\s+)?(?<ignore>.+?)(?:\.(?=\s|$)|;|,\s+you|\s+unless|$)", RegexOptions.IgnoreCase),
             // Overwrite detection
             ["overwrite"] = new Regex(@"(?:overwrite|replace)(?:\s+when\s+prompted|\s+if\s+(?:asked|prompted))?", RegexOptions.IgnoreCase),
             ["no_overwrite"] = new Regex(@"(?:do\s+not|don't)\s+overwrite", RegexOptions.IgnoreCase),
@@ -933,7 +939,7 @@ namespace ModSync.Core.Parsing
             instruction.Source = ApplyExclusions(instruction.Source, unit);
 
             // === Handle "Only" Clauses ===
-            Match onlyMatch = Regex.Match(unit, @"(?:only|just)\s+(?:move|use|install)\s+(?:the\s+)?(?<only>.+?)(?:\.|;|,\s+(?:not|ignore)|$)", RegexOptions.IgnoreCase);
+            Match onlyMatch = Regex.Match(unit, @"(?:only|just)\s+(?:move|use|install)\s+(?:the\s+)?(?<only>.+?)(?:\.(?=\s|$)|;|,\s+(?:not|ignore)|$)", RegexOptions.IgnoreCase);
             if (onlyMatch.Success)
             {
                 string onlyText = onlyMatch.Groups["only"].Value;

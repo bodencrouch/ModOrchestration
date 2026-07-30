@@ -381,6 +381,69 @@ ___
         }
 
         [Test]
+        public void DraftInstructions_HQBlasters_DeleteBeforePatcherRun_PreservesFullFilenameWithExtension()
+        {
+            // AE6: the HQ Blasters sequence deletes keblastore.utm to force an intentional single
+            // TSLPatcher error before running the patcher. Before this fix, the Delete patterns' shared
+            // "end of clause" boundary used a bare '.' that also matched the extension separator inside
+            // the filename itself, truncating the capture to "keblastore" and silently dropping ".utm".
+            ModComponent component = CreateComponent(
+                "Delete keblastore.utm from the TSLPatchdata folder before running the patcher.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Delete));
+                Assert.That(component.Instructions[0].Source.Any(s => s.EndsWith("keblastore.utm", StringComparison.OrdinalIgnoreCase)),
+                    Is.True, "The full filename including its extension must survive, not be truncated at the extension separator");
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_HQBlasters_MultiFileDeleteList_PreservesAllExtensions()
+        {
+            // AE6's post-patcher cleanup deletes several more files by name; every file's extension must
+            // survive, not just the first item's (the same extension-separator boundary bug affected list
+            // patterns too, truncating mid-list as soon as it hit any filename's own '.').
+            ModComponent component = CreateComponent(
+                "Delete LSI_win01.tpc and LSI_box01.tpc before moving to override.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions[0].Source, Has.Count.EqualTo(2));
+                Assert.That(component.Instructions[0].Source.Any(s => s.EndsWith("LSI_win01.tpc", StringComparison.OrdinalIgnoreCase)), Is.True);
+                Assert.That(component.Instructions[0].Source.Any(s => s.EndsWith("LSI_box01.tpc", StringComparison.OrdinalIgnoreCase)), Is.True);
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_HQBlasters_WildcardPrefixRename_SurfacesAsGapNotWrongRename()
+        {
+            // AE6's rename step ("rename w_ionrfl_04.* files to w_ionrfl_004.*") is a bulk prefix rename,
+            // not an enumerable exact-file pair. No pattern models this yet; it must surface as an explicit
+            // reviewable gap rather than draft a wrong single-file rename or silently disappear.
+            ModComponent component = CreateComponent("Rename all w_ionrfl_04.* files to w_ionrfl_004.*.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(0));
+                Assert.That(results[0].UnparsedGaps, Is.Not.Empty,
+                    "An undraftable bulk-rename step must surface as a gap, never silently dropped or misapplied");
+                Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Rename), Is.False);
+            });
+        }
+
+        [Test]
         public void DraftInstructions_UnparseableProse_DegradesGracefullyToNoDrafts()
         {
             // Pure commentary (no action verb): recognized as informational, not a gap.
