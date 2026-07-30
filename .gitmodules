@@ -1,9 +1,9 @@
 [submodule "src/AvRichTextBox"]
 	path = src/AvRichTextBox
-	url = https://github.com/th3w1zard1/AvRichTextBox.git
+	url = https://github.com/oldrepublicwizard/AvRichTextBox.git
 [submodule "src/RtfDomParserAvalonia"]
 	path = src/RtfDomParserAvalonia
-	url = https://github.com/th3w1zard1/RtfDomParserAvalonia.git
+	url = https://github.com/oldrepublicwizard/RtfDomParserAvalonia.git
 [submodule "vendor/KPatcher"]
 	path = vendor/KPatcher
-	url = https://github.com/th3w1zard1/KPatcher.git
+	url = https://github.com/oldrepublicwizard/KPatcher.git

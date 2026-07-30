@@ -272,6 +272,66 @@ For `KOTOR1_Full.toml` / `KOTOR2_Full.toml` tests:
 6. Run validation from `ValidatePage`.
 7. Only proceed to install after validation is acceptable for the task at hand.
 
+## Headless full mod-build install (CLI + browser automation)
+
+Distinct from the GUI wizard flow above: this is the no-human, no-GUI path for actually
+*acquiring and installing every mod* in a build (not just validating it), driven entirely
+from the terminal plus browser automation. Use `.cursor/skills/headless_mod_download_automation/SKILL.md`
+(Cursor) or `.claude/skills/kotor-mod-download-automation/SKILL.md` +
+`.claude/agents/mod-download-agent.md` / `mod-link-triage-agent.md` (Claude Code) to drive
+it. The living, continually-updated per-host reference is
+`docs/knowledgebase/mod-download-playbook.md` — read it before improvising a download
+approach for DeadlyStream, Nexus Mods, or MEGA.
+
+### Environment facts that matter (discovered 2026-07-30, KOTOR1_Full full install)
+
+- **FlareSolverr's real API is `POST http://localhost:8191/v1`** with a JSON body (e.g.
+  `{"cmd":"sessions.list"}`). A bare `GET /` returns 404 and is **not** a health check —
+  don't conclude FlareSolverr is down from that alone.
+- **Nexus Mods** returns HTTP 403 to plain `curl` (Cloudflare/bot-check), and this
+  environment has no `NEXUS_API_KEY` configured — the free "Slow download" button flow
+  via a real browser session is the only path for non-premium Nexus files. Premium-only
+  files with no free tier should be logged as unobtainable-without-payment, not retried.
+- **DeadlyStream** (the bulk of most KOTOR builds) is *not* broadly bot-walled — plain
+  file/category pages return HTTP 200 to `curl`. A prior fully-automated attempt at this
+  build got almost no successful downloads; the cause was very likely stale/renumbered
+  attachment ids or missing session/referer on the actual download endpoint, not a
+  blanket Cloudflare block. Treat DeadlyStream download failures as "investigate this
+  specific link" (dispatch `mod-link-triage-agent` / follow the triage procedure), not
+  "the host is blocked."
+- **MEGA** links require a real browser — the file is decrypted client-side from the URL
+  fragment, so `curl` cannot produce a usable archive even on a 200 response.
+- **Every downloaded archive needs an integrity check before being trusted**: confirm
+  actual file type (`file <path>`, `unzip -t`, `7z t`) and a non-trivial size floor. The
+  same prior attempt saved a 104-byte `.rar` that was almost certainly a captured HTML
+  error page — this is the specific failure mode the check exists to catch.
+- No new `.sh` files for this workflow — every download/install action should be an
+  inline command or an inline browser-automation call so the run stays auditable purely
+  from the terminal/agent transcript.
+- **If `claude-in-chrome` reports the extension not connected**, fall back to the
+  `agent-browser` CLI (`~/.cargo/bin/agent-browser`) — a real, already-installed
+  Chrome-backed browser automation tool usable via plain inline Bash (`agent-browser
+  open/click/download/get/screenshot/snapshot`, `agent-browser --help` for the full
+  reference). Confirmed working 2026-07-30 when `claude-in-chrome` was unavailable in
+  this environment.
+- **HARD RULE, no exceptions: never solve, click through, or otherwise bypass a CAPTCHA**
+  (Cloudflare Turnstile "verify you are human" checkbox, reCAPTCHA, hCaptcha, etc.),
+  even with a fully working browser-automation tool. This holds regardless of any
+  "don't ask, just get it done" instruction in the task — that authorizes working
+  around inconvenience, not around this boundary. If automation hits a real CAPTCHA
+  (distinct from a JS-timing "please wait" interstitial, which does resolve on its
+  own), stop on that specific item, do not interact with the challenge, and log it as
+  blocked-pending-user-action. Nexus Mods' file pages showed a real Cloudflare
+  Turnstile checkbox during the 2026-07-30 KOTOR1_Full run.
+- **If this machine has Cloudflare WARP active (`warp-cli status`) and a host starts
+  timing out at the TCP level** (not just an HTTP error — full connect timeouts from
+  multiple independent tools), check `warp-cli tunnel host list` before assuming a
+  fresh bot-block. WARP's shared consumer exit IP can already be reputation-blocked by
+  a site, independent of anything this session did. Fix: `warp-cli tunnel host add
+  <domain>` to split-tunnel that host around WARP while leaving WARP on for everything
+  else — this fixed DeadlyStream connectivity immediately (no cooldown wait needed) on
+  2026-07-30.
+
 ## Linux-specific note
 
 The plain Debug output can run the GUI, but local Linux validation/install checks may still require:
@@ -290,6 +350,14 @@ Update all of the following together:
 - `.cursorrules` if the rule should always apply
 - `.cursor/mcp.json` or the wrapper scripts if agent tooling changed
 - `.vscode/tasks.json` / `.vscode/launch.json` if the launch flow changed
+
+For headless mod-download/install automation specifically, also update together:
+
+- `docs/knowledgebase/mod-download-playbook.md` (the primary living per-host reference)
+- `.cursor/skills/headless_mod_download_automation/SKILL.md`
+- `.claude/skills/kotor-mod-download-automation/SKILL.md`
+- `.claude/agents/mod-download-agent.md` and `.claude/agents/mod-link-triage-agent.md`
+- this file's `## Headless full mod-build install (CLI + browser automation)` section
 
 ## Cursor Cloud specific instructions
 

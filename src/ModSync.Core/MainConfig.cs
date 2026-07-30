@@ -162,6 +162,15 @@ namespace ModSync.Core
             set => ContinueInstallOnModFailure = value;
         }
 
+        /// <summary>When true, skips the git-based checkpoint/rollback system entirely (CLI --no-checkpoint).</summary>
+        public static bool NoCheckpoint { get; private set; }
+
+        public bool noCheckpoint
+        {
+            get => NoCheckpoint;
+            set => NoCheckpoint = value;
+        }
+
         /// <summary>Stores the Nexus Mods API key. Mutate via <see cref="nexusModsApiKey"/>.</summary>
         public static string NexusModsApiKey { get; private set; }
         /// <summary>Instance accessor for <see cref="NexusModsApiKey"/>.</summary>

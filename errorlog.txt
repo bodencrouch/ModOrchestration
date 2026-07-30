@@ -1,0 +1,817 @@
+
+Assertion with Exception Trace: Exception ''str' object has no attribute 'info'' of type '<class 'AttributeError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "pykotor/tslpatcher/patcher.py", line 372, in install
+  File "pykotor/tslpatcher/mods/nss.py", line 118, in patch_resource
+  File "pykotor/resource/formats/ncs/ncs_auto.py", line 112, in compile_nss
+  File "pykotor/resource/formats/ncs/compiler/parser.py", line 75, in __init__
+  File "ply/yacc.py", line 3317, in yacc
+AttributeError: 'str' object has no attribute 'info'
+
+Stack Trace Variables:
+
+Function 'install' at /tmp/_MEIlRdZll/pykotor/tslpatcher/patcher.pyc:372:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f2d1340c490>
+  should_cancel = <threading.Event object at 0x7f2d1389d0c0>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7f2d1340cac0>
+  temp_script_folder = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)
+  patches_list = [<pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2d1340e440>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2d1340e410>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2d1340e470>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2d1340e4a0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2d1340e4d0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2d1340e500>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2d1340e110>, <pykoto...<truncated>
+  memory = PatcherMemory(memory_2da={}, memory_str={})
+  patch = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7f2d1340e680>
+  output_container_path = CaseAwarePath(\run\media\brunner56\mybook\steamlibrary\steamapps\common\swkotor\override)
+  exists = False
+  capsule = None
+  data_to_patch = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  patched_data = b'////////////////////////////////////////////////////////\r\n//\r\n//  NWScript\r\n//\r\n//  The list of actions and pre-defined constants.\r\n//\r\n//  (c) BioWare Corp, 1999\r\n//\r\n////////////////////////////////////////////////////////\r\n\r\n#define ENGINE_NUM_STRUCTURES   4\r\n#define ENGINE_STRUCTURE_0      effect\r\n#define ENGINE_STRUCTURE_1      event\r\n#define ENGINE_STRUCTURE_2      location\r\n#define ENGINE_STRUCTURE_3      talent\r\n\r\n// Constants\r\n\r\nint        NUM_INVENTORY_SLOTS  ...<truncated>
+  e = AttributeError("'str' object has no attribute 'info'")
+
+Function 'patch_resource' at /tmp/_MEIlRdZll/pykotor/tslpatcher/mods/nss.pyc:118:
+  self = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7f2d1340e680>
+  nss_source = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  memory = PatcherMemory(memory_2da={}, memory_str={})
+  logger = <pykotor.tslpatcher.logger.PatchLogger object at 0x7f2d13867850>
+  game = <Game.K1: 1>
+  reader = <pykotor.common.stream.BinaryReader object at 0x7f2d1343c130>
+  nss_bytes = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  source = <pykotor.tslpatcher.mods.nss.MutableString object at 0x7f2d1343c2e0>
+  temp_script_file = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir\kas22_attack.nss)
+  is_windows = False
+  nwnnsscomp_exists = True
+
+Function 'compile_nss' at /tmp/_MEIlRdZll/pykotor/resource/formats/ncs/ncs_auto.pyc:112:
+  source = '\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsOb...<truncated>
+  game = <Game.K1: 1>
+  optimizers = [<pykotor.resource.formats.ncs.optimizers.RemoveNopOptimizer object at 0x7f2d1343c6d0>, <pykotor.resource.formats.ncs.optimizers.RemoveMoveSPEqualsZeroOptimizer object at 0x7f2d1343c4c0>, <pykotor.resource.formats.ncs.optimizers.RemoveUnusedBlocksOptimizer object at 0x7f2d1343c580>]
+  library_lookup = [CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function '__init__' at /tmp/_MEIlRdZll/pykotor/resource/formats/ncs/compiler/parser.pyc:75:
+  self = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7f2d1343c640>
+  functions = [ScriptFunction(<DataType.INT: 'int'>, 'Random', [ScriptParam(<DataType.INT: 'int'>, 'nMaxInteger', None)], '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);', '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);'), ScriptFunction(<DataType.VOID: 'void'>, 'PrintString', [ScriptParam(<DataType.STRING: 'string'>, 'sString', None)], '// 1: Output sString to the log file.\r\nvoid PrintStr...<truncated>
+  constants = [ScriptConstant("DataType.INT", "NUM_INVENTORY_SLOTS", "18"), ScriptConstant("DataType.INT", "TRUE", "1"), ScriptConstant("DataType.INT", "FALSE", "0"), ScriptConstant("DataType.FLOAT", "DIRECTION_EAST", "0.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_NORTH", "90.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_WEST", "180.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_SOUTH", "270.0"), ScriptConstant("DataType.FLOAT", "PI", "3.141592"), ScriptConstant("DataType.INT", "ATTITUDE_NEUTRAL", "0"), ScriptC...<truncated>
+  library = {'k_inc_cheat': b'//:: k_inc_cheat\n/*\n    This will be localized area for all\n    Cheat Bot scripting.\n*/\n//:: Created By: Preston Watamaniuk\n//:: Copyright (c) 2002 Bioware Corp.\n#include "k_inc_debug"\n//Takes a PLANET_ Constant\nvoid CH_SetPlanetaryGlobal(int nPlanetConstant);\n//Makes the specified party member available to the PC\nvoid CH_SetPartyMemberAvailable(int nNPC);\n//::///////////////////////////////////////////////\n//:: Set Planet Local\n//:: Copyright (c) 2001 Bioware Corp.\n//::////...<truncated>
+  library_lookup = [CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function 'yacc' at /tmp/_MEIlRdZll/ply/yacc.pyc:3317:
+  method = 'LALR'
+  debug = False
+  tabmodule = 'pykotor.resource.formats.ncs.compiler.parsetab'
+  start = None
+  check_recursion = True
+  optimize = False
+  write_tables = False
+  debugfile = 'parser.out'
+  outputdir = '/tmp/_MEIlRdZll/pykotor/resource/formats/ncs/compiler'
+  debuglog = 'yacc_debuglog.txt'
+  errorlog = <ply.yacc.PlyLogger object at 0x7f2d1343c9a0>
+  picklefile = None
+  _items = [('__annotations__', {'tokens': 'list[str]', 'literals': 'list[str]'}), ('__class__', <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>), ('__delattr__', <method-wrapper '__delattr__' of NssParser object at 0x7f2d1343c640>), ('__dict__', {}), ('__dir__', <built-in method __dir__ of NssParser object at 0x7f2d1343c640>), ('__doc__', None), ('__eq__', <method-wrapper '__eq__' of NssParser object at 0x7f2d1343c640>), ('__format__', <built-in method __format__ of NssParser object at 0x7f2d1343c640...<truncated>
+  pdict = {'__annotations__': {'tokens': 'list[str]', 'literals': 'list[str]'}, '__class__': <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>, '__delattr__': <method-wrapper '__delattr__' of NssParser object at 0x7f2d1343c640>, '__dict__': {}, '__dir__': <built-in method __dir__ of NssParser object at 0x7f2d1343c640>, '__doc__': None, '__eq__': <method-wrapper '__eq__' of NssParser object at 0x7f2d1343c640>, '__format__': <built-in method __format__ of NssParser object at 0x7f2d1343c640>, '__ge__': <m...<truncated>
+  srcfile = '/tmp/_MEIlRdZll/pykotor/resource/formats/ncs/compiler/parser.pyc'
+  pkg = 'pykotor.resource.formats.ncs.compiler'
+  pinfo = <ply.yacc.ParserReflect object at 0x7f2d1343c910>
+  signature = "leftORleftANDleftBITWISE_ORleftBITWISE_XORleftBITWISE_ANDleftEQUALSNOT_EQUALSleftGREATER_THANLESS_THANGREATER_THAN_OR_EQUALSLESS_THAN_OR_EQUALSleftBITWISE_LEFTBITWISE_RIGHTleftADDMINUSleftMULTIPLYDIVIDEMODrightBITWISE_NOTNOTleftINCREMENTDECREMENTACTION_TYPE ADD ADDITION_ASSIGNMENT_OPERATOR AND BITWISE_AND BITWISE_LEFT BITWISE_NOT BITWISE_OR BITWISE_RIGHT BITWISE_XOR BREAK_CONTROL CASE_CONTROL CONTINUE_CONTROL DECREMENT DEFAULT_CONTROL DIVIDE DIVISION_ASSIGNMENT_OPERATOR DO_CONTROL EFFECT_TYPE ELSE_CONTROL ...<truncated>
+  lr = <ply.yacc.LRTable object at 0x7f2d1343ca30>
+  module = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7f2d1343c640>
+Assertion with Exception Trace: Exception 'cannot install - missing a required mod' of type '<class 'ImportError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1353, in <module>
+  File "__main__.py", line 1348, in main
+  File "__main__.py", line 163, in __init__
+  File "__main__.py", line 375, in handle_commandline
+  File "__main__.py", line 391, in _begin_oneshot
+  File "__main__.py", line 1071, in begin_install_thread
+  File "__main__.py", line 1069, in begin_install_thread
+  File "__main__.py", line 1150, in _execute_mod_install
+  File "pykotor/tslpatcher/patcher.py", line 100, in config
+ImportError: cannot install - missing a required mod
+
+Stack Trace Variables:
+
+Function '<module>' at /tmp/_MEIGu0Q3f/__main__.py:1353:
+  __annotations__ = {'CURRENT_VERSION': 'tuple[int, ...]'}
+  _pyi_main_co = <code object <module> at 0x7fa1086d5840, file "__main__.py", line 1>
+  sys = <module 'sys' (built-in)>
+  pyimod02_importers = <module 'pyimod02_importers' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod02_importers.py'>
+  os = <module 'os' from '/tmp/_MEIGu0Q3f/base_library.zip/os.pyc'>
+  VIRTENV = 'VIRTUAL_ENV'
+  python_path = ['/tmp/_MEIGu0Q3f/base_library.zip', '/tmp/_MEIGu0Q3f/lib-dynload', '/tmp/_MEIGu0Q3f']
+  pth = '/tmp/_MEIGu0Q3f'
+  encodings = <module 'encodings' from '/tmp/_MEIGu0Q3f/base_library.zip/encodings/__init__.pyc'>
+  pyimod03_ctypes = <module 'pyimod03_ctypes' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod03_ctypes.py'>
+  entry = '/tmp/_MEIGu0Q3f/base_library.zip'
+  annotations = _Feature((3, 7, 0, 'beta', 1), (3, 11, 0, 'alpha', 0), 16777216)
+  base64 = <module 'base64' from '/tmp/_MEIGu0Q3f/base64.pyc'>
+  contextlib = <module 'contextlib' from '/tmp/_MEIGu0Q3f/contextlib.pyc'>
+  ctypes = <module 'ctypes' from '/tmp/_MEIGu0Q3f/ctypes/__init__.pyc'>
+  inspect = <module 'inspect' from '/tmp/_MEIGu0Q3f/inspect.pyc'>
+  io = <module 'io' from '/tmp/_MEIGu0Q3f/base_library.zip/io.pyc'>
+  json = <module 'json' from '/tmp/_MEIGu0Q3f/json/__init__.pyc'>
+  pathlib = <module 'pathlib' from '/tmp/_MEIGu0Q3f/pathlib.pyc'>
+  subprocess = <module 'subprocess' from '/tmp/_MEIGu0Q3f/subprocess.pyc'>
+  tempfile = <module 'tempfile' from '/tmp/_MEIGu0Q3f/tempfile.pyc'>
+  time = <module 'time' (built-in)>
+  tk = <module 'tkinter' from '/tmp/_MEIGu0Q3f/tkinter/__init__.pyc'>
+  traceback = <module 'traceback' from '/tmp/_MEIGu0Q3f/base_library.zip/traceback.pyc'>
+  webbrowser = <module 'webbrowser' from '/tmp/_MEIGu0Q3f/webbrowser.pyc'>
+  ArgumentParser = <class 'argparse.ArgumentParser'>
+  Namespace = <class 'argparse.Namespace'>
+  datetime = <class 'datetime.datetime'>
+  timedelta = <class 'datetime.timedelta'>
+  timezone = <class 'datetime.timezone'>
+  IntEnum = <enum 'IntEnum'>
+  Event = <class 'threading.Event'>
+  Thread = <class 'threading.Thread'>
+  filedialog = <module 'tkinter.filedialog' from '/tmp/_MEIGu0Q3f/tkinter/filedialog.pyc'>
+  messagebox = <module 'tkinter.messagebox' from '/tmp/_MEIGu0Q3f/tkinter/messagebox.pyc'>
+  ttk = <module 'tkinter.ttk' from '/tmp/_MEIGu0Q3f/tkinter/ttk.pyc'>
+  tkfont = <module 'tkinter.font' from '/tmp/_MEIGu0Q3f/tkinter/font.pyc'>
+  TYPE_CHECKING = False
+  Callable = typing.Callable
+  NoReturn = typing.NoReturn
+  Game = <enum 'Game'>
+  BinaryReader = <class 'pykotor.common.stream.BinaryReader'>
+  ResourceIdentifier = <class 'pykotor.extract.file.ResourceIdentifier'>
+  decode_bytes_with_fallbacks = <function decode_bytes_with_fallbacks at 0x7fa0f9df2ef0>
+  CaseAwarePath = <class 'pykotor.tools.path.CaseAwarePath'>
+  find_kotor_paths_from_default = <function find_kotor_paths_from_default at 0x7fa0f97163b0>
+  PatchLog = <class 'pykotor.tslpatcher.logger.PatchLog'>
+  PatchLogger = <class 'pykotor.tslpatcher.logger.PatchLogger'>
+  ModInstaller = <class 'pykotor.tslpatcher.patcher.ModInstaller'>
+  ConfigReader = <class 'pykotor.tslpatcher.reader.ConfigReader'>
+  NamespaceReader = <class 'pykotor.tslpatcher.reader.NamespaceReader'>
+  ModUninstaller = <class 'pykotor.tslpatcher.uninstall.ModUninstaller'>
+  format_exception_with_variables = <function format_exception_with_variables at 0x7fa0f9cc7eb0>
+  universal_simplify_exception = <function universal_simplify_exception at 0x7fa0f9cc7c70>
+  striprtf = <function striprtf at 0x7fa0f9dd0f70>
+  Path = <class 'utility.system.path.Path'>
+  ToolTip = <class 'utility.tkinter.tooltip.ToolTip'>
+  CURRENT_VERSION = (1, 5, 1)
+  VERSION_LABEL = 'v1.5.1'
+  ExitCode = <enum 'ExitCode'>
+  HoloPatcherError = <class '__main__.HoloPatcherError'>
+  parse_args = <function parse_args at 0x7fa1086ca7a0>
+  App = <class '__main__.App'>
+  onAppCrash = <function onAppCrash at 0x7fa0f948b520>
+  is_frozen = <function is_frozen at 0x7fa0f949d3f0>
+  main = <function main at 0x7fa0f949d480>
+
+Function 'main' at /tmp/_MEIGu0Q3f/__main__.py:1348:
+
+Function '__init__' at /tmp/_MEIGu0Q3f/__main__.py:163:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+  __class__ = <class '__main__.App'>
+
+Function 'handle_commandline' at /tmp/_MEIGu0Q3f/__main__.py:375:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+  num_cmdline_actions = 1
+
+Function '_begin_oneshot' at /tmp/_MEIGu0Q3f/__main__.py:391:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+
+Function 'begin_install_thread' at /tmp/_MEIGu0Q3f/__main__.py:1071:
+  should_cancel_thread = <threading.Event object at 0x7fa0f94a5120>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7fa0f90ac310>
+  ini_file_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade\option_3.ini)
+  namespace_mod_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fa0f94a5720>
+  self = <__main__.App object .>
+
+Function 'begin_install_thread' at /tmp/_MEIGu0Q3f/__main__.py:1069:
+  should_cancel_thread = <threading.Event object at 0x7fa0f94a5120>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7fa0f90ac310>
+  ini_file_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade\option_3.ini)
+  namespace_mod_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fa0f94a5720>
+  self = <__main__.App object .>
+
+Function '_execute_mod_install' at /tmp/_MEIGu0Q3f/__main__.py:1150:
+  self = <__main__.App object .>
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fa0f94a5720>
+  should_cancel_thread = <threading.Event object at 0x7fa0f94a5120>
+
+Function 'config' at /tmp/_MEIGu0Q3f/pykotor/tslpatcher/patcher.pyc:100:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fa0f94a5720>
+  ini_file_bytes = b';[K1] Republic Soldier\'s New Shade v1.1.1 - Option 3;\r\n\r\n;Patcher Setup;\r\n[Settings]\r\nFileExists=1\r\nWindowCaption=New Shade for JC\'s "Republic Soldier Uniform for PC" - Male and Female\r\nConfirmMessage=N/A\nRequired=pfbbl.mdl\r\nLogLevel=4\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=0\r\n\r\n;Indexing;\r\n[InstallList]\r\ninstall_folder0=Override\r\n\r\n;Override Install;\r\n[install_folder0]\r\nReplace0=PMBBL01.tpc\r...<truncated>
+  ini_text = ';[K1] Republic Soldier\'s New Shade v1.1.1 - Option 3;\r\n\r\n;Patcher Setup;\r\n[Settings]\r\nFileExists=1\r\nWindowCaption=New Shade for JC\'s "Republic Soldier Uniform for PC" - Male and Female\r\nConfirmMessage=N/A\nRequired=pfbbl.mdl\r\nLogLevel=4\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=0\r\n\r\n;Indexing;\r\n[InstallList]\r\ninstall_folder0=Override\r\n\r\n;Override Install;\r\n[install_folder0]\r\nReplace0=PMBBL01.tpc\r\...<truncated>
+  requiredfile_path = CaseAwarePath(\run\media\brunner56\mybook\steamlibrary\steamapps\common\swkotor\override\pfbbl.mdl)
+Assertion with Exception Trace: Exception ''str' object has no attribute 'info'' of type '<class 'AttributeError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "pykotor/tslpatcher/patcher.py", line 372, in install
+  File "pykotor/tslpatcher/mods/nss.py", line 118, in patch_resource
+  File "pykotor/resource/formats/ncs/ncs_auto.py", line 112, in compile_nss
+  File "pykotor/resource/formats/ncs/compiler/parser.py", line 75, in __init__
+  File "ply/yacc.py", line 3317, in yacc
+AttributeError: 'str' object has no attribute 'info'
+
+Stack Trace Variables:
+
+Function 'install' at /tmp/_MEINbFrkh/pykotor/tslpatcher/patcher.pyc:372:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f2ab4fec490>
+  should_cancel = <threading.Event object at 0x7f2ab54a10c0>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7f2ab4fecc40>
+  temp_script_folder = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)
+  patches_list = [<pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2ab4fee440>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2ab4fee410>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2ab4fee470>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2ab4fee4a0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2ab4fee4d0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2ab4fee500>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f2ab4fee110>, <pykoto...<truncated>
+  memory = PatcherMemory(memory_2da={}, memory_str={})
+  patch = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7f2ab4fee680>
+  output_container_path = CaseAwarePath(\run\media\brunner56\mybook\steamlibrary\steamapps\common\swkotor\override)
+  exists = False
+  capsule = None
+  data_to_patch = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  patched_data = b'////////////////////////////////////////////////////////\r\n//\r\n//  NWScript\r\n//\r\n//  The list of actions and pre-defined constants.\r\n//\r\n//  (c) BioWare Corp, 1999\r\n//\r\n////////////////////////////////////////////////////////\r\n\r\n#define ENGINE_NUM_STRUCTURES   4\r\n#define ENGINE_STRUCTURE_0      effect\r\n#define ENGINE_STRUCTURE_1      event\r\n#define ENGINE_STRUCTURE_2      location\r\n#define ENGINE_STRUCTURE_3      talent\r\n\r\n// Constants\r\n\r\nint        NUM_INVENTORY_SLOTS  ...<truncated>
+  e = AttributeError("'str' object has no attribute 'info'")
+
+Function 'patch_resource' at /tmp/_MEINbFrkh/pykotor/tslpatcher/mods/nss.pyc:118:
+  self = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7f2ab4fee680>
+  nss_source = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  memory = PatcherMemory(memory_2da={}, memory_str={})
+  logger = <pykotor.tslpatcher.logger.PatchLogger object at 0x7f2ab546b850>
+  game = <Game.K1: 1>
+  reader = <pykotor.common.stream.BinaryReader object at 0x7f2ab50405e0>
+  nss_bytes = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  source = <pykotor.tslpatcher.mods.nss.MutableString object at 0x7f2ab5040670>
+  temp_script_file = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir\kas22_attack.nss)
+  is_windows = False
+  nwnnsscomp_exists = True
+
+Function 'compile_nss' at /tmp/_MEINbFrkh/pykotor/resource/formats/ncs/ncs_auto.pyc:112:
+  source = '\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsOb...<truncated>
+  game = <Game.K1: 1>
+  optimizers = [<pykotor.resource.formats.ncs.optimizers.RemoveNopOptimizer object at 0x7f2ab5040a90>, <pykotor.resource.formats.ncs.optimizers.RemoveMoveSPEqualsZeroOptimizer object at 0x7f2ab5040880>, <pykotor.resource.formats.ncs.optimizers.RemoveUnusedBlocksOptimizer object at 0x7f2ab5040940>]
+  library_lookup = [CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function '__init__' at /tmp/_MEINbFrkh/pykotor/resource/formats/ncs/compiler/parser.pyc:75:
+  self = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7f2ab5040a00>
+  functions = [ScriptFunction(<DataType.INT: 'int'>, 'Random', [ScriptParam(<DataType.INT: 'int'>, 'nMaxInteger', None)], '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);', '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);'), ScriptFunction(<DataType.VOID: 'void'>, 'PrintString', [ScriptParam(<DataType.STRING: 'string'>, 'sString', None)], '// 1: Output sString to the log file.\r\nvoid PrintStr...<truncated>
+  constants = [ScriptConstant("DataType.INT", "NUM_INVENTORY_SLOTS", "18"), ScriptConstant("DataType.INT", "TRUE", "1"), ScriptConstant("DataType.INT", "FALSE", "0"), ScriptConstant("DataType.FLOAT", "DIRECTION_EAST", "0.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_NORTH", "90.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_WEST", "180.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_SOUTH", "270.0"), ScriptConstant("DataType.FLOAT", "PI", "3.141592"), ScriptConstant("DataType.INT", "ATTITUDE_NEUTRAL", "0"), ScriptC...<truncated>
+  library = {'k_inc_cheat': b'//:: k_inc_cheat\n/*\n    This will be localized area for all\n    Cheat Bot scripting.\n*/\n//:: Created By: Preston Watamaniuk\n//:: Copyright (c) 2002 Bioware Corp.\n#include "k_inc_debug"\n//Takes a PLANET_ Constant\nvoid CH_SetPlanetaryGlobal(int nPlanetConstant);\n//Makes the specified party member available to the PC\nvoid CH_SetPartyMemberAvailable(int nNPC);\n//::///////////////////////////////////////////////\n//:: Set Planet Local\n//:: Copyright (c) 2001 Bioware Corp.\n//::////...<truncated>
+  library_lookup = [CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function 'yacc' at /tmp/_MEINbFrkh/ply/yacc.pyc:3317:
+  method = 'LALR'
+  debug = False
+  tabmodule = 'pykotor.resource.formats.ncs.compiler.parsetab'
+  start = None
+  check_recursion = True
+  optimize = False
+  write_tables = False
+  debugfile = 'parser.out'
+  outputdir = '/tmp/_MEINbFrkh/pykotor/resource/formats/ncs/compiler'
+  debuglog = 'yacc_debuglog.txt'
+  errorlog = <ply.yacc.PlyLogger object at 0x7f2ab5040d60>
+  picklefile = None
+  _items = [('__annotations__', {'tokens': 'list[str]', 'literals': 'list[str]'}), ('__class__', <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>), ('__delattr__', <method-wrapper '__delattr__' of NssParser object at 0x7f2ab5040a00>), ('__dict__', {}), ('__dir__', <built-in method __dir__ of NssParser object at 0x7f2ab5040a00>), ('__doc__', None), ('__eq__', <method-wrapper '__eq__' of NssParser object at 0x7f2ab5040a00>), ('__format__', <built-in method __format__ of NssParser object at 0x7f2ab5040a00...<truncated>
+  pdict = {'__annotations__': {'tokens': 'list[str]', 'literals': 'list[str]'}, '__class__': <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>, '__delattr__': <method-wrapper '__delattr__' of NssParser object at 0x7f2ab5040a00>, '__dict__': {}, '__dir__': <built-in method __dir__ of NssParser object at 0x7f2ab5040a00>, '__doc__': None, '__eq__': <method-wrapper '__eq__' of NssParser object at 0x7f2ab5040a00>, '__format__': <built-in method __format__ of NssParser object at 0x7f2ab5040a00>, '__ge__': <m...<truncated>
+  srcfile = '/tmp/_MEINbFrkh/pykotor/resource/formats/ncs/compiler/parser.pyc'
+  pkg = 'pykotor.resource.formats.ncs.compiler'
+  pinfo = <ply.yacc.ParserReflect object at 0x7f2ab5040cd0>
+  signature = "leftORleftANDleftBITWISE_ORleftBITWISE_XORleftBITWISE_ANDleftEQUALSNOT_EQUALSleftGREATER_THANLESS_THANGREATER_THAN_OR_EQUALSLESS_THAN_OR_EQUALSleftBITWISE_LEFTBITWISE_RIGHTleftADDMINUSleftMULTIPLYDIVIDEMODrightBITWISE_NOTNOTleftINCREMENTDECREMENTACTION_TYPE ADD ADDITION_ASSIGNMENT_OPERATOR AND BITWISE_AND BITWISE_LEFT BITWISE_NOT BITWISE_OR BITWISE_RIGHT BITWISE_XOR BREAK_CONTROL CASE_CONTROL CONTINUE_CONTROL DECREMENT DEFAULT_CONTROL DIVIDE DIVISION_ASSIGNMENT_OPERATOR DO_CONTROL EFFECT_TYPE ELSE_CONTROL ...<truncated>
+  lr = <ply.yacc.LRTable object at 0x7f2ab5040df0>
+  module = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7f2ab5040a00>
+Assertion with Exception Trace: Exception 'cannot install - missing a required mod' of type '<class 'ImportError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1353, in <module>
+  File "__main__.py", line 1348, in main
+  File "__main__.py", line 163, in __init__
+  File "__main__.py", line 375, in handle_commandline
+  File "__main__.py", line 391, in _begin_oneshot
+  File "__main__.py", line 1071, in begin_install_thread
+  File "__main__.py", line 1069, in begin_install_thread
+  File "__main__.py", line 1150, in _execute_mod_install
+  File "pykotor/tslpatcher/patcher.py", line 100, in config
+ImportError: cannot install - missing a required mod
+
+Stack Trace Variables:
+
+Function '<module>' at /tmp/_MEIpiOGr8/__main__.py:1353:
+  __annotations__ = {'CURRENT_VERSION': 'tuple[int, ...]'}
+  _pyi_main_co = <code object <module> at 0x7f6d02d59840, file "__main__.py", line 1>
+  sys = <module 'sys' (built-in)>
+  pyimod02_importers = <module 'pyimod02_importers' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod02_importers.py'>
+  os = <module 'os' from '/tmp/_MEIpiOGr8/base_library.zip/os.pyc'>
+  VIRTENV = 'VIRTUAL_ENV'
+  python_path = ['/tmp/_MEIpiOGr8/base_library.zip', '/tmp/_MEIpiOGr8/lib-dynload', '/tmp/_MEIpiOGr8']
+  pth = '/tmp/_MEIpiOGr8'
+  encodings = <module 'encodings' from '/tmp/_MEIpiOGr8/base_library.zip/encodings/__init__.pyc'>
+  pyimod03_ctypes = <module 'pyimod03_ctypes' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod03_ctypes.py'>
+  entry = '/tmp/_MEIpiOGr8/base_library.zip'
+  annotations = _Feature((3, 7, 0, 'beta', 1), (3, 11, 0, 'alpha', 0), 16777216)
+  base64 = <module 'base64' from '/tmp/_MEIpiOGr8/base64.pyc'>
+  contextlib = <module 'contextlib' from '/tmp/_MEIpiOGr8/contextlib.pyc'>
+  ctypes = <module 'ctypes' from '/tmp/_MEIpiOGr8/ctypes/__init__.pyc'>
+  inspect = <module 'inspect' from '/tmp/_MEIpiOGr8/inspect.pyc'>
+  io = <module 'io' from '/tmp/_MEIpiOGr8/base_library.zip/io.pyc'>
+  json = <module 'json' from '/tmp/_MEIpiOGr8/json/__init__.pyc'>
+  pathlib = <module 'pathlib' from '/tmp/_MEIpiOGr8/pathlib.pyc'>
+  subprocess = <module 'subprocess' from '/tmp/_MEIpiOGr8/subprocess.pyc'>
+  tempfile = <module 'tempfile' from '/tmp/_MEIpiOGr8/tempfile.pyc'>
+  time = <module 'time' (built-in)>
+  tk = <module 'tkinter' from '/tmp/_MEIpiOGr8/tkinter/__init__.pyc'>
+  traceback = <module 'traceback' from '/tmp/_MEIpiOGr8/base_library.zip/traceback.pyc'>
+  webbrowser = <module 'webbrowser' from '/tmp/_MEIpiOGr8/webbrowser.pyc'>
+  ArgumentParser = <class 'argparse.ArgumentParser'>
+  Namespace = <class 'argparse.Namespace'>
+  datetime = <class 'datetime.datetime'>
+  timedelta = <class 'datetime.timedelta'>
+  timezone = <class 'datetime.timezone'>
+  IntEnum = <enum 'IntEnum'>
+  Event = <class 'threading.Event'>
+  Thread = <class 'threading.Thread'>
+  filedialog = <module 'tkinter.filedialog' from '/tmp/_MEIpiOGr8/tkinter/filedialog.pyc'>
+  messagebox = <module 'tkinter.messagebox' from '/tmp/_MEIpiOGr8/tkinter/messagebox.pyc'>
+  ttk = <module 'tkinter.ttk' from '/tmp/_MEIpiOGr8/tkinter/ttk.pyc'>
+  tkfont = <module 'tkinter.font' from '/tmp/_MEIpiOGr8/tkinter/font.pyc'>
+  TYPE_CHECKING = False
+  Callable = typing.Callable
+  NoReturn = typing.NoReturn
+  Game = <enum 'Game'>
+  BinaryReader = <class 'pykotor.common.stream.BinaryReader'>
+  ResourceIdentifier = <class 'pykotor.extract.file.ResourceIdentifier'>
+  decode_bytes_with_fallbacks = <function decode_bytes_with_fallbacks at 0x7f6d023ceef0>
+  CaseAwarePath = <class 'pykotor.tools.path.CaseAwarePath'>
+  find_kotor_paths_from_default = <function find_kotor_paths_from_default at 0x7f6cf3d7a3b0>
+  PatchLog = <class 'pykotor.tslpatcher.logger.PatchLog'>
+  PatchLogger = <class 'pykotor.tslpatcher.logger.PatchLogger'>
+  ModInstaller = <class 'pykotor.tslpatcher.patcher.ModInstaller'>
+  ConfigReader = <class 'pykotor.tslpatcher.reader.ConfigReader'>
+  NamespaceReader = <class 'pykotor.tslpatcher.reader.NamespaceReader'>
+  ModUninstaller = <class 'pykotor.tslpatcher.uninstall.ModUninstaller'>
+  format_exception_with_variables = <function format_exception_with_variables at 0x7f6cf43bfeb0>
+  universal_simplify_exception = <function universal_simplify_exception at 0x7f6cf43bfc70>
+  striprtf = <function striprtf at 0x7f6d023acf70>
+  Path = <class 'utility.system.path.Path'>
+  ToolTip = <class 'utility.tkinter.tooltip.ToolTip'>
+  CURRENT_VERSION = (1, 5, 1)
+  VERSION_LABEL = 'v1.5.1'
+  ExitCode = <enum 'ExitCode'>
+  HoloPatcherError = <class '__main__.HoloPatcherError'>
+  parse_args = <function parse_args at 0x7f6d02d4e7a0>
+  App = <class '__main__.App'>
+  onAppCrash = <function onAppCrash at 0x7f6cf3ae3520>
+  is_frozen = <function is_frozen at 0x7f6cf3af53f0>
+  main = <function main at 0x7f6cf3af5480>
+
+Function 'main' at /tmp/_MEIpiOGr8/__main__.py:1348:
+
+Function '__init__' at /tmp/_MEIpiOGr8/__main__.py:163:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+  __class__ = <class '__main__.App'>
+
+Function 'handle_commandline' at /tmp/_MEIpiOGr8/__main__.py:375:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+  num_cmdline_actions = 1
+
+Function '_begin_oneshot' at /tmp/_MEIpiOGr8/__main__.py:391:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+
+Function 'begin_install_thread' at /tmp/_MEIpiOGr8/__main__.py:1071:
+  should_cancel_thread = <threading.Event object at 0x7f6cf3afd120>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7f6cf368c310>
+  ini_file_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade\option_3.ini)
+  namespace_mod_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f6cf3afd720>
+  self = <__main__.App object .>
+
+Function 'begin_install_thread' at /tmp/_MEIpiOGr8/__main__.py:1069:
+  should_cancel_thread = <threading.Event object at 0x7f6cf3afd120>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7f6cf368c310>
+  ini_file_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade\option_3.ini)
+  namespace_mod_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f6cf3afd720>
+  self = <__main__.App object .>
+
+Function '_execute_mod_install' at /tmp/_MEIpiOGr8/__main__.py:1150:
+  self = <__main__.App object .>
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f6cf3afd720>
+  should_cancel_thread = <threading.Event object at 0x7f6cf3afd120>
+
+Function 'config' at /tmp/_MEIpiOGr8/pykotor/tslpatcher/patcher.pyc:100:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f6cf3afd720>
+  ini_file_bytes = b';[K1] Republic Soldier\'s New Shade v1.1.1 - Option 3;\r\n\r\n;Patcher Setup;\r\n[Settings]\r\nFileExists=1\r\nWindowCaption=New Shade for JC\'s "Republic Soldier Uniform for PC" - Male and Female\r\nConfirmMessage=N/A\nRequired=pfbbl.mdl\r\nLogLevel=4\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=0\r\n\r\n;Indexing;\r\n[InstallList]\r\ninstall_folder0=Override\r\n\r\n;Override Install;\r\n[install_folder0]\r\nReplace0=PMBBL01.tpc\r...<truncated>
+  ini_text = ';[K1] Republic Soldier\'s New Shade v1.1.1 - Option 3;\r\n\r\n;Patcher Setup;\r\n[Settings]\r\nFileExists=1\r\nWindowCaption=New Shade for JC\'s "Republic Soldier Uniform for PC" - Male and Female\r\nConfirmMessage=N/A\nRequired=pfbbl.mdl\r\nLogLevel=4\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=0\r\n\r\n;Indexing;\r\n[InstallList]\r\ninstall_folder0=Override\r\n\r\n;Override Install;\r\n[install_folder0]\r\nReplace0=PMBBL01.tpc\r\...<truncated>
+  requiredfile_path = CaseAwarePath(\run\media\brunner56\mybook\steamlibrary\steamapps\common\swkotor\override\pfbbl.mdl)
+Assertion with Exception Trace: Exception ''str' object has no attribute 'info'' of type '<class 'AttributeError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "pykotor/tslpatcher/patcher.py", line 372, in install
+  File "pykotor/tslpatcher/mods/nss.py", line 118, in patch_resource
+  File "pykotor/resource/formats/ncs/ncs_auto.py", line 112, in compile_nss
+  File "pykotor/resource/formats/ncs/compiler/parser.py", line 75, in __init__
+  File "ply/yacc.py", line 3317, in yacc
+AttributeError: 'str' object has no attribute 'info'
+
+Stack Trace Variables:
+
+Function 'install' at /tmp/_MEIITsslR/pykotor/tslpatcher/patcher.pyc:372:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f6166084490>
+  should_cancel = <threading.Event object at 0x7f61664f90c0>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7f6166084c40>
+  temp_script_folder = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)
+  patches_list = [<pykotor.tslpatcher.mods.install.InstallFile object at 0x7f6166086440>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f6166086410>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f6166086470>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f61660864a0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f61660864d0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f6166086500>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f6166086110>, <pykoto...<truncated>
+  memory = PatcherMemory(memory_2da={}, memory_str={})
+  patch = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7f6166086680>
+  output_container_path = CaseAwarePath(\run\media\brunner56\mybook\steamlibrary\steamapps\common\swkotor\override)
+  exists = False
+  capsule = None
+  data_to_patch = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  patched_data = b'////////////////////////////////////////////////////////\r\n//\r\n//  NWScript\r\n//\r\n//  The list of actions and pre-defined constants.\r\n//\r\n//  (c) BioWare Corp, 1999\r\n//\r\n////////////////////////////////////////////////////////\r\n\r\n#define ENGINE_NUM_STRUCTURES   4\r\n#define ENGINE_STRUCTURE_0      effect\r\n#define ENGINE_STRUCTURE_1      event\r\n#define ENGINE_STRUCTURE_2      location\r\n#define ENGINE_STRUCTURE_3      talent\r\n\r\n// Constants\r\n\r\nint        NUM_INVENTORY_SLOTS  ...<truncated>
+  e = AttributeError("'str' object has no attribute 'info'")
+
+Function 'patch_resource' at /tmp/_MEIITsslR/pykotor/tslpatcher/mods/nss.pyc:118:
+  self = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7f6166086680>
+  nss_source = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  memory = PatcherMemory(memory_2da={}, memory_str={})
+  logger = <pykotor.tslpatcher.logger.PatchLogger object at 0x7f61664c3850>
+  game = <Game.K1: 1>
+  reader = <pykotor.common.stream.BinaryReader object at 0x7f61660f05e0>
+  nss_bytes = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  source = <pykotor.tslpatcher.mods.nss.MutableString object at 0x7f61660f0670>
+  temp_script_file = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir\kas22_attack.nss)
+  is_windows = False
+  nwnnsscomp_exists = True
+
+Function 'compile_nss' at /tmp/_MEIITsslR/pykotor/resource/formats/ncs/ncs_auto.pyc:112:
+  source = '\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsOb...<truncated>
+  game = <Game.K1: 1>
+  optimizers = [<pykotor.resource.formats.ncs.optimizers.RemoveNopOptimizer object at 0x7f61660f0a90>, <pykotor.resource.formats.ncs.optimizers.RemoveMoveSPEqualsZeroOptimizer object at 0x7f61660f0880>, <pykotor.resource.formats.ncs.optimizers.RemoveUnusedBlocksOptimizer object at 0x7f61660f0940>]
+  library_lookup = [CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function '__init__' at /tmp/_MEIITsslR/pykotor/resource/formats/ncs/compiler/parser.pyc:75:
+  self = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7f61660f0a00>
+  functions = [ScriptFunction(<DataType.INT: 'int'>, 'Random', [ScriptParam(<DataType.INT: 'int'>, 'nMaxInteger', None)], '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);', '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);'), ScriptFunction(<DataType.VOID: 'void'>, 'PrintString', [ScriptParam(<DataType.STRING: 'string'>, 'sString', None)], '// 1: Output sString to the log file.\r\nvoid PrintStr...<truncated>
+  constants = [ScriptConstant("DataType.INT", "NUM_INVENTORY_SLOTS", "18"), ScriptConstant("DataType.INT", "TRUE", "1"), ScriptConstant("DataType.INT", "FALSE", "0"), ScriptConstant("DataType.FLOAT", "DIRECTION_EAST", "0.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_NORTH", "90.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_WEST", "180.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_SOUTH", "270.0"), ScriptConstant("DataType.FLOAT", "PI", "3.141592"), ScriptConstant("DataType.INT", "ATTITUDE_NEUTRAL", "0"), ScriptC...<truncated>
+  library = {'k_inc_cheat': b'//:: k_inc_cheat\n/*\n    This will be localized area for all\n    Cheat Bot scripting.\n*/\n//:: Created By: Preston Watamaniuk\n//:: Copyright (c) 2002 Bioware Corp.\n#include "k_inc_debug"\n//Takes a PLANET_ Constant\nvoid CH_SetPlanetaryGlobal(int nPlanetConstant);\n//Makes the specified party member available to the PC\nvoid CH_SetPartyMemberAvailable(int nNPC);\n//::///////////////////////////////////////////////\n//:: Set Planet Local\n//:: Copyright (c) 2001 Bioware Corp.\n//::////...<truncated>
+  library_lookup = [CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function 'yacc' at /tmp/_MEIITsslR/ply/yacc.pyc:3317:
+  method = 'LALR'
+  debug = False
+  tabmodule = 'pykotor.resource.formats.ncs.compiler.parsetab'
+  start = None
+  check_recursion = True
+  optimize = False
+  write_tables = False
+  debugfile = 'parser.out'
+  outputdir = '/tmp/_MEIITsslR/pykotor/resource/formats/ncs/compiler'
+  debuglog = 'yacc_debuglog.txt'
+  errorlog = <ply.yacc.PlyLogger object at 0x7f61660f0d60>
+  picklefile = None
+  _items = [('__annotations__', {'tokens': 'list[str]', 'literals': 'list[str]'}), ('__class__', <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>), ('__delattr__', <method-wrapper '__delattr__' of NssParser object at 0x7f61660f0a00>), ('__dict__', {}), ('__dir__', <built-in method __dir__ of NssParser object at 0x7f61660f0a00>), ('__doc__', None), ('__eq__', <method-wrapper '__eq__' of NssParser object at 0x7f61660f0a00>), ('__format__', <built-in method __format__ of NssParser object at 0x7f61660f0a00...<truncated>
+  pdict = {'__annotations__': {'tokens': 'list[str]', 'literals': 'list[str]'}, '__class__': <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>, '__delattr__': <method-wrapper '__delattr__' of NssParser object at 0x7f61660f0a00>, '__dict__': {}, '__dir__': <built-in method __dir__ of NssParser object at 0x7f61660f0a00>, '__doc__': None, '__eq__': <method-wrapper '__eq__' of NssParser object at 0x7f61660f0a00>, '__format__': <built-in method __format__ of NssParser object at 0x7f61660f0a00>, '__ge__': <m...<truncated>
+  srcfile = '/tmp/_MEIITsslR/pykotor/resource/formats/ncs/compiler/parser.pyc'
+  pkg = 'pykotor.resource.formats.ncs.compiler'
+  pinfo = <ply.yacc.ParserReflect object at 0x7f61660f0cd0>
+  signature = "leftORleftANDleftBITWISE_ORleftBITWISE_XORleftBITWISE_ANDleftEQUALSNOT_EQUALSleftGREATER_THANLESS_THANGREATER_THAN_OR_EQUALSLESS_THAN_OR_EQUALSleftBITWISE_LEFTBITWISE_RIGHTleftADDMINUSleftMULTIPLYDIVIDEMODrightBITWISE_NOTNOTleftINCREMENTDECREMENTACTION_TYPE ADD ADDITION_ASSIGNMENT_OPERATOR AND BITWISE_AND BITWISE_LEFT BITWISE_NOT BITWISE_OR BITWISE_RIGHT BITWISE_XOR BREAK_CONTROL CASE_CONTROL CONTINUE_CONTROL DECREMENT DEFAULT_CONTROL DIVIDE DIVISION_ASSIGNMENT_OPERATOR DO_CONTROL EFFECT_TYPE ELSE_CONTROL ...<truncated>
+  lr = <ply.yacc.LRTable object at 0x7f61660f0df0>
+  module = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7f61660f0a00>
+Assertion with Exception Trace: Exception 'cannot install - missing a required mod' of type '<class 'ImportError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1353, in <module>
+  File "__main__.py", line 1348, in main
+  File "__main__.py", line 163, in __init__
+  File "__main__.py", line 375, in handle_commandline
+  File "__main__.py", line 391, in _begin_oneshot
+  File "__main__.py", line 1071, in begin_install_thread
+  File "__main__.py", line 1069, in begin_install_thread
+  File "__main__.py", line 1150, in _execute_mod_install
+  File "pykotor/tslpatcher/patcher.py", line 100, in config
+ImportError: cannot install - missing a required mod
+
+Stack Trace Variables:
+
+Function '<module>' at /tmp/_MEIWoZTdX/__main__.py:1353:
+  __annotations__ = {'CURRENT_VERSION': 'tuple[int, ...]'}
+  _pyi_main_co = <code object <module> at 0x7f70be0dd840, file "__main__.py", line 1>
+  sys = <module 'sys' (built-in)>
+  pyimod02_importers = <module 'pyimod02_importers' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod02_importers.py'>
+  os = <module 'os' from '/tmp/_MEIWoZTdX/base_library.zip/os.pyc'>
+  VIRTENV = 'VIRTUAL_ENV'
+  python_path = ['/tmp/_MEIWoZTdX/base_library.zip', '/tmp/_MEIWoZTdX/lib-dynload', '/tmp/_MEIWoZTdX']
+  pth = '/tmp/_MEIWoZTdX'
+  encodings = <module 'encodings' from '/tmp/_MEIWoZTdX/base_library.zip/encodings/__init__.pyc'>
+  pyimod03_ctypes = <module 'pyimod03_ctypes' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod03_ctypes.py'>
+  entry = '/tmp/_MEIWoZTdX/base_library.zip'
+  annotations = _Feature((3, 7, 0, 'beta', 1), (3, 11, 0, 'alpha', 0), 16777216)
+  base64 = <module 'base64' from '/tmp/_MEIWoZTdX/base64.pyc'>
+  contextlib = <module 'contextlib' from '/tmp/_MEIWoZTdX/contextlib.pyc'>
+  ctypes = <module 'ctypes' from '/tmp/_MEIWoZTdX/ctypes/__init__.pyc'>
+  inspect = <module 'inspect' from '/tmp/_MEIWoZTdX/inspect.pyc'>
+  io = <module 'io' from '/tmp/_MEIWoZTdX/base_library.zip/io.pyc'>
+  json = <module 'json' from '/tmp/_MEIWoZTdX/json/__init__.pyc'>
+  pathlib = <module 'pathlib' from '/tmp/_MEIWoZTdX/pathlib.pyc'>
+  subprocess = <module 'subprocess' from '/tmp/_MEIWoZTdX/subprocess.pyc'>
+  tempfile = <module 'tempfile' from '/tmp/_MEIWoZTdX/tempfile.pyc'>
+  time = <module 'time' (built-in)>
+  tk = <module 'tkinter' from '/tmp/_MEIWoZTdX/tkinter/__init__.pyc'>
+  traceback = <module 'traceback' from '/tmp/_MEIWoZTdX/base_library.zip/traceback.pyc'>
+  webbrowser = <module 'webbrowser' from '/tmp/_MEIWoZTdX/webbrowser.pyc'>
+  ArgumentParser = <class 'argparse.ArgumentParser'>
+  Namespace = <class 'argparse.Namespace'>
+  datetime = <class 'datetime.datetime'>
+  timedelta = <class 'datetime.timedelta'>
+  timezone = <class 'datetime.timezone'>
+  IntEnum = <enum 'IntEnum'>
+  Event = <class 'threading.Event'>
+  Thread = <class 'threading.Thread'>
+  filedialog = <module 'tkinter.filedialog' from '/tmp/_MEIWoZTdX/tkinter/filedialog.pyc'>
+  messagebox = <module 'tkinter.messagebox' from '/tmp/_MEIWoZTdX/tkinter/messagebox.pyc'>
+  ttk = <module 'tkinter.ttk' from '/tmp/_MEIWoZTdX/tkinter/ttk.pyc'>
+  tkfont = <module 'tkinter.font' from '/tmp/_MEIWoZTdX/tkinter/font.pyc'>
+  TYPE_CHECKING = False
+  Callable = typing.Callable
+  NoReturn = typing.NoReturn
+  Game = <enum 'Game'>
+  BinaryReader = <class 'pykotor.common.stream.BinaryReader'>
+  ResourceIdentifier = <class 'pykotor.extract.file.ResourceIdentifier'>
+  decode_bytes_with_fallbacks = <function decode_bytes_with_fallbacks at 0x7f70af7eeef0>
+  CaseAwarePath = <class 'pykotor.tools.path.CaseAwarePath'>
+  find_kotor_paths_from_default = <function find_kotor_paths_from_default at 0x7f70af1123b0>
+  PatchLog = <class 'pykotor.tslpatcher.logger.PatchLog'>
+  PatchLogger = <class 'pykotor.tslpatcher.logger.PatchLogger'>
+  ModInstaller = <class 'pykotor.tslpatcher.patcher.ModInstaller'>
+  ConfigReader = <class 'pykotor.tslpatcher.reader.ConfigReader'>
+  NamespaceReader = <class 'pykotor.tslpatcher.reader.NamespaceReader'>
+  ModUninstaller = <class 'pykotor.tslpatcher.uninstall.ModUninstaller'>
+  format_exception_with_variables = <function format_exception_with_variables at 0x7f70af6c3eb0>
+  universal_simplify_exception = <function universal_simplify_exception at 0x7f70af6c3c70>
+  striprtf = <function striprtf at 0x7f70af7ccf70>
+  Path = <class 'utility.system.path.Path'>
+  ToolTip = <class 'utility.tkinter.tooltip.ToolTip'>
+  CURRENT_VERSION = (1, 5, 1)
+  VERSION_LABEL = 'v1.5.1'
+  ExitCode = <enum 'ExitCode'>
+  HoloPatcherError = <class '__main__.HoloPatcherError'>
+  parse_args = <function parse_args at 0x7f70be0d27a0>
+  App = <class '__main__.App'>
+  onAppCrash = <function onAppCrash at 0x7f70aee87520>
+  is_frozen = <function is_frozen at 0x7f70aee993f0>
+  main = <function main at 0x7f70aee99480>
+
+Function 'main' at /tmp/_MEIWoZTdX/__main__.py:1348:
+
+Function '__init__' at /tmp/_MEIWoZTdX/__main__.py:163:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+  __class__ = <class '__main__.App'>
+
+Function 'handle_commandline' at /tmp/_MEIWoZTdX/__main__.py:375:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+  num_cmdline_actions = 1
+
+Function '_begin_oneshot' at /tmp/_MEIWoZTdX/__main__.py:391:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+
+Function 'begin_install_thread' at /tmp/_MEIWoZTdX/__main__.py:1071:
+  should_cancel_thread = <threading.Event object at 0x7f70aeea1120>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7f70aea20310>
+  ini_file_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade\option_3.ini)
+  namespace_mod_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f70aeea1720>
+  self = <__main__.App object .>
+
+Function 'begin_install_thread' at /tmp/_MEIWoZTdX/__main__.py:1069:
+  should_cancel_thread = <threading.Event object at 0x7f70aeea1120>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7f70aea20310>
+  ini_file_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade\option_3.ini)
+  namespace_mod_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f70aeea1720>
+  self = <__main__.App object .>
+
+Function '_execute_mod_install' at /tmp/_MEIWoZTdX/__main__.py:1150:
+  self = <__main__.App object .>
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f70aeea1720>
+  should_cancel_thread = <threading.Event object at 0x7f70aeea1120>
+
+Function 'config' at /tmp/_MEIWoZTdX/pykotor/tslpatcher/patcher.pyc:100:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f70aeea1720>
+  ini_file_bytes = b';[K1] Republic Soldier\'s New Shade v1.1.1 - Option 3;\r\n\r\n;Patcher Setup;\r\n[Settings]\r\nFileExists=1\r\nWindowCaption=New Shade for JC\'s "Republic Soldier Uniform for PC" - Male and Female\r\nConfirmMessage=N/A\nRequired=pfbbl.mdl\r\nLogLevel=4\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=0\r\n\r\n;Indexing;\r\n[InstallList]\r\ninstall_folder0=Override\r\n\r\n;Override Install;\r\n[install_folder0]\r\nReplace0=PMBBL01.tpc\r...<truncated>
+  ini_text = ';[K1] Republic Soldier\'s New Shade v1.1.1 - Option 3;\r\n\r\n;Patcher Setup;\r\n[Settings]\r\nFileExists=1\r\nWindowCaption=New Shade for JC\'s "Republic Soldier Uniform for PC" - Male and Female\r\nConfirmMessage=N/A\nRequired=pfbbl.mdl\r\nLogLevel=4\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=0\r\n\r\n;Indexing;\r\n[InstallList]\r\ninstall_folder0=Override\r\n\r\n;Override Install;\r\n[install_folder0]\r\nReplace0=PMBBL01.tpc\r\...<truncated>
+  requiredfile_path = CaseAwarePath(\run\media\brunner56\mybook\steamlibrary\steamapps\common\swkotor\override\pfbbl.mdl)
+Assertion with Exception Trace: Exception ''str' object has no attribute 'info'' of type '<class 'AttributeError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "pykotor/tslpatcher/patcher.py", line 372, in install
+  File "pykotor/tslpatcher/mods/nss.py", line 118, in patch_resource
+  File "pykotor/resource/formats/ncs/ncs_auto.py", line 112, in compile_nss
+  File "pykotor/resource/formats/ncs/compiler/parser.py", line 75, in __init__
+  File "ply/yacc.py", line 3317, in yacc
+AttributeError: 'str' object has no attribute 'info'
+
+Stack Trace Variables:
+
+Function 'install' at /tmp/_MEISNqhlJ/pykotor/tslpatcher/patcher.pyc:372:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f5b56264430>
+  should_cancel = <threading.Event object at 0x7f5b56701060>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7f5b56264be0>
+  temp_script_folder = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)
+  patches_list = [<pykotor.tslpatcher.mods.install.InstallFile object at 0x7f5b562663e0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f5b562663b0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f5b56266410>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f5b56266440>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f5b56266470>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f5b562664a0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7f5b562660b0>, <pykoto...<truncated>
+  memory = PatcherMemory(memory_2da={}, memory_str={})
+  patch = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7f5b56266620>
+  output_container_path = CaseAwarePath(\run\media\brunner56\mybook\steamlibrary\steamapps\common\swkotor\override)
+  exists = False
+  capsule = None
+  data_to_patch = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  patched_data = b'////////////////////////////////////////////////////////\r\n//\r\n//  NWScript\r\n//\r\n//  The list of actions and pre-defined constants.\r\n//\r\n//  (c) BioWare Corp, 1999\r\n//\r\n////////////////////////////////////////////////////////\r\n\r\n#define ENGINE_NUM_STRUCTURES   4\r\n#define ENGINE_STRUCTURE_0      effect\r\n#define ENGINE_STRUCTURE_1      event\r\n#define ENGINE_STRUCTURE_2      location\r\n#define ENGINE_STRUCTURE_3      talent\r\n\r\n// Constants\r\n\r\nint        NUM_INVENTORY_SLOTS  ...<truncated>
+  e = AttributeError("'str' object has no attribute 'info'")
+
+Function 'patch_resource' at /tmp/_MEISNqhlJ/pykotor/tslpatcher/mods/nss.pyc:118:
+  self = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7f5b56266620>
+  nss_source = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  memory = PatcherMemory(memory_2da={}, memory_str={})
+  logger = <pykotor.tslpatcher.logger.PatchLogger object at 0x7f5b566cb7f0>
+  game = <Game.K1: 1>
+  reader = <pykotor.common.stream.BinaryReader object at 0x7f5b56288580>
+  nss_bytes = b'\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsO...<truncated>
+  source = <pykotor.tslpatcher.mods.nss.MutableString object at 0x7f5b56288610>
+  temp_script_file = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir\kas22_attack.nss)
+  is_windows = False
+  nwnnsscomp_exists = True
+
+Function 'compile_nss' at /tmp/_MEISNqhlJ/pykotor/resource/formats/ncs/ncs_auto.pyc:112:
+  source = '\r\n#include "k_inc_utility"\r\n\r\nvoid main()\r\n{\r\n\tUT_DarkSml(GetFirstPC());\r\n\r\n\tChangeToStandardFaction(OBJECT_SELF, STANDARD_FACTION_HOSTILE_1);\r\n\tAssignCommand(OBJECT_SELF, ActionEquipItem(CreateItemOnObject("g_w_blstrrfl001", OBJECT_SELF, 1), INVENTORY_SLOT_RIGHTWEAPON, TRUE));\t\r\n\tAssignCommand(OBJECT_SELF, ActionAttack(GetFirstPC(), FALSE));\r\n\r\n\tobject oNearby = GetFirstObjectInShape(SHAPE_SPHERE, 30.0, GetLocation(OBJECT_SELF), FALSE, OBJECT_TYPE_CREATURE );\r\n\twhile(GetIsOb...<truncated>
+  game = <Game.K1: 1>
+  optimizers = [<pykotor.resource.formats.ncs.optimizers.RemoveNopOptimizer object at 0x7f5b56288a30>, <pykotor.resource.formats.ncs.optimizers.RemoveMoveSPEqualsZeroOptimizer object at 0x7f5b56288820>, <pykotor.resource.formats.ncs.optimizers.RemoveUnusedBlocksOptimizer object at 0x7f5b562888e0>]
+  library_lookup = [CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function '__init__' at /tmp/_MEISNqhlJ/pykotor/resource/formats/ncs/compiler/parser.pyc:75:
+  self = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7f5b562889a0>
+  functions = [ScriptFunction(<DataType.INT: 'int'>, 'Random', [ScriptParam(<DataType.INT: 'int'>, 'nMaxInteger', None)], '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);', '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);'), ScriptFunction(<DataType.VOID: 'void'>, 'PrintString', [ScriptParam(<DataType.STRING: 'string'>, 'sString', None)], '// 1: Output sString to the log file.\r\nvoid PrintStr...<truncated>
+  constants = [ScriptConstant("DataType.INT", "NUM_INVENTORY_SLOTS", "18"), ScriptConstant("DataType.INT", "TRUE", "1"), ScriptConstant("DataType.INT", "FALSE", "0"), ScriptConstant("DataType.FLOAT", "DIRECTION_EAST", "0.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_NORTH", "90.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_WEST", "180.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_SOUTH", "270.0"), ScriptConstant("DataType.FLOAT", "PI", "3.141592"), ScriptConstant("DataType.INT", "ATTITUDE_NEUTRAL", "0"), ScriptC...<truncated>
+  library = {'k_inc_cheat': b'//:: k_inc_cheat\n/*\n    This will be localized area for all\n    Cheat Bot scripting.\n*/\n//:: Created By: Preston Watamaniuk\n//:: Copyright (c) 2002 Bioware Corp.\n#include "k_inc_debug"\n//Takes a PLANET_ Constant\nvoid CH_SetPlanetaryGlobal(int nPlanetConstant);\n//Makes the specified party member available to the PC\nvoid CH_SetPartyMemberAvailable(int nNPC);\n//::///////////////////////////////////////////////\n//:: Set Planet Local\n//:: Copyright (c) 2001 Bioware Corp.\n//::////...<truncated>
+  library_lookup = [CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\killczerkajerk\tslpatchdata\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function 'yacc' at /tmp/_MEISNqhlJ/ply/yacc.pyc:3317:
+  method = 'LALR'
+  debug = False
+  tabmodule = 'pykotor.resource.formats.ncs.compiler.parsetab'
+  start = None
+  check_recursion = True
+  optimize = False
+  write_tables = False
+  debugfile = 'parser.out'
+  outputdir = '/tmp/_MEISNqhlJ/pykotor/resource/formats/ncs/compiler'
+  debuglog = 'yacc_debuglog.txt'
+  errorlog = <ply.yacc.PlyLogger object at 0x7f5b56288d00>
+  picklefile = None
+  _items = [('__annotations__', {'tokens': 'list[str]', 'literals': 'list[str]'}), ('__class__', <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>), ('__delattr__', <method-wrapper '__delattr__' of NssParser object at 0x7f5b562889a0>), ('__dict__', {}), ('__dir__', <built-in method __dir__ of NssParser object at 0x7f5b562889a0>), ('__doc__', None), ('__eq__', <method-wrapper '__eq__' of NssParser object at 0x7f5b562889a0>), ('__format__', <built-in method __format__ of NssParser object at 0x7f5b562889a0...<truncated>
+  pdict = {'__annotations__': {'tokens': 'list[str]', 'literals': 'list[str]'}, '__class__': <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>, '__delattr__': <method-wrapper '__delattr__' of NssParser object at 0x7f5b562889a0>, '__dict__': {}, '__dir__': <built-in method __dir__ of NssParser object at 0x7f5b562889a0>, '__doc__': None, '__eq__': <method-wrapper '__eq__' of NssParser object at 0x7f5b562889a0>, '__format__': <built-in method __format__ of NssParser object at 0x7f5b562889a0>, '__ge__': <m...<truncated>
+  srcfile = '/tmp/_MEISNqhlJ/pykotor/resource/formats/ncs/compiler/parser.pyc'
+  pkg = 'pykotor.resource.formats.ncs.compiler'
+  pinfo = <ply.yacc.ParserReflect object at 0x7f5b56288c70>
+  signature = "leftORleftANDleftBITWISE_ORleftBITWISE_XORleftBITWISE_ANDleftEQUALSNOT_EQUALSleftGREATER_THANLESS_THANGREATER_THAN_OR_EQUALSLESS_THAN_OR_EQUALSleftBITWISE_LEFTBITWISE_RIGHTleftADDMINUSleftMULTIPLYDIVIDEMODrightBITWISE_NOTNOTleftINCREMENTDECREMENTACTION_TYPE ADD ADDITION_ASSIGNMENT_OPERATOR AND BITWISE_AND BITWISE_LEFT BITWISE_NOT BITWISE_OR BITWISE_RIGHT BITWISE_XOR BREAK_CONTROL CASE_CONTROL CONTINUE_CONTROL DECREMENT DEFAULT_CONTROL DIVIDE DIVISION_ASSIGNMENT_OPERATOR DO_CONTROL EFFECT_TYPE ELSE_CONTROL ...<truncated>
+  lr = <ply.yacc.LRTable object at 0x7f5b56288d90>
+  module = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7f5b562889a0>
+Assertion with Exception Trace: Exception 'cannot install - missing a required mod' of type '<class 'ImportError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1353, in <module>
+  File "__main__.py", line 1348, in main
+  File "__main__.py", line 163, in __init__
+  File "__main__.py", line 375, in handle_commandline
+  File "__main__.py", line 391, in _begin_oneshot
+  File "__main__.py", line 1071, in begin_install_thread
+  File "__main__.py", line 1069, in begin_install_thread
+  File "__main__.py", line 1150, in _execute_mod_install
+  File "pykotor/tslpatcher/patcher.py", line 100, in config
+ImportError: cannot install - missing a required mod
+
+Stack Trace Variables:
+
+Function '<module>' at /tmp/_MEIqDGn0w/__main__.py:1353:
+  __annotations__ = {'CURRENT_VERSION': 'tuple[int, ...]'}
+  _pyi_main_co = <code object <module> at 0x7ff74d305840, file "__main__.py", line 1>
+  sys = <module 'sys' (built-in)>
+  pyimod02_importers = <module 'pyimod02_importers' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod02_importers.py'>
+  os = <module 'os' from '/tmp/_MEIqDGn0w/base_library.zip/os.pyc'>
+  VIRTENV = 'VIRTUAL_ENV'
+  python_path = ['/tmp/_MEIqDGn0w/base_library.zip', '/tmp/_MEIqDGn0w/lib-dynload', '/tmp/_MEIqDGn0w']
+  pth = '/tmp/_MEIqDGn0w'
+  encodings = <module 'encodings' from '/tmp/_MEIqDGn0w/base_library.zip/encodings/__init__.pyc'>
+  pyimod03_ctypes = <module 'pyimod03_ctypes' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod03_ctypes.py'>
+  entry = '/tmp/_MEIqDGn0w/base_library.zip'
+  annotations = _Feature((3, 7, 0, 'beta', 1), (3, 11, 0, 'alpha', 0), 16777216)
+  base64 = <module 'base64' from '/tmp/_MEIqDGn0w/base64.pyc'>
+  contextlib = <module 'contextlib' from '/tmp/_MEIqDGn0w/contextlib.pyc'>
+  ctypes = <module 'ctypes' from '/tmp/_MEIqDGn0w/ctypes/__init__.pyc'>
+  inspect = <module 'inspect' from '/tmp/_MEIqDGn0w/inspect.pyc'>
+  io = <module 'io' from '/tmp/_MEIqDGn0w/base_library.zip/io.pyc'>
+  json = <module 'json' from '/tmp/_MEIqDGn0w/json/__init__.pyc'>
+  pathlib = <module 'pathlib' from '/tmp/_MEIqDGn0w/pathlib.pyc'>
+  subprocess = <module 'subprocess' from '/tmp/_MEIqDGn0w/subprocess.pyc'>
+  tempfile = <module 'tempfile' from '/tmp/_MEIqDGn0w/tempfile.pyc'>
+  time = <module 'time' (built-in)>
+  tk = <module 'tkinter' from '/tmp/_MEIqDGn0w/tkinter/__init__.pyc'>
+  traceback = <module 'traceback' from '/tmp/_MEIqDGn0w/base_library.zip/traceback.pyc'>
+  webbrowser = <module 'webbrowser' from '/tmp/_MEIqDGn0w/webbrowser.pyc'>
+  ArgumentParser = <class 'argparse.ArgumentParser'>
+  Namespace = <class 'argparse.Namespace'>
+  datetime = <class 'datetime.datetime'>
+  timedelta = <class 'datetime.timedelta'>
+  timezone = <class 'datetime.timezone'>
+  IntEnum = <enum 'IntEnum'>
+  Event = <class 'threading.Event'>
+  Thread = <class 'threading.Thread'>
+  filedialog = <module 'tkinter.filedialog' from '/tmp/_MEIqDGn0w/tkinter/filedialog.pyc'>
+  messagebox = <module 'tkinter.messagebox' from '/tmp/_MEIqDGn0w/tkinter/messagebox.pyc'>
+  ttk = <module 'tkinter.ttk' from '/tmp/_MEIqDGn0w/tkinter/ttk.pyc'>
+  tkfont = <module 'tkinter.font' from '/tmp/_MEIqDGn0w/tkinter/font.pyc'>
+  TYPE_CHECKING = False
+  Callable = typing.Callable
+  NoReturn = typing.NoReturn
+  Game = <enum 'Game'>
+  BinaryReader = <class 'pykotor.common.stream.BinaryReader'>
+  ResourceIdentifier = <class 'pykotor.extract.file.ResourceIdentifier'>
+  decode_bytes_with_fallbacks = <function decode_bytes_with_fallbacks at 0x7ff73e9f2ef0>
+  CaseAwarePath = <class 'pykotor.tools.path.CaseAwarePath'>
+  find_kotor_paths_from_default = <function find_kotor_paths_from_default at 0x7ff73e3163b0>
+  PatchLog = <class 'pykotor.tslpatcher.logger.PatchLog'>
+  PatchLogger = <class 'pykotor.tslpatcher.logger.PatchLogger'>
+  ModInstaller = <class 'pykotor.tslpatcher.patcher.ModInstaller'>
+  ConfigReader = <class 'pykotor.tslpatcher.reader.ConfigReader'>
+  NamespaceReader = <class 'pykotor.tslpatcher.reader.NamespaceReader'>
+  ModUninstaller = <class 'pykotor.tslpatcher.uninstall.ModUninstaller'>
+  format_exception_with_variables = <function format_exception_with_variables at 0x7ff73e8c7eb0>
+  universal_simplify_exception = <function universal_simplify_exception at 0x7ff73e8c7c70>
+  striprtf = <function striprtf at 0x7ff73e9d0f70>
+  Path = <class 'utility.system.path.Path'>
+  ToolTip = <class 'utility.tkinter.tooltip.ToolTip'>
+  CURRENT_VERSION = (1, 5, 1)
+  VERSION_LABEL = 'v1.5.1'
+  ExitCode = <enum 'ExitCode'>
+  HoloPatcherError = <class '__main__.HoloPatcherError'>
+  parse_args = <function parse_args at 0x7ff74d2fa7a0>
+  App = <class '__main__.App'>
+  onAppCrash = <function onAppCrash at 0x7ff73e08b520>
+  is_frozen = <function is_frozen at 0x7ff73e09d3f0>
+  main = <function main at 0x7ff73e09d480>
+
+Function 'main' at /tmp/_MEIqDGn0w/__main__.py:1348:
+
+Function '__init__' at /tmp/_MEIqDGn0w/__main__.py:163:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+  __class__ = <class '__main__.App'>
+
+Function 'handle_commandline' at /tmp/_MEIqDGn0w/__main__.py:375:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+  num_cmdline_actions = 1
+
+Function '_begin_oneshot' at /tmp/_MEIqDGn0w/__main__.py:391:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor', tslpatchdata="/run/media/brunner56/MyBook/Workspaces/ModSync/tmp/mod_downloads/[K1]_Republic_Soldier's_New_Shade_v1.1.1/[K1]_Republic_Soldier's_New_Shade_v1.1.1", namespace_option_index=3, console=False, uninstall=False, install=True, validate=False)
+
+Function 'begin_install_thread' at /tmp/_MEIqDGn0w/__main__.py:1071:
+  should_cancel_thread = <threading.Event object at 0x7ff73e0a50c0>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7ff73dcdc2b0>
+  ini_file_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade\option_3.ini)
+  namespace_mod_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7ff73e0a56c0>
+  self = <__main__.App object .>
+
+Function 'begin_install_thread' at /tmp/_MEIqDGn0w/__main__.py:1069:
+  should_cancel_thread = <threading.Event object at 0x7ff73e0a50c0>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7ff73dcdc2b0>
+  ini_file_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade\option_3.ini)
+  namespace_mod_path = CaseAwarePath(\run\media\brunner56\mybook\workspaces\modsync\tmp\mod_downloads\[k1]_republic_soldier's_new_shade_v1.1.1\[k1]_republic_soldier's_new_shade_v1.1.1\tslpatchdata\new_shade)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7ff73e0a56c0>
+  self = <__main__.App object .>
+
+Function '_execute_mod_install' at /tmp/_MEIqDGn0w/__main__.py:1150:
+  self = <__main__.App object .>
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7ff73e0a56c0>
+  should_cancel_thread = <threading.Event object at 0x7ff73e0a50c0>
+
+Function 'config' at /tmp/_MEIqDGn0w/pykotor/tslpatcher/patcher.pyc:100:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7ff73e0a56c0>
+  ini_file_bytes = b';[K1] Republic Soldier\'s New Shade v1.1.1 - Option 3;\r\n\r\n;Patcher Setup;\r\n[Settings]\r\nFileExists=1\r\nWindowCaption=New Shade for JC\'s "Republic Soldier Uniform for PC" - Male and Female\r\nConfirmMessage=N/A\nRequired=pfbbl.mdl\r\nLogLevel=4\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=0\r\n\r\n;Indexing;\r\n[InstallList]\r\ninstall_folder0=Override\r\n\r\n;Override Install;\r\n[install_folder0]\r\nReplace0=PMBBL01.tpc\r...<truncated>
+  ini_text = ';[K1] Republic Soldier\'s New Shade v1.1.1 - Option 3;\r\n\r\n;Patcher Setup;\r\n[Settings]\r\nFileExists=1\r\nWindowCaption=New Shade for JC\'s "Republic Soldier Uniform for PC" - Male and Female\r\nConfirmMessage=N/A\nRequired=pfbbl.mdl\r\nLogLevel=4\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=0\r\n\r\n;Indexing;\r\n[InstallList]\r\ninstall_folder0=Override\r\n\r\n;Override Install;\r\n[install_folder0]\r\nReplace0=PMBBL01.tpc\r\...<truncated>
+  requiredfile_path = CaseAwarePath(\run\media\brunner56\mybook\steamlibrary\steamapps\common\swkotor\override\pfbbl.mdl)

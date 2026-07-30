@@ -1143,25 +1143,35 @@ Exception Type: {ex.GetType().FullName}";
                     {
                         await Logger.LogAsync($"Install of '{component.Name}' succeeded.").ConfigureAwait(false);
 
-                        // Create checkpoint after successful installation
-                        try
+                        // Create checkpoint after successful installation (skipped entirely when
+                        // --no-checkpoint disabled the git-based checkpoint system, since
+                        // coordinator.CheckpointService is never created in that case).
+                        if (!MainConfig.NoCheckpoint && coordinator.CheckpointService != null)
                         {
-                            CheckpointInfo checkpoint = await coordinator.CheckpointService.CreateCheckpointAsync(
-                                component,
-                                index + 1,
-                                total,
-                                cancellationToken
-                            ).ConfigureAwait(false);
+                            try
+                            {
+                                CheckpointInfo checkpoint = await coordinator.CheckpointService.CreateCheckpointAsync(
+                                    component,
+                                    index + 1,
+                                    total,
+                                    cancellationToken
+                                ).ConfigureAwait(false);
 
-                            coordinator.CheckpointManager.State.ComponentCheckpoints[component.Guid] = checkpoint.CommitId;
-                            await Logger.LogAsync($"✓ Checkpoint created: {checkpoint.ShortCommitId}").ConfigureAwait(false);
+                                coordinator.CheckpointManager.State.ComponentCheckpoints[component.Guid] = checkpoint.CommitId;
+                                await Logger.LogAsync($"✓ Checkpoint created: {checkpoint.ShortCommitId}").ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                await Logger.LogWarningAsync($"Failed to create checkpoint for '{component.Name}': {ex.Message}").ConfigureAwait(false);
+                            }
                         }
-                        catch (Exception ex)
+
+                        if (!MainConfig.NoCheckpoint)
                         {
-                            await Logger.LogWarningAsync($"Failed to create checkpoint for '{component.Name}': {ex.Message}").ConfigureAwait(false);
+                            // PromoteSnapshotAsync does a full recursive copy + zip of the whole
+                            // game directory — skip entirely when checkpointing is disabled.
+                            await coordinator.CheckpointManager.PromoteSnapshotAsync(destination, cancellationToken).ConfigureAwait(false);
                         }
-
-                        await coordinator.CheckpointManager.PromoteSnapshotAsync(destination, cancellationToken).ConfigureAwait(false);
                     }
                     else if (exitCode == ModComponent.InstallExitCode.MissingSourceFiles && MainConfig.ContinueInstallOnMissingSources)
                     {

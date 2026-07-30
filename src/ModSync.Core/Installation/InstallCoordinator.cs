@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 
 using JetBrains.Annotations;
 
+using ModSync.Core;
 using ModSync.Core.Services.Checkpoints;
 
 namespace ModSync.Core.Installation
@@ -34,9 +35,24 @@ namespace ModSync.Core.Installation
         public async Task<ResumeResult> InitializeAsync([NotNull] IList<ModComponent> components, [NotNull] DirectoryInfo destinationPath, CancellationToken cancellationToken)
         {
             await CheckpointManager.InitializeAsync(components, destinationPath).ConfigureAwait(false);
-            await CheckpointManager.EnsureSnapshotAsync(destinationPath, cancellationToken).ConfigureAwait(false);
+            if (!MainConfig.NoCheckpoint)
+            {
+                // EnsureSnapshotAsync does a full recursive copy + zip of the whole game
+                // directory — skip it entirely when checkpointing is disabled.
+                await CheckpointManager.EnsureSnapshotAsync(destinationPath, cancellationToken).ConfigureAwait(false);
+            }
 
             ReleaseCheckpointService();
+
+            if (MainConfig.NoCheckpoint)
+            {
+                // Checkpoint system explicitly disabled (--no-checkpoint): skip the git-based
+                // baseline snapshot entirely (it re-syncs the whole game directory and is
+                // prohibitively slow on large installs / slow storage). No rollback capability
+                // is available for this session.
+                List<ModComponent> orderedNoCheckpoint = GetOrderedInstallList(components);
+                return new ResumeResult(CheckpointManager.State.SessionId, orderedNoCheckpoint);
+            }
 
             // Initialize Git-based checkpoint system
             CheckpointService = new Services.GitCheckpointService(destinationPath.FullName);

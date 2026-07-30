@@ -3150,6 +3150,11 @@ componentName: null,
 
                 s_config.continueInstallOnMissingSources = opts.ContinueOnMissingSources;
                 s_config.continueInstallOnModFailure = opts.ContinueOnModFailure;
+                s_config.noCheckpoint = opts.NoCheckpoint;
+                if (opts.NoCheckpoint)
+                {
+                    await Logger.LogAsync("Checkpoint system disabled via --no-checkpoint.").ConfigureAwait(false);
+                }
 
                 if (!string.IsNullOrWhiteSpace(opts.NexusApiKey))
                 {

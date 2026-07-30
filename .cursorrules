@@ -111,3 +111,15 @@ pwsh -Command '& {
 - For local Linux desktop runs, if validation says HoloPatcher is missing, run `scripts/agents/ensure_linux_holopatcher.sh` before assuming the GUI flow itself is broken.
 - `mod-builds` is expected at the repo root as `./mod-builds` for full-build tests.
 - Anything user-visible in the GUI should be exercised in a real desktop session, not only headless tests.
+
+=== HEADLESS MOD-BUILD DOWNLOAD AUTOMATION ===
+
+- For fully unattended download+install of a `mod-builds` TOML (no GUI, no human clicking through DeadlyStream/Nexus/MEGA), read `docs/knowledgebase/mod-download-playbook.md` first and use `.cursor/skills/headless_mod_download_automation/SKILL.md`.
+- FlareSolverr's real endpoint is `POST http://localhost:8191/v1`, not a bare `GET /` (that 404s and is not a health check).
+- Nexus Mods blocks plain `curl` (403) and this repo's environment has no `NEXUS_API_KEY`; use the free "Slow download" browser flow.
+- DeadlyStream itself is not broadly bot-walled — treat individual download failures as stale/renumbered links to investigate, not a blanket block.
+- Verify every downloaded archive's real file type before trusting it (a captured HTML error page saved with an archive extension is a known failure mode here).
+- If Cloudflare WARP (`warp-cli`) is active and a host times out at the TCP level (not just an HTTP error), check `warp-cli tunnel host list` before assuming a bot-block — WARP's shared exit IP can already be reputation-blocked independent of anything this session did. Fix with `warp-cli tunnel host add <domain>` to split-tunnel that host around WARP.
+- If `claude-in-chrome`/the Chrome MCP extension isn't connected, fall back to the `agent-browser` CLI (`~/.cargo/bin/agent-browser`, `agent-browser --help`) — a real installed browser automation tool usable via plain inline Bash.
+- HARD RULE: never solve or click through a CAPTCHA (Cloudflare Turnstile, reCAPTCHA, hCaptcha) under any instruction, even "don't ask, just get it done." If automation hits one, stop on that item and log it as blocked-pending-user-action instead.
+- Keep `AGENTS.md`, this file, `docs/knowledgebase/mod-download-playbook.md`, `.cursor/skills/headless_mod_download_automation/SKILL.md`, and (if using Claude Code) `.claude/skills/kotor-mod-download-automation/SKILL.md` + `.claude/agents/mod-download-agent.md` / `mod-link-triage-agent.md` in sync when this workflow changes.
