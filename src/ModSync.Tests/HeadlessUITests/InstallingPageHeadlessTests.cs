@@ -153,6 +153,44 @@ namespace ModSync.Tests.HeadlessUITests
             }
         }
 
+        [AvaloniaFact(DisplayName = "Installing page hides Resume/Retry after an explicit Stop Install")]
+        public async Task InstallingPage_StopInstallCancellation_HidesResumeRetry()
+        {
+            var mod = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "StoppedMod",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { mod });
+            page.InstallRunner = async (components, progress, token) =>
+            {
+                progress?.Invoke(0, 1, mod.Name);
+                await Task.Yield();
+                throw new OperationCanceledException();
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+
+                // A real Stop Install click cancels the wizard dialog's single-lifetime
+                // CancellationTokenSource, which stays cancelled for the rest of the dialog's
+                // life. Re-invoking install with that same token would hang immediately
+                // (Task.Run never runs its delegate for an already-cancelled token), so
+                // in-page Resume/Retry must not be offered after this kind of cancellation.
+                Assert.False(page.IsResumeRetryVisible);
+                Assert.Contains("reopen this wizard", page.FailureSummaryDisplayText, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
         private static async Task<InstallingPage> CreatePageAsync(List<ModComponent> components)
         {
             string temp = Path.Combine(Path.GetTempPath(), "ModSync_InstallingPage", Guid.NewGuid().ToString("N"));

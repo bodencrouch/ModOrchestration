@@ -78,6 +78,60 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public async Task Probe_DifferentDestination_IsNotResumable()
+        {
+            var component = new ModComponent { Guid = Guid.NewGuid(), Name = "A", IsSelected = true };
+            var components = new List<ModComponent> { component };
+
+            using (var coordinator = new InstallCoordinator())
+            {
+                await coordinator.InitializeAsync(components, _destination, default, enableGitCheckpoints: false);
+                component.InstallState = ModComponent.ComponentInstallState.Pending;
+                coordinator.CheckpointManager.UpdateComponentState(component);
+                await coordinator.CheckpointManager.SaveAsync();
+            }
+
+            var otherDestination = Directory.CreateDirectory(Path.Combine(_tempRoot, "other-game"));
+
+            ResumableSessionInfo info = await CheckpointManager.ProbeResumableSessionAsync(otherDestination, components);
+            Assert.That(info.IsResumable, Is.False);
+        }
+
+        [Test]
+        public async Task Initialize_SessionCopiedFromDifferentDestination_DoesNotAdoptStaleCompletedState()
+        {
+            var component = new ModComponent { Guid = Guid.NewGuid(), Name = "A", IsSelected = true };
+            var components = new List<ModComponent> { component };
+
+            var originalDestination = Directory.CreateDirectory(Path.Combine(_tempRoot, "original-game"));
+            using (var coordinator = new InstallCoordinator())
+            {
+                await coordinator.InitializeAsync(components, originalDestination, default, enableGitCheckpoints: false);
+                component.InstallState = ModComponent.ComponentInstallState.Completed;
+                coordinator.CheckpointManager.UpdateComponentState(component);
+                await coordinator.CheckpointManager.SaveAsync();
+            }
+
+            // Simulate the whole game folder (including its session file) being copied to a
+            // new destination -- the session's recorded DestinationPath now points elsewhere.
+            Directory.CreateDirectory(CheckpointPaths.GetRoot(_destination.FullName));
+            File.Copy(
+                Path.Combine(CheckpointPaths.GetRoot(originalDestination.FullName), "install_session.json"),
+                Path.Combine(CheckpointPaths.GetRoot(_destination.FullName), "install_session.json"),
+                overwrite: true);
+
+            component.InstallState = ModComponent.ComponentInstallState.Pending;
+
+            using (var coordinator = new InstallCoordinator())
+            {
+                await coordinator.InitializeAsync(components, _destination, default, enableGitCheckpoints: false);
+
+                Assert.That(component.InstallState, Is.Not.EqualTo(ModComponent.ComponentInstallState.Completed),
+                    "A session copied in from a different destination must not donate its Completed markers to this install.");
+            }
+        }
+
+        [Test]
         public async Task StartOver_DeletesSession_ProbeNoLongerResumable()
         {
             var done = new ModComponent { Guid = Guid.NewGuid(), Name = "Done", IsSelected = true };

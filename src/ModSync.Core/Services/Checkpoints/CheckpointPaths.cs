@@ -92,9 +92,25 @@ namespace ModSync.Core.Services.Checkpoints
 
             if (File.Exists(_sessionPath))
             {
-                string json = await NetFrameworkCompatibility.ReadAllTextAsync(_sessionPath, Encoding.UTF8).ConfigureAwait(false);
-                InstallSessionState existingState = JsonConvert.DeserializeObject<InstallSessionState>(json, s_serializerSettings);
-                if (existingState != null && ValidateLoadedState(existingState))
+                InstallSessionState existingState = null;
+                try
+                {
+                    string json = await NetFrameworkCompatibility.ReadAllTextAsync(_sessionPath, Encoding.UTF8).ConfigureAwait(false);
+                    existingState = JsonConvert.DeserializeObject<InstallSessionState>(json, s_serializerSettings);
+                }
+                catch (Exception ex) when (ex is JsonException || ex is IOException)
+                {
+                    Logger.LogWarning($"Failed to read existing session at '{_sessionPath}': {ex.Message}");
+                }
+
+                // Only adopt a session written for this same destination. A session copied in
+                // from a different install (e.g. the whole game folder was copied elsewhere)
+                // must not silently donate its Completed/Skipped markers to an unrelated install.
+                bool destinationMatches = existingState is null
+                    || string.IsNullOrWhiteSpace(existingState.DestinationPath)
+                    || PathsEqual(existingState.DestinationPath, destinationPath.FullName);
+
+                if (existingState != null && destinationMatches && ValidateLoadedState(existingState))
                 {
                     _state = existingState;
                     SyncComponentsWithState(components);
@@ -196,8 +212,21 @@ namespace ModSync.Core.Services.Checkpoints
                 return ResumableSessionInfo.None;
             }
 
-            string json = await NetFrameworkCompatibility.ReadAllTextAsync(sessionPath, Encoding.UTF8).ConfigureAwait(false);
-            InstallSessionState state = JsonConvert.DeserializeObject<InstallSessionState>(json, s_serializerSettings);
+            InstallSessionState state;
+            try
+            {
+                string json = await NetFrameworkCompatibility.ReadAllTextAsync(sessionPath, Encoding.UTF8).ConfigureAwait(false);
+                state = JsonConvert.DeserializeObject<InstallSessionState>(json, s_serializerSettings);
+            }
+            catch (Exception ex) when (ex is JsonException || ex is IOException)
+            {
+                // A corrupted or unreadable session file (e.g. truncated by a crash mid-write)
+                // is treated the same as "no session" -- fail closed rather than surfacing an
+                // unhandled exception on the wizard's navigation path.
+                Logger.LogWarning($"Failed to read resumable session at '{sessionPath}': {ex.Message}");
+                return ResumableSessionInfo.None;
+            }
+
             if (state is null || !ValidateLoadedState(state))
             {
                 return ResumableSessionInfo.None;

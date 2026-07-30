@@ -277,7 +277,7 @@ namespace ModSync.Dialogs.WizardPages
 
         private void ResumeRetryButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_isInstalling)
+            if (_isInstalling || _pageCancellationToken.IsCancellationRequested)
             {
                 return;
             }
@@ -527,7 +527,16 @@ namespace ModSync.Dialogs.WizardPages
                         summary += " Session resume may be unavailable for further work.";
                     }
 
-                    summary += " Resume continues remaining mods; it does not restore a pristine game folder.";
+                    // An explicit Stop Install cancels the wizard dialog's single-lifetime
+                    // cancellation token, which stays cancelled for the rest of this dialog's
+                    // life. Retrying with that same token would hang immediately without
+                    // running anything, so don't offer in-page retry here -- direct the
+                    // player to reopen the wizard, where InstallStartPage offers the same
+                    // resume via the on-disk session file instead.
+                    bool canRetryInPage = !wasCancelled;
+                    summary += canRetryInPage
+                        ? " Resume continues remaining mods; it does not restore a pristine game folder."
+                        : " Close and reopen this wizard to resume from where it left off; it does not restore a pristine game folder.";
 
                     if (_failurePanel != null)
                     {
@@ -541,7 +550,7 @@ namespace ModSync.Dialogs.WizardPages
 
                     if (_resumeRetryButton != null)
                     {
-                        _resumeRetryButton.IsVisible = remaining > 0 || !success;
+                        _resumeRetryButton.IsVisible = canRetryInPage && (remaining > 0 || !success);
                         _resumeRetryButton.Content = remaining > 0 ? "Resume / Retry" : "Retry";
                     }
                 }
