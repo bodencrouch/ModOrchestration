@@ -1912,19 +1912,37 @@ componentName: null,
                 }
 
                 List<ModComponent> components;
+                Ports.Guides.GuideIngestResult ingestResult;
                 try
                 {
+                    string content;
+                    string formatHint;
                     if (opts.UseStdin)
                     {
-                        string stdinContent = await Console.In.ReadToEndAsync().ConfigureAwait(false);
-                        components = (await ModComponentSerializationService
-                            .DeserializeModComponentFromStringAsync(stdinContent)
-                            .ConfigureAwait(false)).ToList();
+                        content = await Console.In.ReadToEndAsync().ConfigureAwait(false);
+                        formatHint = null;
                     }
                     else
                     {
-                        components = await FileLoadingService.LoadFromFileAsync(opts.InputPath).ConfigureAwait(false);
+                        (content, formatHint) = await FileLoadingService.ReadFileContentAndFormatHintAsync(opts.InputPath).ConfigureAwait(false);
                     }
+
+                    if (opts.ParseDirections)
+                    {
+                        msg = "Drafting instructions from natural-language Directions prose...";
+                        if (s_progressDisplay != null)
+                        {
+                            s_progressDisplay.WriteScrollingLog(msg);
+                        }
+                        else
+                        {
+                            await Logger.LogVerboseAsync(msg).ConfigureAwait(false);
+                        }
+                    }
+
+                    ingestResult = await Task.Run(() => Ports.Guides.GuideIngestService.Instance.IngestFromText(
+                        content, formatHint, opts.ParseDirections)).ConfigureAwait(false);
+                    components = ingestResult.Components.ToList();
 
                     // Handle dependency resolution
                     components = (List<ModComponent>)HandleDependencyResolutionErrors(components, opts.IgnoreErrors, "Convert");
@@ -1938,6 +1956,19 @@ componentName: null,
                     {
                         await Logger.LogVerboseAsync(msg).ConfigureAwait(false);
                     }
+
+                    if (opts.ParseDirections)
+                    {
+                        msg = $"Drafted instructions for {ingestResult.DraftResults.Count} component(s) - all drafts are flagged for review";
+                        if (s_progressDisplay != null)
+                        {
+                            s_progressDisplay.WriteScrollingLog(msg);
+                        }
+                        else
+                        {
+                            await Logger.LogAsync(msg).ConfigureAwait(false);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1950,34 +1981,7 @@ componentName: null,
                     throw;
                 }
 
-                IReadOnlyList<Parsing.DraftInstructionResult> draftResults = null;
-                if (opts.ParseDirections)
-                {
-                    msg = "Drafting instructions from natural-language Directions prose...";
-                    if (s_progressDisplay != null)
-                    {
-                        s_progressDisplay.WriteScrollingLog(msg);
-                    }
-                    else
-                    {
-                        await Logger.LogVerboseAsync(msg).ConfigureAwait(false);
-                    }
-
-                    draftResults = Parsing.DraftInstructionService.GenerateDraftInstructions(
-                        components,
-                        logInfo: message => Logger.Log(message),
-                        logVerbose: message => Logger.LogVerbose(message));
-
-                    msg = $"Drafted instructions for {draftResults.Count} component(s) - all drafts are flagged for review";
-                    if (s_progressDisplay != null)
-                    {
-                        s_progressDisplay.WriteScrollingLog(msg);
-                    }
-                    else
-                    {
-                        await Logger.LogAsync(msg).ConfigureAwait(false);
-                    }
-                }
+                IReadOnlyList<Parsing.DraftInstructionResult> draftResults = opts.ParseDirections ? ingestResult.DraftResults : null;
 
                 if (opts.Download)
                 {

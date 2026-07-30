@@ -94,7 +94,8 @@ namespace ModSync.Core.Ports.Guides
                 widescreenWarningContent: NullIfEmpty(parsed.WidescreenWarningContent),
                 aspyrExclusiveWarningContent: NullIfEmpty(parsed.AspyrExclusiveWarningContent),
                 installationWarningContent: NullIfEmpty(parsed.InstallationWarningContent),
-                trace: parsed.Trace);
+                trace: parsed.Trace,
+                warnings: (parsed.Warnings ?? new List<string>()).ToList());
         }
 
         [CanBeNull]

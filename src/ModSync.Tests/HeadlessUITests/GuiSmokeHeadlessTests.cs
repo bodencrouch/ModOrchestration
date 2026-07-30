@@ -119,6 +119,18 @@ ___
                     MainConfig.AllComponents,
                     c => (c.Name ?? string.Empty).Contains("Clipboard", StringComparison.OrdinalIgnoreCase));
                 Assert.True(autoGenerateCallbacks >= 1 || componentsLoadedCallbacks >= 1);
+
+                // U7 regression guard: paste now routes through IGuideIngestService with drafting on
+                // (this surface's existing default). Directions prose still drafts an instruction and
+                // gets the review flag, exactly as it did calling MarkdownParser/DraftInstructionService
+                // directly.
+                ModComponent clipboardMod = MainConfig.AllComponents.First(
+                    c => (c.Name ?? string.Empty).Contains("Clipboard", StringComparison.OrdinalIgnoreCase));
+                Assert.NotEmpty(clipboardMod.Instructions);
+                Assert.Contains(
+                    "DRAFT INSTRUCTIONS",
+                    clipboardMod.InstallationWarning ?? string.Empty,
+                    StringComparison.Ordinal);
             }
             finally
             {

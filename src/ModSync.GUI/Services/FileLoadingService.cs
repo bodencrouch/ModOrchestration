@@ -285,6 +285,7 @@ namespace ModSync.Services
             {
                 MarkdownParserResult parseResult = null;
                 MarkdownImportProfile configuredProfile;
+                bool alreadyDraftedByPort = false;
 
                 if (editorMode)
                 {
@@ -343,11 +344,28 @@ namespace ModSync.Services
                 }
                 else
                 {
-                    configuredProfile = profile ?? MarkdownImportProfile.CreateDefault();
-                    var parser = new MarkdownParser(configuredProfile,
-                        logInfo => Logger.Log(logInfo),
-                        logVerbose => Logger.LogVerbose(logVerbose));
-                    parseResult = parser.Parse(fileContents);
+                    // Routed through the shared guide ingest port (U7) instead of calling MarkdownParser/
+                    // DraftInstructionService directly: this covers file-open (draftInstructionsFromProse:
+                    // false, per its own caller) and paste (draftInstructionsFromProse: true) with the same
+                    // draft-flag value each caller already passed in - no behavior change, only the mechanism.
+#pragma warning disable MA0004 // Use Task.
+                    Core.Ports.Guides.GuideIngestResult ingestResult = await Task.Run(() =>
+                        Core.Ports.Guides.GuideIngestService.Instance.IngestFromText(
+                            fileContents, formatHint: "markdown", draftInstructionsFromProse));
+#pragma warning restore MA0004 // Use Task.
+
+                    parseResult = new MarkdownParserResult
+                    {
+                        Components = ingestResult.Components.ToList(),
+                        Warnings = ingestResult.Warnings.ToList(),
+                        PreambleContent = ingestResult.PreambleContent ?? string.Empty,
+                        EpilogueContent = ingestResult.EpilogueContent ?? string.Empty,
+                        WidescreenWarningContent = ingestResult.WidescreenWarningContent ?? string.Empty,
+                        AspyrExclusiveWarningContent = ingestResult.AspyrExclusiveWarningContent ?? string.Empty,
+                        InstallationWarningContent = ingestResult.InstallationWarningContent ?? string.Empty,
+                        Trace = ingestResult.Trace ?? new ParsingTraceInfo(),
+                    };
+                    alreadyDraftedByPort = draftInstructionsFromProse;
 
                     ProcessModLinks(parseResult.Components);
 
@@ -371,8 +389,7 @@ namespace ModSync.Services
                     }
                 }
 
-
-                if (draftInstructionsFromProse && parseResult.Components != null)
+                if (draftInstructionsFromProse && !alreadyDraftedByPort && parseResult.Components != null)
                 {
 #pragma warning disable MA0004 // Use Task.
                     await GenerateDraftInstructionsFromProseAsync(parseResult.Components);

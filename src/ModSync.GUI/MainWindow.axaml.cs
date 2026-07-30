@@ -4213,7 +4213,7 @@ namespace ModSync
                 }
 
                 await Logger.LogAsync($"[DocsButton_Click] Generating documentation for {MainConfig.AllComponents.Count} mod component(s)...");
-                string docs = ModComponentSerializationService.GenerateModDocumentation(
+                string docs = Core.Ports.Guides.GuideEmitService.Instance.EmitMarkdown(
                     MainConfig.AllComponents,
                     MainConfig.PreambleContent,
                     MainConfig.EpilogueContent,

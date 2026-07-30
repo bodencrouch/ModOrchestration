@@ -25,8 +25,10 @@ namespace ModSync.Core.Ports.Guides
             [CanBeNull] string widescreenWarningContent = null,
             [CanBeNull] string aspyrExclusiveWarningContent = null,
             [CanBeNull] string installationWarningContent = null,
-            [CanBeNull] ParsingTraceInfo trace = null)
+            [CanBeNull] ParsingTraceInfo trace = null,
+            [CanBeNull][ItemNotNull] IReadOnlyList<string> warnings = null)
         {
+            Warnings = warnings ?? Array.Empty<string>();
             Components = components ?? throw new ArgumentNullException(nameof(components));
             DraftResults = draftResults ?? Array.Empty<DraftInstructionResult>();
             DetectedFormat = detectedFormat;
@@ -45,6 +47,14 @@ namespace ModSync.Core.Ports.Guides
         [NotNull]
         [ItemNotNull]
         public IReadOnlyList<DraftInstructionResult> DraftResults { get; }
+
+        /// <summary>
+        /// Non-fatal parse warnings (e.g. a component section that produced no valid component). Markdown-
+        /// only; always empty for other formats, which do not surface warnings through this port.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        public IReadOnlyList<string> Warnings { get; }
 
         [CanBeNull]
         public string DetectedFormat { get; }
