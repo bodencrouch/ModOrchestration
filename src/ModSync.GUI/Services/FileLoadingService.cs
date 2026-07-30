@@ -284,10 +284,12 @@ namespace ModSync.Services
             try
             {
                 MarkdownParserResult parseResult = null;
-                MarkdownImportProfile configuredProfile;
+                bool alreadyDraftedByPort = false;
 
                 if (editorMode)
                 {
+                    MarkdownImportProfile configuredProfile;
+
                     // UI elements must be created and shown on the UI thread
 #pragma warning disable MA0004 // Use Task.
                     await Dispatcher.UIThread.InvokeAsync(async () =>
@@ -343,11 +345,39 @@ namespace ModSync.Services
                 }
                 else
                 {
-                    configuredProfile = profile ?? MarkdownImportProfile.CreateDefault();
-                    var parser = new MarkdownParser(configuredProfile,
-                        logInfo => Logger.Log(logInfo),
-                        logVerbose => Logger.LogVerbose(logVerbose));
-                    parseResult = parser.Parse(fileContents);
+                    // Routed through the shared guide ingest port (U7) instead of calling MarkdownParser/
+                    // DraftInstructionService directly: this covers file-open (draftInstructionsFromProse:
+                    // false, per its own caller) and paste (draftInstructionsFromProse: true) with the same
+                    // draft-flag value each caller already passed in - no behavior change, only the mechanism.
+                    // The port always parses with the default profile, so a custom profile has no effect
+                    // here (only the editor-mode dialog path above supports one) - flag that explicitly
+                    // rather than silently dropping it if a future caller passes one.
+                    if (profile != null)
+                    {
+#pragma warning disable MA0004 // Use Task.
+                        await Logger.LogWarningAsync(
+                            "[LoadMarkdownContentAsync] A custom MarkdownImportProfile was provided but is not supported outside editor mode; using the default profile.");
+#pragma warning restore MA0004 // Use Task.
+                    }
+
+#pragma warning disable MA0004 // Use Task.
+                    Core.Ports.Guides.GuideIngestResult ingestResult = await Task.Run(() =>
+                        Core.Ports.Guides.GuideIngestService.Instance.IngestFromText(
+                            fileContents, formatHint: "markdown", draftInstructionsFromProse));
+#pragma warning restore MA0004 // Use Task.
+
+                    parseResult = new MarkdownParserResult
+                    {
+                        Components = ingestResult.Components.ToList(),
+                        Warnings = ingestResult.Warnings.ToList(),
+                        PreambleContent = ingestResult.PreambleContent ?? string.Empty,
+                        EpilogueContent = ingestResult.EpilogueContent ?? string.Empty,
+                        WidescreenWarningContent = ingestResult.WidescreenWarningContent ?? string.Empty,
+                        AspyrExclusiveWarningContent = ingestResult.AspyrExclusiveWarningContent ?? string.Empty,
+                        InstallationWarningContent = ingestResult.InstallationWarningContent ?? string.Empty,
+                        Trace = ingestResult.Trace ?? new ParsingTraceInfo(),
+                    };
+                    alreadyDraftedByPort = draftInstructionsFromProse;
 
                     ProcessModLinks(parseResult.Components);
 
@@ -371,8 +401,7 @@ namespace ModSync.Services
                     }
                 }
 
-
-                if (draftInstructionsFromProse && parseResult.Components != null)
+                if (draftInstructionsFromProse && !alreadyDraftedByPort && parseResult.Components != null)
                 {
 #pragma warning disable MA0004 // Use Task.
                     await GenerateDraftInstructionsFromProseAsync(parseResult.Components);
@@ -527,6 +556,13 @@ namespace ModSync.Services
 
             foreach (DraftInstructionResult draftResult in draftResults)
             {
+                // DraftResults now includes components whose Directions produced zero drafts (U2 gap
+                // reporting) - only flag components that actually drafted instructions.
+                if (draftResult.DraftInstructionCount == 0)
+                {
+                    continue;
+                }
+
                 // ApplyReviewFlag runs inside GenerateDraftInstructions; re-apply is idempotent and keeps
                 // InstallationWarning aligned with CLI ReviewFlagMessage / validation-issue text.
                 DraftInstructionService.ApplyReviewFlag(draftResult.Component);

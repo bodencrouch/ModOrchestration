@@ -24,6 +24,12 @@ namespace ModSync.Core.Parsing
 
         // Core instruction detection patterns - ordered by specificity (most specific first)
         // These patterns cover ALL variations found in KOTOR mod build documentation
+        //
+        // Note on `\.(?=\s|$)` boundary alternatives: a bare `\.` here would also match the extension
+        // separator inside a filename mid-clause (e.g. "keblastore.utm"), truncating the capture right
+        // after the base name. Requiring the period be followed by whitespace or end-of-string keeps it
+        // matching only a genuine clause-ending period (surviving trailing periods are always followed by
+        // whitespace/EOL by the time SplitIntoProcessingUnits hands a unit here).
         private static readonly List<InstructionPattern> s_instructionPatterns = new List<InstructionPattern>
         {
 			// === HIGHLY SPECIFIC MOVE/COPY PATTERNS (must come first) ===
@@ -59,13 +65,13 @@ namespace ModSync.Core.Parsing
             ),
 			// "Move only X" / "Only move X"
 			new InstructionPattern(
-                @"(?:(?:move|copy|install)\s+(?:only|just|specifically)|(?:only|just)\s+(?:move|copy|install))\s+(?:the\s+)?(?<source>[\w\s\-_.&/\\()""']+?)(?:\s+to\s+(?:your\s+)?(?<destination>[\w\s\-_/\\]+?))?(?:\.|$|,)",
+                @"(?:(?:move|copy|install)\s+(?:only|just|specifically)|(?:only|just)\s+(?:move|copy|install))\s+(?:the\s+)?(?<source>[\w\s\-_.&/\\()""']+?)(?:\s+to\s+(?:your\s+)?(?<destination>[\w\s\-_/\\]+?))?(?:\.(?=\s|$)|$|,)",
                 Instruction.ActionType.Move,
                 RegexOptions.IgnoreCase
             ),
 			// "Move ONLY X and Y (file list)"
 			new InstructionPattern(
-                @"move\s+ONLY\s+(?<source>[\w\s\-_.&/\\()]+?)(?:\s+to\s+(?<destination>[\w\s\-_/\\]+?))?(?:\.|$)",
+                @"move\s+ONLY\s+(?<source>[\w\s\-_.&/\\()]+?)(?:\s+to\s+(?<destination>[\w\s\-_/\\]+?))?(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Move,
                 RegexOptions.IgnoreCase
             ),
@@ -109,13 +115,13 @@ namespace ModSync.Core.Parsing
             ),
 			// "Delete X, Y, and Z" (list)
 			new InstructionPattern(
-                @"(?:delete|remove)\s+(?<source>(?:[\w\-_.]+(?:\s+&\s+\.[\w]+)?(?:,\s*|\s+and\s+|\s+&\s+|\s+plus\s+))+[\w\-_.]+)(?:\s+before|\s+after|\.|\s+from|$)",
+                @"(?:delete|remove)\s+(?<source>(?:[\w\-_.]+(?:\s+&\s+\.[\w]+)?(?:,\s*|\s+and\s+|\s+&\s+|\s+plus\s+))+[\w\-_.]+)(?:\s+before|\s+after|\.(?=\s|$)|\s+from|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
 			// "Delete everything inside X except Y"
 			new InstructionPattern(
-                @"delete\s+everything\s+inside\s+(?:the\s+)?(?<source>[\w\s\-_/\\]+?)\s+except\s+(?<exceptions>.+?)(?:\.|$)",
+                @"delete\s+everything\s+inside\s+(?:the\s+)?(?<source>[\w\s\-_/\\]+?)\s+except\s+(?<exceptions>.+?)(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -127,7 +133,7 @@ namespace ModSync.Core.Parsing
             ),
 			// General delete
 			new InstructionPattern(
-                @"(?:delete|remove)\s+(?:the\s+)?(?:file\s+)?(?<source>[\w\s\-_/\\*.,()&""']+?)(?:\s+before|\s+after|\s+from|\.|\s+in\s+your|$)",
+                @"(?:delete|remove)\s+(?:the\s+)?(?:file\s+)?(?<source>[\w\s\-_/\\*.,()&""']+?)(?:\s+before|\s+after|\s+from|\.(?=\s|$)|\s+in\s+your|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -155,7 +161,7 @@ namespace ModSync.Core.Parsing
             ),
 			// "Install the main mod, then re-run and select X"
 			new InstructionPattern(
-                @"install\s+(?:the\s+)?(?:main\s+mod|base\s+mod),?\s+then\s+re-run\s+(?:the\s+)?(?:patcher|installer)\s+and\s+select\s+(?<option>.+?)(?:\.|$|,\s+if)",
+                @"install\s+(?:the\s+)?(?:main\s+mod|base\s+mod),?\s+then\s+re-run\s+(?:the\s+)?(?:patcher|installer)\s+and\s+select\s+(?<option>.+?)(?:\.(?=\s|$)|$|,\s+if)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
@@ -185,7 +191,7 @@ namespace ModSync.Core.Parsing
             ),
 			// "Install X, then re-run for Y"
 			new InstructionPattern(
-                @"install\s+(?<option1>.+?),?\s+then\s+re-run\s+(?:it\s+)?(?:once\s+more|twice\s+more|again)?(?:,?\s+(?:once\s+)?for\s+(?:each\s+of\s+)?(?:the\s+)?)?(?<option2>.+?)(?:\.|$)",
+                @"install\s+(?<option1>.+?),?\s+then\s+re-run\s+(?:it\s+)?(?:once\s+more|twice\s+more|again)?(?:,?\s+(?:once\s+)?for\s+(?:each\s+of\s+)?(?:the\s+)?)?(?<option2>.+?)(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
@@ -227,7 +233,7 @@ namespace ModSync.Core.Parsing
             ),
 			// "Re-run the patcher"
 			new InstructionPattern(
-                @"re-run\s+(?:the\s+)?(?:patcher|installer)(?:\s+(?:and|to))?\s+(?:select|install|apply)?\s*(?<option>[\w\s\-_/\\.,&()""']*?)(?:\s+option)?(?:\.|$|,)",
+                @"re-run\s+(?:the\s+)?(?:patcher|installer)(?:\s+(?:and|to))?\s+(?:select|install|apply)?\s*(?<option>[\w\s\-_/\\.,&()""']*?)(?:\s+option)?(?:\.(?=\s|$)|$|,)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
@@ -273,7 +279,7 @@ namespace ModSync.Core.Parsing
 			// === DELETE PATTERNS (exhaustive) ===
 			// "Before moving ... delete / be sure to delete ..."
 			new InstructionPattern(
-                @"before\s+moving(?:\s+the\s+files?)?(?:\s+to\s+(?:your\s+)?(?:override|game).*?)?,?\s+(?:be\s+sure\s+to\s+)?delete\s+(?:the\s+following(?:\s+files?)?:?\s*)?(?<source>.+?)(?:\.|$)",
+                @"before\s+moving(?:\s+the\s+files?)?(?:\s+to\s+(?:your\s+)?(?:override|game).*?)?,?\s+(?:be\s+sure\s+to\s+)?delete\s+(?:the\s+following(?:\s+files?)?:?\s*)?(?<source>.+?)(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -297,7 +303,7 @@ namespace ModSync.Core.Parsing
             ),
 			// "Delete the following files: X, Y, Z" / "delete the following: X, Y"
 			new InstructionPattern(
-                @"delete\s+the\s+following(?:\s+files?)?:?\s+(?<source>.+?)(?:\.|$)",
+                @"delete\s+the\s+following(?:\s+files?)?:?\s+(?<source>.+?)(?:\.(?=\s|$)|$)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -309,7 +315,7 @@ namespace ModSync.Core.Parsing
             ),
 			// Generic delete with file list
 			new InstructionPattern(
-                @"(?:delete|remove)\s+(?<source>[\w\s\-_/\\*.,()&""']+?)(?:\s+before|\s+after|\.|\s+from)",
+                @"(?:delete|remove)\s+(?<source>[\w\s\-_/\\*.,()&""']+?)(?:\s+before|\s+after|\.(?=\s|$)|\s+from)",
                 Instruction.ActionType.Delete,
                 RegexOptions.IgnoreCase
             ),
@@ -329,12 +335,12 @@ namespace ModSync.Core.Parsing
 			// === PATCHER/INSTALLER ===
 			// Must cover all variations
 			new InstructionPattern(
-                @"(?:when\s+)?installing,?\s+(?:select|use|choose)\s+(?<option>.+?)(?:\.|;|$)",
+                @"(?:when\s+)?installing,?\s+(?:select|use|choose)\s+(?<option>.+?)(?:\.(?=\s|$)|;|$)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
             new InstructionPattern(
-                @"re-run\s+the\s+(?:patcher|installer)(?:\s+and)?\s+(?:select|install)?\s*(?<option>.*?)(?:\.|$|,\s+if)",
+                @"re-run\s+the\s+(?:patcher|installer)(?:\s+and)?\s+(?:select|install)?\s*(?<option>.*?)(?:\.(?=\s|$)|$|,\s+if)",
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
@@ -406,8 +412,8 @@ namespace ModSync.Core.Parsing
             // Wildcards and patterns
             ["wildcard"] = new Regex(@"(?<pattern>[\w\-_*?]+\*[\w\-_*?]*)", RegexOptions.IgnoreCase),
             // Exclusions
-            ["except"] = new Regex(@"(?:except|excluding|but\s+not|not\s+including)(?:\s+(?:for|the))?\s+(?:the\s+)?(?<exceptions>.+?)(?:\s*(?:\(|:|;|\.|$))", RegexOptions.IgnoreCase | RegexOptions.Singleline),
-            ["ignore"] = new Regex(@"(?:ignore|skip|don't\s+(?:install|move|use))\s+(?:the\s+)?(?<ignore>.+?)(?:\.|;|,\s+you|\s+unless|$)", RegexOptions.IgnoreCase),
+            ["except"] = new Regex(@"(?:except|excluding|but\s+not|not\s+including)(?:\s+(?:for|the))?\s+(?:the\s+)?(?<exceptions>.+?)(?:\s*(?:\(|:|;|\.(?=\s|$)|$))", RegexOptions.IgnoreCase | RegexOptions.Singleline),
+            ["ignore"] = new Regex(@"(?:ignore|skip|don't\s+(?:install|move|use))\s+(?:the\s+)?(?<ignore>.+?)(?:\.(?=\s|$)|;|,\s+you|\s+unless|$)", RegexOptions.IgnoreCase),
             // Overwrite detection
             ["overwrite"] = new Regex(@"(?:overwrite|replace)(?:\s+when\s+prompted|\s+if\s+(?:asked|prompted))?", RegexOptions.IgnoreCase),
             ["no_overwrite"] = new Regex(@"(?:do\s+not|don't)\s+overwrite", RegexOptions.IgnoreCase),
@@ -447,6 +453,41 @@ namespace ModSync.Core.Parsing
             [CanBeNull] string downloadInstructions,
             [NotNull] ModComponent parentComponent)
         {
+            return ParseInstructions(installationInstructions, downloadInstructions, parentComponent, out _);
+        }
+
+        /// <summary>
+        /// Parses natural language instructions into structured Instruction objects, additionally reporting
+        /// processing units that read as actionable prose (contain an action verb) but matched no known
+        /// pattern - a gap the caller should surface for review rather than silently drop. Units recognized
+        /// as pure commentary (<see cref="IsInformationalOnly"/>) are not gaps; they are correctly skipped.
+        /// </summary>
+        [NotNull]
+        public ObservableCollection<Instruction> ParseInstructions(
+            [NotNull] string installationInstructions,
+            [CanBeNull] string downloadInstructions,
+            [NotNull] ModComponent parentComponent,
+            [NotNull] out IReadOnlyList<string> unparsedGaps)
+        {
+            return ParseInstructions(installationInstructions, downloadInstructions, parentComponent, out unparsedGaps, out _);
+        }
+
+        /// <summary>
+        /// Parses natural language instructions into structured Instruction objects, reporting both unparsed
+        /// gaps (see the four-argument overload) and conditional-draft notes: a drafted instruction whose
+        /// source clause read "if also using &lt;mod&gt;, additionally/also &lt;action&gt;" (the K2CP+HD-Visas
+        /// pattern). That clause always decomposes into its own instruction rather than merging into - or
+        /// being silently dropped from - the surrounding unconditional clause; the note records which mod the
+        /// draft is conditional on so the reviewer knows not to apply it unconditionally.
+        /// </summary>
+        [NotNull]
+        public ObservableCollection<Instruction> ParseInstructions(
+            [NotNull] string installationInstructions,
+            [CanBeNull] string downloadInstructions,
+            [NotNull] ModComponent parentComponent,
+            [NotNull] out IReadOnlyList<string> unparsedGaps,
+            [NotNull] out IReadOnlyList<string> conditionalDrafts)
+        {
             if (installationInstructions is null)
             {
                 throw new ArgumentNullException(nameof(installationInstructions));
@@ -458,6 +499,8 @@ namespace ModSync.Core.Parsing
             }
 
             var instructions = new ObservableCollection<Instruction>();
+            var gaps = new List<string>();
+            var conditionalNotes = new List<string>();
 
             _logVerbose($"[NLParser] Parsing instructions for component: {parentComponent.Name}");
 
@@ -466,12 +509,12 @@ namespace ModSync.Core.Parsing
             string normalizedInstructions = StripMarkdownEmphasis(installationInstructions);
 
             // Split into logical units (sentences/clauses)
-            List<string> units = SplitIntoProcessingUnits(normalizedInstructions);
+            List<ProcessingUnit> units = SplitIntoProcessingUnits(normalizedInstructions);
             _logVerbose($"[NLParser] Found {units.Count} instruction units to parse");
 
-            foreach (string unit in units)
+            foreach (ProcessingUnit unit in units)
             {
-                List<Instruction> parsedInstructions = ParseInstructionUnit(unit, parentComponent);
+                List<Instruction> parsedInstructions = ParseInstructionUnit(unit.Text, parentComponent, gaps);
                 foreach (Instruction instruction in parsedInstructions)
                 {
                     instructions.Add(instruction);
@@ -479,6 +522,12 @@ namespace ModSync.Core.Parsing
                         ? string.Join(", ", instruction.Source.Take(3))
                         : "(no source)";
                     _logVerbose($"[NLParser] Created {instruction.Action} instruction: {sourcePreview}");
+
+                    if (unit.Condition != null)
+                    {
+                        conditionalNotes.Add(
+                            $"{instruction.Action} ({sourcePreview}) applies only if also using '{unit.Condition}' - verify before installing.");
+                    }
                 }
             }
 
@@ -494,17 +543,57 @@ namespace ModSync.Core.Parsing
             }
 
             _logInfo($"[NLParser] Generated {instructions.Count} instructions for '{parentComponent.Name}'");
+            unparsedGaps = gaps;
+            conditionalDrafts = conditionalNotes;
             return instructions;
         }
 
         /// <summary>
+        /// A single logical instruction unit to parse, optionally tagged with the mod name it is
+        /// conditional on (e.g. "delete these three more files" is only conditional text when it follows
+        /// "if also using HD Visas,"). <see cref="Condition"/> is null for ordinary unconditional units.
+        /// </summary>
+        private readonly struct ProcessingUnit
+        {
+            [NotNull] public string Text { get; }
+            [CanBeNull] public string Condition { get; }
+
+            public ProcessingUnit([NotNull] string text, [CanBeNull] string condition = null)
+            {
+                Text = text;
+                Condition = condition;
+            }
+        }
+
+        /// <summary>
+        /// Matches the K2CP+HD-Visas style nested conditional: an unconditional action clause followed by
+        /// "if (you're) (also) using &lt;mod&gt;, additionally/also &lt;action&gt;". Captures the mod name
+        /// and the conditional action text separately from the unconditional prefix so each becomes its own
+        /// processing unit instead of one clause silently absorbing (or dropping) the other.
+        /// </summary>
+        private static readonly Regex s_conditionalClausePattern = new Regex(
+            @"^(?<main>.+?)(?:,?\s+and\s+)?,?\s*if\s+(?:you'?re\s+)?(?:also\s+)?using\s+(?<condition>[^,]+?)\s*,\s*(?:additionally|also)?\s*(?<conditional>.+)$",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        /// <summary>
+        /// Matches the same conditional clause as <see cref="s_conditionalClausePattern"/> when it has
+        /// already been split off from its preceding unconditional clause (e.g. by an earlier semicolon
+        /// or "then" split) and so has no "main" prefix of its own to capture.
+        /// </summary>
+        private static readonly Regex s_bareConditionalClausePattern = new Regex(
+            @"^if\s+(?:you'?re\s+)?(?:also\s+)?using\s+(?<condition>[^,]+?)\s*,\s*(?:additionally|also)?\s*(?<conditional>.+)$",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        /// <summary>
         /// Splits instruction text into logical processing units (sentences/clauses).
-        /// Handles complex multi-clause instructions.
+        /// Handles complex multi-clause instructions, including a nested "if also using X, additionally Y"
+        /// conditional clause, which decomposes into a separate tagged unit rather than being merged into
+        /// (or silently dropped from) the surrounding unconditional clause.
         /// </summary>
         [NotNull]
-        private static List<string> SplitIntoProcessingUnits([NotNull] string text)
+        private static List<ProcessingUnit> SplitIntoProcessingUnits([NotNull] string text)
         {
-            var units = new List<string>();
+            var units = new List<ProcessingUnit>();
 
             // First, split on sentence boundaries (periods followed by space or newline)
             // But be careful not to split on file extensions
@@ -524,18 +613,62 @@ namespace ModSync.Core.Parsing
 
                 foreach (string clause in clauses)
                 {
-                    string cleaned = clause.Trim().TrimEnd('.');
-                    if (cleaned.Length > 15) // Ignore very short fragments
+                    string cleaned = clause.Trim().TrimEnd('.', ';').Trim();
+                    if (cleaned.Length <= 15) // Ignore very short fragments
                     {
-                        units.Add(cleaned);
+                        continue;
                     }
+
+                    // Both conditional-clause patterns require "using X,"; skip the regex work entirely
+                    // for the overwhelming majority of clauses that don't contain it.
+                    bool mayBeConditional = cleaned.IndexOf("using", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                    Match bareConditionalMatch = mayBeConditional
+                        ? s_bareConditionalClausePattern.Match(cleaned)
+                        : Match.Empty;
+                    if (bareConditionalMatch.Success)
+                    {
+                        string bareCondition = bareConditionalMatch.Groups["condition"].Value.Trim();
+                        string bareConditional = bareConditionalMatch.Groups["conditional"].Value.Trim();
+
+                        if (bareConditional.Length > 0)
+                        {
+                            units.Add(new ProcessingUnit(bareConditional, bareCondition));
+                        }
+
+                        continue;
+                    }
+
+                    Match conditionalMatch = mayBeConditional
+                        ? s_conditionalClausePattern.Match(cleaned)
+                        : Match.Empty;
+                    if (conditionalMatch.Success)
+                    {
+                        string main = conditionalMatch.Groups["main"].Value.Trim().TrimEnd('.', ';').Trim();
+                        string condition = conditionalMatch.Groups["condition"].Value.Trim();
+                        string conditional = conditionalMatch.Groups["conditional"].Value.Trim();
+
+                        if (main.Length > 15)
+                        {
+                            units.Add(new ProcessingUnit(main));
+                        }
+
+                        if (conditional.Length > 0)
+                        {
+                            units.Add(new ProcessingUnit(conditional, condition));
+                        }
+
+                        continue;
+                    }
+
+                    units.Add(new ProcessingUnit(cleaned));
                 }
             }
 
             // If no units found, just use the whole text
             if (units.Count == 0 && !string.IsNullOrWhiteSpace(text))
             {
-                units.Add(text.Trim());
+                units.Add(new ProcessingUnit(text.Trim()));
             }
 
             return units;
@@ -560,10 +693,15 @@ namespace ModSync.Core.Parsing
         }
 
         /// <summary>
-        /// Parses a single instruction unit into zero or more Instructions.
+        /// Parses a single instruction unit into zero or more Instructions. When <paramref name="unparsedGaps"/>
+        /// is supplied, a unit that contains an action verb but matches no known pattern is appended to it -
+        /// distinct from a unit recognized as pure commentary, which is skipped without being a gap.
         /// </summary>
         [NotNull]
-        private List<Instruction> ParseInstructionUnit([NotNull] string unit, [NotNull] ModComponent parentComponent)
+        private List<Instruction> ParseInstructionUnit(
+            [NotNull] string unit,
+            [NotNull] ModComponent parentComponent,
+            [CanBeNull] List<string> unparsedGaps = null)
         {
             var instructions = new List<Instruction>();
 
@@ -571,6 +709,22 @@ namespace ModSync.Core.Parsing
             if (IsInformationalOnly(unit))
             {
                 _logVerbose($"[NLParser] Skipping informational unit: {unit.Substring(0, Math.Min(60, unit.Length))}...");
+                return instructions;
+            }
+
+            // AE7: redrob-style cleanlist deletion is conditioned on an externally-maintained file, not
+            // enumerable from the guide text. Detect it before the generic pattern list runs so a Delete
+            // pattern never mismatches part of this prose into a wrong fixed file list - either draft a
+            // CleanList instruction that defers resolution to the referenced file, or (when no specific
+            // file is named) surface it as a gap. Either way, this unit never falls through to the
+            // generic patterns below.
+            if (TryHandleCleanlistReference(unit, parentComponent, unparsedGaps, out Instruction cleanlistInstruction))
+            {
+                if (cleanlistInstruction != null)
+                {
+                    instructions.Add(cleanlistInstruction);
+                }
+
                 return instructions;
             }
 
@@ -592,10 +746,11 @@ namespace ModSync.Core.Parsing
                 }
             }
 
-            // If no pattern matched but it looks like an action, log it
+            // If no pattern matched but it looks like an action, this is a reviewable gap rather than a silent drop.
             if (instructions.Count == 0 && ContainsActionVerb(unit))
             {
                 _logVerbose($"[NLParser] No pattern matched for unit with action verb: {unit.Substring(0, Math.Min(80, unit.Length))}...");
+                unparsedGaps?.Add(unit);
             }
 
             return instructions;
@@ -643,6 +798,70 @@ namespace ModSync.Core.Parsing
                                      "extract", "unzip", "place", "put", "rename", "download", "use", "select", };
 
             return actionVerbs.Any(verb => lower.IndexOf(" " + verb + " ", StringComparison.OrdinalIgnoreCase) >= 0 || lower.StartsWith(verb + " ", StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// Matches an explicit cleanlist file name (e.g. <c>cleanlist_k1.txt</c>) - redrob's convention -
+        /// referenced anywhere in the unit.
+        /// </summary>
+        private static readonly Regex s_cleanlistFileNamePattern = new Regex(
+            @"\bcleanlist[\w\-]*\.txt\b", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Matches a bare mention of "the cleanlist" with no specific file named - too ambiguous to draft
+        /// a real instruction from, but still a genuine actionable reference, not commentary.
+        /// </summary>
+        private static readonly Regex s_bareCleanlistMentionPattern = new Regex(
+            @"\bcleanlist\b", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// AE7: detects a redrob-style deletion driven by an externally maintained cleanlist file - a
+        /// per-mod deletion list that cannot be enumerated from the guide text alone. When the unit names
+        /// a specific cleanlist file, drafts a <see cref="Instruction.ActionType.CleanList"/> instruction
+        /// referencing it (resolution of which files it deletes is deferred to install time, exactly like
+        /// <see cref="Instruction.ExecuteCleanListAsync"/> already does - this never fabricates a fixed file
+        /// list). When only a bare "cleanlist" mention appears with no nameable file, the conditional nature
+        /// is preserved as an unparsed gap instead of guessing.
+        /// </summary>
+        /// <returns>
+        /// true when the unit is a cleanlist reference and has been fully handled (whether or not an
+        /// instruction was produced) - the caller must not fall through to the generic pattern list.
+        /// </returns>
+        private static bool TryHandleCleanlistReference(
+            [NotNull] string unit,
+            [NotNull] ModComponent parentComponent,
+            [CanBeNull] List<string> unparsedGaps,
+            [CanBeNull] out Instruction instruction)
+        {
+            instruction = null;
+
+            // Both patterns below require "cleanlist"; skip the regex work entirely otherwise.
+            if (unit.IndexOf("cleanlist", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            Match fileMatch = s_cleanlistFileNamePattern.Match(unit);
+            if (fileMatch.Success)
+            {
+                instruction = new Instruction
+                {
+                    Action = Instruction.ActionType.CleanList,
+                    Source = new List<string> { DraftInstructionService.ModDirectoryPlaceholder + @"\" + fileMatch.Value },
+                    Destination = @"<<kotorDirectory>>\Override",
+                    Overwrite = true,
+                };
+                instruction.SetParentComponent(parentComponent);
+                return true;
+            }
+
+            if (s_bareCleanlistMentionPattern.IsMatch(unit))
+            {
+                unparsedGaps?.Add(unit);
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -732,7 +951,7 @@ namespace ModSync.Core.Parsing
             instruction.Source = ApplyExclusions(instruction.Source, unit);
 
             // === Handle "Only" Clauses ===
-            Match onlyMatch = Regex.Match(unit, @"(?:only|just)\s+(?:move|use|install)\s+(?:the\s+)?(?<only>.+?)(?:\.|;|,\s+(?:not|ignore)|$)", RegexOptions.IgnoreCase);
+            Match onlyMatch = Regex.Match(unit, @"(?:only|just)\s+(?:move|use|install)\s+(?:the\s+)?(?<only>.+?)(?:\.(?=\s|$)|;|,\s+(?:not|ignore)|$)", RegexOptions.IgnoreCase);
             if (onlyMatch.Success)
             {
                 string onlyText = onlyMatch.Groups["only"].Value;

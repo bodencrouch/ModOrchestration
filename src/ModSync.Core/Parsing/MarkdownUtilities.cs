@@ -29,7 +29,7 @@ namespace ModSync.Core.Parsing
             }
             return markdown;
         }
-        private static readonly string[] newLineSeparator = new[] { "\r\n", "\r", "\n" };
+        internal static readonly string[] newLineSeparator = new[] { "\r\n", "\r", "\n" };
 
         [NotNull]
         [ItemNotNull]

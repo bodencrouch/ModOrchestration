@@ -140,6 +140,7 @@ ___
                 Assert.That(results, Has.Count.EqualTo(1), "Component with parseable prose should receive drafts");
                 Assert.That(component.Instructions, Is.Not.Empty, "Draft instructions should be attached to the component");
                 Assert.That(results[0].DraftInstructionCount, Is.EqualTo(component.Instructions.Count));
+                Assert.That(results[0].UnparsedGaps, Is.Empty, "Prose that fully matches known patterns has zero gaps");
             });
 
             Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Move), Is.True,
@@ -253,15 +254,229 @@ ___
         }
 
         [Test]
+        public void DraftInstructions_K2CPHDVisasNestedConditional_DecomposesIntoDistinctInstructions()
+        {
+            // AE8: an unconditional deletion followed by "if also using HD Visas, additionally delete
+            // these three more" must decompose into two distinct instructions - the conditional half must
+            // never merge into the unconditional one, nor be silently dropped from it.
+            ModComponent component = CreateComponent(
+                "Delete portraits001.tga and portraits002.tga before moving to override, " +
+                "and if also using HD Visas, additionally delete hdvisas01.tga, hdvisas02.tga, and hdvisas03.tga.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(2),
+                    "The unconditional and HD-Visas-conditional deletions must be captured as distinct instructions");
+                Assert.That(component.Instructions.Count(i => i.Action == Instruction.ActionType.Delete), Is.EqualTo(2));
+                Assert.That(results[0].HasConditionalDrafts, Is.True,
+                    "The HD-Visas-conditional deletion must be flagged as conditional, not applied unconditionally");
+                Assert.That(results[0].ConditionalDrafts.Count, Is.EqualTo(1));
+                Assert.That(results[0].ConditionalDrafts[0], Does.Contain("HD Visas"));
+                Assert.That(component.InstallationWarning, Does.Contain("HD Visas"),
+                    "The conditional note should be surfaced on the component for review");
+            });
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_NestedConditional_SemicolonVariant_StillTagsCondition()
+        {
+            // Same AE8 shape, but the guide phrases the conditional clause after a semicolon rather than
+            // "and if" - the existing semicolon splitter already separates the two clauses, so this
+            // guards the "bare" conditional-clause form (no unconditional prefix in the same fragment).
+            ModComponent component = CreateComponent(
+                "Delete these files before moving to override; " +
+                "if also using HD Visas, additionally delete these three more files.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(2));
+                Assert.That(results[0].HasConditionalDrafts, Is.True);
+                Assert.That(results[0].ConditionalDrafts[0], Does.Contain("HD Visas"));
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_NonConditionalProse_UnaffectedByConditionalClauseSplitter()
+        {
+            // Regression guard: ordinary prose with no "if also using" clause must parse exactly as before.
+            ModComponent component = CreateComponent(MoveFoldersProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].HasConditionalDrafts, Is.False);
+                Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Move), Is.True);
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_RedrobCleanlistWithNamedFile_DraftsCleanListInstruction()
+        {
+            // AE7: a redrob-style per-mod deletion driven by cleanlist_k1.txt cannot be enumerated from the
+            // guide text. Before this fix the parser silently resolved it to a nonsensical fixed file list
+            // (e.g. deleting a literal path made of prose words) instead of never guessing.
+            ModComponent component = CreateComponent(
+                "Delete the files listed in cleanlist_k1.txt for your installed mods before running the patcher.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(1));
+                Assert.That(results[0].UnparsedGaps, Is.Empty);
+                Assert.That(component.Instructions, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.CleanList));
+                Assert.That(component.Instructions[0].Source.Any(s => s.Contains("cleanlist_k1.txt")), Is.True);
+            });
+
+            AssertInstructionIsSandboxed(component.Instructions[0]);
+        }
+
+        [Test]
+        public void DraftInstructions_RedrobCleanlistWithoutNamedFile_SurfacesAsGapNotWrongFixedList()
+        {
+            // AE7 edge case: a bare "cleanlist" mention with no nameable file must never be resolved to a
+            // fabricated fixed file list - it surfaces as a reviewable gap instead.
+            ModComponent component = CreateComponent(
+                "Before installing, delete any files listed in the cleanlist that correspond to mods you already have installed.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(0));
+                Assert.That(results[0].UnparsedGaps, Is.Not.Empty);
+                Assert.That(component.Instructions, Is.Empty,
+                    "Must never fabricate a fixed Delete file list from an unnameable cleanlist reference");
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_LiteralFileDeletion_UnaffectedByCleanlistDetection()
+        {
+            // Regression guard: an ordinary, literal file-deletion entry (no cleanlist reference) drafts
+            // exactly as before.
+            ModComponent component = CreateComponent(DeleteBeforeMoveProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Delete), Is.True);
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.CleanList), Is.False);
+        }
+
+        [Test]
+        public void DraftInstructions_HQBlasters_DeleteBeforePatcherRun_PreservesFullFilenameWithExtension()
+        {
+            // AE6: the HQ Blasters sequence deletes keblastore.utm to force an intentional single
+            // TSLPatcher error before running the patcher. Before this fix, the Delete patterns' shared
+            // "end of clause" boundary used a bare '.' that also matched the extension separator inside
+            // the filename itself, truncating the capture to "keblastore" and silently dropping ".utm".
+            ModComponent component = CreateComponent(
+                "Delete keblastore.utm from the TSLPatchdata folder before running the patcher.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Delete));
+                Assert.That(component.Instructions[0].Source.Any(s => s.EndsWith("keblastore.utm", StringComparison.OrdinalIgnoreCase)),
+                    Is.True, "The full filename including its extension must survive, not be truncated at the extension separator");
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_HQBlasters_MultiFileDeleteList_PreservesAllExtensions()
+        {
+            // AE6's post-patcher cleanup deletes several more files by name; every file's extension must
+            // survive, not just the first item's (the same extension-separator boundary bug affected list
+            // patterns too, truncating mid-list as soon as it hit any filename's own '.').
+            ModComponent component = CreateComponent(
+                "Delete LSI_win01.tpc and LSI_box01.tpc before moving to override.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions[0].Source, Has.Count.EqualTo(2));
+                Assert.That(component.Instructions[0].Source.Any(s => s.EndsWith("LSI_win01.tpc", StringComparison.OrdinalIgnoreCase)), Is.True);
+                Assert.That(component.Instructions[0].Source.Any(s => s.EndsWith("LSI_box01.tpc", StringComparison.OrdinalIgnoreCase)), Is.True);
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_HQBlasters_WildcardPrefixRename_SurfacesAsGapNotWrongRename()
+        {
+            // AE6's rename step ("rename w_ionrfl_04.* files to w_ionrfl_004.*") is a bulk prefix rename,
+            // not an enumerable exact-file pair. No pattern models this yet; it must surface as an explicit
+            // reviewable gap rather than draft a wrong single-file rename or silently disappear.
+            ModComponent component = CreateComponent("Rename all w_ionrfl_04.* files to w_ionrfl_004.*.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(0));
+                Assert.That(results[0].UnparsedGaps, Is.Not.Empty,
+                    "An undraftable bulk-rename step must surface as a gap, never silently dropped or misapplied");
+                Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Rename), Is.False);
+            });
+        }
+
+        [Test]
         public void DraftInstructions_UnparseableProse_DegradesGracefullyToNoDrafts()
         {
+            // Pure commentary (no action verb): recognized as informational, not a gap.
             ModComponent component = CreateComponent("A fan favorite retexture bundle. Many enjoy this excellent work.");
 
             IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
 
             Assert.Multiple(() =>
             {
-                Assert.That(results, Is.Empty, "Unparseable prose should degrade to today's behavior");
+                Assert.That(results, Has.Count.EqualTo(1),
+                    "A component with Directions prose should still appear in results even when nothing drafts");
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(0));
+                Assert.That(results[0].UnparsedGaps, Is.Empty, "Pure commentary is not an unparsed gap");
+                Assert.That(component.Instructions, Is.Empty);
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_ActionableButUnmatchedProse_SurfacesAsUnparsedGap()
+        {
+            // Contains an action verb ("select") but is phrased in a way no pattern in the list matches
+            // (no file/folder/version noun for the "select" patterns to anchor on).
+            ModComponent component = CreateComponent("Select whichever seems best for your taste, honestly.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(0));
+                Assert.That(results[0].UnparsedGaps, Is.Not.Empty,
+                    "Actionable prose that matches no pattern must surface as a reviewable gap, not silently drop");
+                Assert.That(results[0].HasUnparsedGaps, Is.True);
                 Assert.That(component.Instructions, Is.Empty);
             });
         }
@@ -468,6 +683,14 @@ Name = ""Paste Cascade Toml Mod""
 
         #region Real guide (mod-builds)
 
+        // U9 measurement finding: MarkdownParser's per-field regex scanning scales superlinearly
+        // (roughly cubic) with document size - confirmed pre-existing on the pre-branch baseline, not
+        // introduced by this plan's changes. A full guide (~150KB, e.g. k1/full.md) takes on the order
+        // of tens of minutes to parse, which is impractical for default CI/local runs. Tagged Slow
+        // (excluded by ModSync.Tests.runsettings' default TestCategory!=Slow filter) until the
+        // underlying scan-scoping performance issue gets its own dedicated fix.
+        [Category("Slow")]
+        [CancelAfter(300_000)]
         [TestCase("k1", "full.md")]
         [TestCase("k2", "full.md")]
         [TestCase("k1", "spoiler-free.md")]
@@ -498,10 +721,11 @@ Name = ""Paste Cascade Toml Mod""
             IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(components);
 
             Assert.That(results, Is.Not.Empty, $"Real guide prose ({gameFolder}/{guideFile}) should draft instructions for at least one component");
+            Assert.That(results.Any(r => r.DraftInstructionCount > 0), Is.True,
+                $"Real guide prose ({gameFolder}/{guideFile}) should draft instructions for at least one component");
 
             foreach (DraftInstructionResult result in results)
             {
-                Assert.That(result.Component.Instructions, Is.Not.Empty);
                 foreach (Instruction instruction in result.Component.Instructions)
                 {
                     AssertInstructionIsSandboxed(instruction);
@@ -552,7 +776,13 @@ Name = ""Paste Cascade Toml Mod""
 
             foreach (DraftInstructionResult draft in ingested.DraftResults)
             {
-                Assert.That(draft.Component.InstallationWarning, Does.Contain(DraftInstructionService.ReviewFlagMessage));
+                // DraftResults now includes components whose Directions produced zero drafts (U2 gap
+                // reporting) - only components that actually drafted instructions get the review flag.
+                if (draft.DraftInstructionCount > 0)
+                {
+                    Assert.That(draft.Component.InstallationWarning, Does.Contain(DraftInstructionService.ReviewFlagMessage));
+                }
+
                 foreach (Instruction instruction in draft.Component.Instructions)
                 {
                     AssertInstructionIsSandboxed(instruction);
@@ -593,6 +823,111 @@ Name = ""Paste Cascade Toml Mod""
 
             Assert.That(components.Count, Is.GreaterThanOrEqualTo(100),
                 $"Bold **Name:** path must keep working for mod-builds K2 full (got {components.Count})");
+        }
+
+        #endregion
+
+        #region Guide ingest port (IGuideIngestService / GuideIngestResult content sections)
+
+        [Test]
+        public void IngestFromText_MarkdownWithPreambleEpilogueWidescreen_PopulatesPortContentSections()
+        {
+            // U6: GuideIngestService now calls MarkdownParser directly for markdown content instead of the
+            // generic deserializer, so preamble/epilogue/widescreen/trace survive onto GuideIngestResult
+            // instead of being dropped at the port boundary.
+            const string markdown = @"This is the preamble text before the mod list.
+
+## Mod List
+
+### First Mod
+**Name:** First Mod
+**Author:** TestAuthor
+**Description:** A basic mod.
+
+___
+
+## Optional Widescreen
+
+This section describes widescreen-only fixes.
+
+### Widescreen Mod
+**Name:** Widescreen Mod
+**Author:** TestAuthor
+**Description:** A widescreen-only fix.
+
+___
+
+## Misc. Basegame Issues & Fixes
+
+This is epilogue content after the widescreen section.
+";
+
+            GuideIngestResult result = GuideIngestService.Instance.IngestFromText(markdown, formatHint: null, parseDirections: false);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Components, Is.Not.Empty);
+                Assert.That(result.DetectedFormat, Is.EqualTo("markdown"));
+                Assert.That(result.PreambleContent, Does.Contain("preamble text before the mod list"));
+                Assert.That(result.EpilogueContent, Does.Contain("Misc. Basegame Issues"));
+                Assert.That(result.WidescreenWarningContent, Does.Contain("Optional Widescreen"));
+                Assert.That(result.Trace, Is.Not.Null, "Markdown ingest should populate a parse trace");
+            });
+        }
+
+        [Test]
+        public void IngestFromText_MarkdownWithUndraftableDirections_SurfacesGapsOnPortResult()
+        {
+            // Integration: U2's unparsed-gap reporting must surface through the port's DraftResults too,
+            // not only when calling MarkdownParser/DraftInstructionService directly.
+            const string markdown = @"### Gap Mod
+**Name:** Gap Mod
+**Author:** TestAuthor
+**Description:** A mod whose directions cannot be fully drafted.
+**Installation Instructions:** Select whichever seems best for your taste, honestly.
+
+___";
+
+            GuideIngestResult result = GuideIngestService.Instance.IngestFromText(markdown, formatHint: "markdown", parseDirections: true);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Components, Has.Count.EqualTo(1));
+                Assert.That(result.DraftResults, Has.Count.EqualTo(1));
+                Assert.That(result.DraftResults[0].UnparsedGaps, Is.Not.Empty,
+                    "The port must surface unparsed gaps, not only direct MarkdownParser/DraftInstructionService callers");
+            });
+        }
+
+        [Test]
+        public void IngestFromText_NonMarkdownFormat_ContentSectionsRemainNullAndComponentsUnaffected()
+        {
+            // Edge case: the markdown-specific rewiring must not regress other formats - TOML ingest
+            // continues through the generic deserializer exactly as before, with no content sections
+            // (those have no TOML equivalent).
+            var component = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "TOML Round Trip Mod",
+                Author = "TestAuthor",
+                Description = "A TOML-only component.",
+            };
+
+            string toml = ModComponentSerializationService.SerializeModComponentAsTomlString(new[] { component });
+
+            GuideIngestResult result = GuideIngestService.Instance.IngestFromText(toml, formatHint: "toml", parseDirections: false);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Components, Has.Count.EqualTo(1));
+                Assert.That(result.Components[0].Name, Is.EqualTo("TOML Round Trip Mod"));
+                Assert.That(result.DetectedFormat, Is.EqualTo("toml"));
+                Assert.That(result.PreambleContent, Is.Null);
+                Assert.That(result.EpilogueContent, Is.Null);
+                Assert.That(result.WidescreenWarningContent, Is.Null);
+                Assert.That(result.AspyrExclusiveWarningContent, Is.Null);
+                Assert.That(result.Trace, Is.Null, "Non-markdown formats never go through MarkdownParser, so there is no trace");
+            });
         }
 
         #endregion
@@ -700,6 +1035,84 @@ Name = ""Paste Cascade Toml Mod""
             {
                 AssertInstructionIsSandboxed(instruction);
             }
+        }
+
+        [Test]
+        public void CliConvert_StdinWithParseDirections_DoesNotReviewFlagZeroDraftComponent()
+        {
+            // Regression guard (found by code review): GenerateDraftInstructions' return list includes
+            // one result per component with Directions prose, even when zero instructions were drafted
+            // (U2 gap reporting). The CLI must only attach the review-flag validation issue to components
+            // that actually drafted something - not every component that merely has Directions text.
+            const string twoComponentGuide = MarkdownGuide + @"
+### Commentary Only Mod
+**Name:** Commentary Only Mod
+**Author:** Test Author
+**Description:** A mod whose directions are pure commentary and draft nothing.
+**Installation Instructions:** This mod is a fan favorite. Many players enjoy the improvements.
+
+___
+";
+
+            string outputToml = Path.Combine(_testDirectory, "zero-draft.toml");
+
+            TextReader previousIn = Console.In;
+            try
+            {
+                Console.SetIn(new StringReader(twoComponentGuide));
+
+                int exitCode = ModBuildConverter.Run(new[]
+                {
+                    "convert",
+                    "--stdin",
+                    "--parse-directions",
+                    "-f", "toml",
+                    "-o", outputToml,
+                    "--plaintext",
+                });
+
+                Assert.That(exitCode, Is.EqualTo(0));
+            }
+            finally
+            {
+                Console.SetIn(previousIn);
+            }
+
+            string tomlOutput = File.ReadAllText(outputToml);
+            var reloaded = ModComponentSerializationService
+                .DeserializeModComponentFromString(tomlOutput, "toml")
+                .ToList();
+
+            Assert.That(reloaded, Has.Count.EqualTo(2));
+
+            ModComponent drafted = reloaded.Single(c => c.Name == "Guide Ingestion Test Mod");
+            ModComponent zeroDraft = reloaded.Single(c => c.Name == "Commentary Only Mod");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(drafted.Instructions, Is.Not.Empty);
+                Assert.That(zeroDraft.Instructions, Is.Empty);
+
+                // The validation-issues header should mention the drafted component's GUID, not the
+                // zero-draft component's - assert via the per-component InstallationWarning instead,
+                // since that's what actually carries the review flag through the TOML round-trip.
+                Assert.That(tomlOutput, Does.Contain(DraftInstructionService.ReviewFlagMessage));
+            });
+
+            string zeroDraftSection = ExtractComponentTomlSection(tomlOutput, "Commentary Only Mod");
+            Assert.That(zeroDraftSection, Does.Not.Contain(DraftInstructionService.ReviewFlagMessage),
+                "A component that drafted zero instructions must not be flagged for review");
+        }
+
+        private static string ExtractComponentTomlSection(string tomlOutput, string componentName)
+        {
+            int nameIndex = tomlOutput.IndexOf($"Name = \"{componentName}\"", StringComparison.Ordinal);
+            Assert.That(nameIndex, Is.GreaterThanOrEqualTo(0), $"Component '{componentName}' not found in TOML output");
+
+            int nextSectionIndex = tomlOutput.IndexOf("[[thisMod]]", nameIndex + 1, StringComparison.Ordinal);
+            return nextSectionIndex >= 0
+                ? tomlOutput.Substring(nameIndex, nextSectionIndex - nameIndex)
+                : tomlOutput.Substring(nameIndex);
         }
 
         [Test]

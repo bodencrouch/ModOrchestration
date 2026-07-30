@@ -1912,19 +1912,37 @@ componentName: null,
                 }
 
                 List<ModComponent> components;
+                Ports.Guides.GuideIngestResult ingestResult;
                 try
                 {
+                    string content;
+                    string formatHint;
                     if (opts.UseStdin)
                     {
-                        string stdinContent = await Console.In.ReadToEndAsync().ConfigureAwait(false);
-                        components = (await ModComponentSerializationService
-                            .DeserializeModComponentFromStringAsync(stdinContent)
-                            .ConfigureAwait(false)).ToList();
+                        content = await Console.In.ReadToEndAsync().ConfigureAwait(false);
+                        formatHint = null;
                     }
                     else
                     {
-                        components = await FileLoadingService.LoadFromFileAsync(opts.InputPath).ConfigureAwait(false);
+                        (content, formatHint) = await FileLoadingService.ReadFileContentAndFormatHintAsync(opts.InputPath).ConfigureAwait(false);
                     }
+
+                    if (opts.ParseDirections)
+                    {
+                        msg = "Drafting instructions from natural-language Directions prose...";
+                        if (s_progressDisplay != null)
+                        {
+                            s_progressDisplay.WriteScrollingLog(msg);
+                        }
+                        else
+                        {
+                            await Logger.LogVerboseAsync(msg).ConfigureAwait(false);
+                        }
+                    }
+
+                    ingestResult = await Task.Run(() => Ports.Guides.GuideIngestService.Instance.IngestFromText(
+                        content, formatHint, opts.ParseDirections)).ConfigureAwait(false);
+                    components = ingestResult.Components.ToList();
 
                     // Handle dependency resolution
                     components = (List<ModComponent>)HandleDependencyResolutionErrors(components, opts.IgnoreErrors, "Convert");
@@ -1938,6 +1956,20 @@ componentName: null,
                     {
                         await Logger.LogVerboseAsync(msg).ConfigureAwait(false);
                     }
+
+                    if (opts.ParseDirections)
+                    {
+                        int draftedCount = ingestResult.DraftResults.Count(r => r.DraftInstructionCount > 0);
+                        msg = $"Drafted instructions for {draftedCount} component(s) - all drafts are flagged for review";
+                        if (s_progressDisplay != null)
+                        {
+                            s_progressDisplay.WriteScrollingLog(msg);
+                        }
+                        else
+                        {
+                            await Logger.LogAsync(msg).ConfigureAwait(false);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1950,34 +1982,7 @@ componentName: null,
                     throw;
                 }
 
-                IReadOnlyList<Parsing.DraftInstructionResult> draftResults = null;
-                if (opts.ParseDirections)
-                {
-                    msg = "Drafting instructions from natural-language Directions prose...";
-                    if (s_progressDisplay != null)
-                    {
-                        s_progressDisplay.WriteScrollingLog(msg);
-                    }
-                    else
-                    {
-                        await Logger.LogVerboseAsync(msg).ConfigureAwait(false);
-                    }
-
-                    draftResults = Parsing.DraftInstructionService.GenerateDraftInstructions(
-                        components,
-                        logInfo: message => Logger.Log(message),
-                        logVerbose: message => Logger.LogVerbose(message));
-
-                    msg = $"Drafted instructions for {draftResults.Count} component(s) - all drafts are flagged for review";
-                    if (s_progressDisplay != null)
-                    {
-                        s_progressDisplay.WriteScrollingLog(msg);
-                    }
-                    else
-                    {
-                        await Logger.LogAsync(msg).ConfigureAwait(false);
-                    }
-                }
+                IReadOnlyList<Parsing.DraftInstructionResult> draftResults = opts.ParseDirections ? ingestResult.DraftResults : null;
 
                 if (opts.Download)
                 {
@@ -2145,11 +2150,18 @@ componentName: null,
                 // Create validation context to track issues for serialization
                 var validationContext = new ComponentValidationContext();
 
-                // Flag prose-drafted instructions for review in the serialized output (never auto-trusted)
+                // Flag prose-drafted instructions for review in the serialized output (never auto-trusted).
+                // DraftResults now includes components whose Directions produced zero drafts (U2 gap
+                // reporting) - only flag components that actually drafted instructions.
                 if (draftResults != null)
                 {
                     foreach (Parsing.DraftInstructionResult draftResult in draftResults)
                     {
+                        if (draftResult.DraftInstructionCount == 0)
+                        {
+                            continue;
+                        }
+
                         validationContext.AddModComponentIssue(
                             draftResult.Component.Guid,
                             Parsing.DraftInstructionService.ReviewFlagMessage);

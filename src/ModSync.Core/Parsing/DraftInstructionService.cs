@@ -22,10 +22,39 @@ namespace ModSync.Core.Parsing
 
         public int DraftInstructionCount { get; }
 
-        public DraftInstructionResult([NotNull] ModComponent component, int draftInstructionCount)
+        /// <summary>
+        /// Directions prose that contained an action verb but matched no known instruction pattern.
+        /// Never populated with commentary/informational prose - only genuine unparsed gaps. Callers
+        /// should render these (e.g. "N of M directions produced no draft") rather than drop them silently.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        public IReadOnlyList<string> UnparsedGaps { get; }
+
+        public bool HasUnparsedGaps => UnparsedGaps.Count > 0;
+
+        /// <summary>
+        /// Human-readable notes for instructions drafted from a nested conditional clause (the
+        /// K2CP+HD-Visas pattern: "delete these files; if also using X, additionally delete these").
+        /// Each note names the mod the draft is conditional on - the drafted instruction is never
+        /// auto-applied unconditionally, but this distinguishes it from an ordinary unconditional draft.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        public IReadOnlyList<string> ConditionalDrafts { get; }
+
+        public bool HasConditionalDrafts => ConditionalDrafts.Count > 0;
+
+        public DraftInstructionResult(
+            [NotNull] ModComponent component,
+            int draftInstructionCount,
+            [CanBeNull][ItemNotNull] IReadOnlyList<string> unparsedGaps = null,
+            [CanBeNull][ItemNotNull] IReadOnlyList<string> conditionalDrafts = null)
         {
             Component = component ?? throw new ArgumentNullException(nameof(component));
             DraftInstructionCount = draftInstructionCount;
+            UnparsedGaps = unparsedGaps ?? Array.Empty<string>();
+            ConditionalDrafts = conditionalDrafts ?? Array.Empty<string>();
         }
     }
 
@@ -45,7 +74,7 @@ namespace ModSync.Core.Parsing
         public const string ReviewFlagMessage =
             "DRAFT INSTRUCTIONS: parsed from guide prose by the natural-language importer. Review before installing - never auto-trusted.";
 
-        [NotNull] private const string ModDirectoryPlaceholder = "<<modDirectory>>";
+        [NotNull] internal const string ModDirectoryPlaceholder = "<<modDirectory>>";
         [NotNull] private const string KotorDirectoryPlaceholder = "<<kotorDirectory>>";
         [NotNull] private const string LegacyGameDirectoryPlaceholder = "<<gameDirectory>>";
 
@@ -53,7 +82,10 @@ namespace ModSync.Core.Parsing
         /// Generates draft instructions for every component that has natural-language Directions prose
         /// but no authored instructions. Components that already have instructions are never touched.
         /// </summary>
-        /// <returns>One result per component that received at least one draft instruction.</returns>
+        /// <returns>
+        /// One result per component that has Directions prose to draft from - including components where
+        /// zero instructions were successfully drafted, so callers can render unparsed gaps for review.
+        /// </returns>
         [NotNull]
         [ItemNotNull]
         public static IReadOnlyList<DraftInstructionResult> GenerateDraftInstructions(
@@ -79,12 +111,16 @@ namespace ModSync.Core.Parsing
                 }
 
                 ObservableCollection<Instruction> parsed;
+                IReadOnlyList<string> unparsedGaps;
+                IReadOnlyList<string> conditionalDrafts;
                 try
                 {
                     parsed = parser.ParseInstructions(
                         component.Directions,
                         string.IsNullOrWhiteSpace(component.DownloadInstructions) ? null : component.DownloadInstructions,
-                        component);
+                        component,
+                        out unparsedGaps,
+                        out conditionalDrafts);
                 }
                 catch (Exception ex)
                 {
@@ -111,8 +147,20 @@ namespace ModSync.Core.Parsing
                 {
                     ApplyReviewFlag(component);
                     info($"[DraftInstructions] Drafted {added} instruction(s) from prose for '{component.Name}' - flagged for review.");
-                    results.Add(new DraftInstructionResult(component, added));
                 }
+
+                if (unparsedGaps.Count > 0)
+                {
+                    info($"[DraftInstructions] {unparsedGaps.Count} direction(s) for '{component.Name}' produced no draft - review needed.");
+                }
+
+                if (conditionalDrafts.Count > 0)
+                {
+                    ApplyConditionalDraftNote(component, conditionalDrafts);
+                    info($"[DraftInstructions] {conditionalDrafts.Count} draft(s) for '{component.Name}' are conditional on another mod - review needed.");
+                }
+
+                results.Add(new DraftInstructionResult(component, added, unparsedGaps, conditionalDrafts));
             }
 
             return results;
@@ -181,15 +229,43 @@ namespace ModSync.Core.Parsing
                 throw new ArgumentNullException(nameof(component));
             }
 
+            AppendWarningIfMissing(component, ReviewFlagMessage, prepend: true);
+        }
+
+        /// <summary>
+        /// Appends conditional-draft notes (see <see cref="DraftInstructionResult.ConditionalDrafts"/>) to a
+        /// component's <see cref="ModComponent.InstallationWarning"/> so a reviewer sees, alongside the
+        /// general draft review flag, exactly which drafted instructions are conditional on another mod.
+        /// Does not duplicate notes already present.
+        /// </summary>
+        private static void ApplyConditionalDraftNote(
+            [NotNull] ModComponent component,
+            [NotNull][ItemNotNull] IReadOnlyList<string> conditionalDrafts)
+        {
+            foreach (string note in conditionalDrafts)
+            {
+                AppendWarningIfMissing(component, note, prepend: false);
+            }
+        }
+
+        /// <summary>
+        /// Adds <paramref name="text"/> to a component's <see cref="ModComponent.InstallationWarning"/>
+        /// unless it's already present. <paramref name="prepend"/> controls whether new text goes before
+        /// or after any existing warning content.
+        /// </summary>
+        private static void AppendWarningIfMissing([NotNull] ModComponent component, [NotNull] string text, bool prepend)
+        {
             if (string.IsNullOrWhiteSpace(component.InstallationWarning))
             {
-                component.InstallationWarning = ReviewFlagMessage;
+                component.InstallationWarning = text;
                 return;
             }
 
-            if (component.InstallationWarning.IndexOf(ReviewFlagMessage, StringComparison.Ordinal) < 0)
+            if (component.InstallationWarning.IndexOf(text, StringComparison.Ordinal) < 0)
             {
-                component.InstallationWarning = ReviewFlagMessage + Environment.NewLine + component.InstallationWarning;
+                component.InstallationWarning = prepend
+                    ? text + Environment.NewLine + component.InstallationWarning
+                    : component.InstallationWarning + Environment.NewLine + text;
             }
         }
 

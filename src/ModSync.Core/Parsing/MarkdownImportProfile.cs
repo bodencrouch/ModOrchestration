@@ -572,12 +572,22 @@ namespace ModSync.Core.Parsing
             return clone;
         }
 
+        /// <summary>
+        /// Builds a regex alternative matching a field expressed as a Docusaurus-style admonition
+        /// fence (<c>:::note</c>/<c>:::warning</c>/<c>:::tip</c>/<c>:::danger</c>/<c>:::info</c>)
+        /// wrapping a definition-list body (<c>:   &lt;content&gt;</c>). The guide has used this
+        /// convention for every field since October 2025; any admonition type may wrap any field,
+        /// so this generalizes rather than hardcoding one admonition type per field.
+        /// </summary>
+        private static string BuildFencePattern(string titlePattern, string groupName) =>
+            @":::(?:note|warning|tip|danger|info)\s*\r?\n\s*(?:" + titlePattern + @")\s*\r?\n:\s*(?<" + groupName + @">(?:(?!\r?\n\s*:::).)*?)\r?\n\s*:::";
+
         public static MarkdownImportProfile CreateDefault()
         {
             // Shared boundary: next bold **Field:**, plain Field:, horizontal rule, or markdown heading.
             // Bold alternatives are listed first so **Name:** wins when both styles appear.
             const string fieldBoundary =
-                @"(?:\*\*[^*\r\n]{1,100}:\*\*|(?:Name|Author|Description|Masters|Category\s*&\s*Tier|Non-English Functionality|Installation Method|Installation Instructions|Install Instructions|Download Instructions|Usage Warning|Screenshots|Known Bugs|Installation Warning|Compatibility Warning|Steam Notes)\s*:|#{2,3}\s|_{3,}|-{3,})";
+                @"(?:\*\*[^*\r\n]{1,100}:\*\*|(?:Name|Author|Description|Masters|Category\s*&\s*Tier|Non-English Functionality|Installation Method|Installation Instructions|Install Instructions|Download Instructions|Usage Warning|Screenshots|Known Bugs|Installation Warning|Compatibility Warning|Steam Notes)\s*:|#{2,3}\s|_{3,}|-{3,}|:::(?:note|warning|tip|danger|info))";
 
             const string defaultRawPattern =
                 @"(?ms)^###\s*(?<heading>.+?)\s*\r?\n" +
@@ -608,23 +618,29 @@ namespace ModSync.Core.Parsing
                 HeadingPattern = @"^###\s+(?<heading>.+?)(?:\s*\[.*?\])?\s*$",
                 NamePattern = @"(?:\*\*Name:\*\*|Name:)\s*(?:\[(?<name>(?<name_link>[^\]]+))\]\([^)]+\)|(?<name_plain>[^\r\n]+))[^\r\n]*",
                 AuthorPattern = @"(?:\*\*Author:\*\*|Author:)\s*(?<author>[^\r\n]+)",
-                DescriptionPattern = @"(?:\*\*Description:\*\*|Description:)\s*(?<description>" + multilineFieldBody + @")",
+                DescriptionPattern = BuildFencePattern("Description", "description") +
+                    @"|(?:\*\*Description:\*\*|Description:)\s*(?<description>" + multilineFieldBody + @")",
                 ModLinkPattern = @"\[(?<label>[^]]+)\]\((?<link>[^)]+)\)",
                 CategoryTierPattern = @"(?:\*\*Category\s*&\s*Tier:\*\*|Category\s*&\s*Tier:)\s*(?<category>[^/\r\n]+)/\s*(?<tier>[^\r\n]+)",
                 InstallationMethodPattern = @"(?:\*\*Installation Method:\*\*|Installation Method:)\s*(?<method>[^\r\n]+)",
-                DownloadInstructionsPattern = @"(?:\*\*Download Instructions:\*\*|Download Instructions:?)\s*(?<download>" + multilineFieldBody + @")",
+                DownloadInstructionsPattern = BuildFencePattern("Download Instructions", "download") +
+                    @"|(?:\*\*Download Instructions:\*\*|Download Instructions:?)\s*(?<download>" + multilineFieldBody + @")",
                 InstallationInstructionsPattern =
-                    @"(?::::note\s*\r?\n\s*Installation Instructions\s*\r?\n:\s*(?<directions>(?:(?!\r?\n\s*:::).)*?)\r?\n\s*:::" +
+                    BuildFencePattern("(?:Install(?:ation)?|Installation) Instructions", "directions") +
                     @"|(?:\*\*(?:Install(?:ation)?|Installation) Instructions:\*\*\s*(?<directions>" + multilineFieldBody + @"))" +
-                    @"|(?m)^(?:Install(?:ation)?|Installation) Instructions:?\s*(?:\r?\n)+(?<directions>" + multilineFieldBody + @"))",
-                UsageWarningPattern = @"(?:\*\*Usage Warning:\*\*|Usage Warning:?)\s*(?<warning>" + multilineFieldBody + @")",
-                ScreenshotsPattern = @"(?:\*\*Screenshots:\*\*|Screenshots:?)\s*(?<screenshots>" + multilineFieldBody + @")",
-                KnownBugsPattern =
-                    @"(?::::warning\s*\r?\n\s*Known Bugs\s*\r?\n:\s*(?<bugs>(?:(?!\r?\n\s*:::).)*?)\r?\n\s*:::" +
-                    @"|(?:\*\*Known Bugs:\*\*|Known Bugs:?)\s*(?<bugs>" + multilineFieldBody + @"))",
-                InstallationWarningPattern = @"(?:\*\*Installation Warning:\*\*|Installation Warning:?)\s*(?<installwarning>" + multilineFieldBody + @")",
-                CompatibilityWarningPattern = @"(?:\*\*Compatibility Warning:\*\*|Compatibility Warning:?)\s*(?<compatwarning>" + multilineFieldBody + @")",
-                SteamNotesPattern = @"(?:\*\*Steam Notes:\*\*|Steam Notes:?)\s*(?<steamnotes>" + multilineFieldBody + @")",
+                    @"|(?m)^(?:Install(?:ation)?|Installation) Instructions:?\s*(?:\r?\n)+(?<directions>" + multilineFieldBody + @")",
+                UsageWarningPattern = BuildFencePattern("Usage Warning", "warning") +
+                    @"|(?:\*\*Usage Warning:\*\*|Usage Warning:?)\s*(?<warning>" + multilineFieldBody + @")",
+                ScreenshotsPattern = BuildFencePattern("Screenshots", "screenshots") +
+                    @"|(?:\*\*Screenshots:\*\*|Screenshots:?)\s*(?<screenshots>" + multilineFieldBody + @")",
+                KnownBugsPattern = BuildFencePattern("Known Bugs", "bugs") +
+                    @"|(?:\*\*Known Bugs:\*\*|Known Bugs:?)\s*(?<bugs>" + multilineFieldBody + @")",
+                InstallationWarningPattern = BuildFencePattern("Installation Warning", "installwarning") +
+                    @"|(?:\*\*Installation Warning:\*\*|Installation Warning:?)\s*(?<installwarning>" + multilineFieldBody + @")",
+                CompatibilityWarningPattern = BuildFencePattern("Compatibility Warning", "compatwarning") +
+                    @"|(?:\*\*Compatibility Warning:\*\*|Compatibility Warning:?)\s*(?<compatwarning>" + multilineFieldBody + @")",
+                SteamNotesPattern = BuildFencePattern("Steam Notes", "steamnotes") +
+                    @"|(?:\*\*Steam Notes:\*\*|Steam Notes:?)\s*(?<steamnotes>" + multilineFieldBody + @")",
                 NonEnglishPattern = @"(?:\*\*Non-English Functionality:\*\*|Non-English Functionality:)\s*(?<value>[^\r\n]+)",
                 DependenciesPattern = @"(?:\*\*Masters:\*\*|Masters:)\s*(?<masters>[^\r\n]+)",
                 DependenciesSeparatorPattern = @"[,;+&]",

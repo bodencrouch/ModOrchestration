@@ -19,11 +19,25 @@ namespace ModSync.Core.Ports.Guides
         public GuideIngestResult(
             [NotNull][ItemNotNull] IReadOnlyList<ModComponent> components,
             [CanBeNull][ItemNotNull] IReadOnlyList<DraftInstructionResult> draftResults = null,
-            [CanBeNull] string detectedFormat = null)
+            [CanBeNull] string detectedFormat = null,
+            [CanBeNull] string preambleContent = null,
+            [CanBeNull] string epilogueContent = null,
+            [CanBeNull] string widescreenWarningContent = null,
+            [CanBeNull] string aspyrExclusiveWarningContent = null,
+            [CanBeNull] string installationWarningContent = null,
+            [CanBeNull] ParsingTraceInfo trace = null,
+            [CanBeNull][ItemNotNull] IReadOnlyList<string> warnings = null)
         {
+            Warnings = warnings ?? Array.Empty<string>();
             Components = components ?? throw new ArgumentNullException(nameof(components));
             DraftResults = draftResults ?? Array.Empty<DraftInstructionResult>();
             DetectedFormat = detectedFormat;
+            PreambleContent = preambleContent;
+            EpilogueContent = epilogueContent;
+            WidescreenWarningContent = widescreenWarningContent;
+            AspyrExclusiveWarningContent = aspyrExclusiveWarningContent;
+            InstallationWarningContent = installationWarningContent;
+            Trace = trace;
         }
 
         [NotNull]
@@ -34,8 +48,46 @@ namespace ModSync.Core.Ports.Guides
         [ItemNotNull]
         public IReadOnlyList<DraftInstructionResult> DraftResults { get; }
 
+        /// <summary>
+        /// Non-fatal parse warnings (e.g. a component section that produced no valid component). Markdown-
+        /// only; always empty for other formats, which do not surface warnings through this port.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        public IReadOnlyList<string> Warnings { get; }
+
         [CanBeNull]
         public string DetectedFormat { get; }
+
+        /// <summary>
+        /// Guide content preceding the "## Mod List" heading. Only populated for markdown-format input -
+        /// null for TOML/YAML/JSON/XML ingest, which has no equivalent section.
+        /// </summary>
+        [CanBeNull]
+        public string PreambleContent { get; }
+
+        /// <summary>Guide content following the last component. Markdown-only; see <see cref="PreambleContent"/>.</summary>
+        [CanBeNull]
+        public string EpilogueContent { get; }
+
+        /// <summary>Widescreen-fix warning section content. Markdown-only; see <see cref="PreambleContent"/>.</summary>
+        [CanBeNull]
+        public string WidescreenWarningContent { get; }
+
+        /// <summary>Aspyr-exclusive-content warning section. Markdown-only; see <see cref="PreambleContent"/>.</summary>
+        [CanBeNull]
+        public string AspyrExclusiveWarningContent { get; }
+
+        /// <summary>Guide-level installation warning section. Markdown-only; see <see cref="PreambleContent"/>.</summary>
+        [CanBeNull]
+        public string InstallationWarningContent { get; }
+
+        /// <summary>
+        /// What <see cref="MarkdownParser"/> matched, where, and with which patterns. Markdown-only; null
+        /// for other formats, which do not go through <see cref="MarkdownParser"/>.
+        /// </summary>
+        [CanBeNull]
+        public ParsingTraceInfo Trace { get; }
     }
 
     /// <summary>
@@ -58,13 +110,17 @@ namespace ModSync.Core.Ports.Guides
         string EmitMarkdown(
             [NotNull][ItemNotNull] IReadOnlyList<ModComponent> components,
             [CanBeNull] string preambleContent = null,
-            [CanBeNull] string epilogueContent = null);
+            [CanBeNull] string epilogueContent = null,
+            [CanBeNull] string widescreenWarningContent = null,
+            [CanBeNull] string aspyrExclusiveWarningContent = null);
 
         [ItemNotNull]
         Task<string> EmitMarkdownAsync(
             [NotNull][ItemNotNull] IReadOnlyList<ModComponent> components,
             [CanBeNull] string preambleContent = null,
             [CanBeNull] string epilogueContent = null,
+            [CanBeNull] string widescreenWarningContent = null,
+            [CanBeNull] string aspyrExclusiveWarningContent = null,
             CancellationToken cancellationToken = default);
     }
 }

@@ -37,43 +37,7 @@ namespace ModSync.Core.Services
             }
 
             string content = ReadFileWithEncodingFallback(filePath);
-
-            string extension = Path.GetExtension(filePath)?.TrimStart(new[] { '.' }).ToLowerInvariant();
-            string format = null;
-
-            if (!string.IsNullOrEmpty(extension))
-            {
-                switch (extension)
-                {
-                    case "md":
-                    case "markdown":
-                    case "mdown":
-                    case "mkdn":
-                    case "mkd":
-                    case "mdtxt":
-                    case "mdtext":
-                    case "text":
-                        format = "markdown";
-                        break;
-                    case "toml":
-                    case "tml":
-                        format = "toml";
-                        break;
-                    case "yaml":
-                    case "yml":
-                        format = "yaml";
-                        break;
-                    case "json":
-                        format = "json";
-                        break;
-                    case "xml":
-                        format = "xml";
-                        break;
-                    default:
-                        format = null;
-                        break;
-                }
-            }
+            string format = GetFormatHintFromExtension(filePath);
 
             return ModComponentSerializationService.DeserializeModComponentFromString(content, format);
         }
@@ -81,6 +45,20 @@ namespace ModSync.Core.Services
         [NotNull]
         [ItemNotNull]
         public static async Task<List<ModComponent>> LoadFromFileAsync([NotNull] string filePath)
+        {
+            (string content, string format) = await ReadFileContentAndFormatHintAsync(filePath).ConfigureAwait(false);
+            return (List<ModComponent>)await ModComponentSerializationService.DeserializeModComponentFromStringAsync(content, format).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Reads a file's content (with the same UTF-8-with-fallback and case-insensitive-path handling as
+        /// <see cref="LoadFromFileAsync"/>) and resolves its format hint from the file extension, without
+        /// deserializing. Callers that need the raw content - e.g. to route through
+        /// <see cref="Ports.Guides.IGuideIngestService"/> - use this instead of duplicating the file-reading
+        /// logic <see cref="LoadFromFileAsync"/> already gets right.
+        /// </summary>
+        [ItemNotNull]
+        public static async Task<(string Content, string FormatHint)> ReadFileContentAndFormatHintAsync([NotNull] string filePath)
         {
             if (filePath is null)
             {
@@ -98,45 +76,44 @@ namespace ModSync.Core.Services
             }
 
             string content = await Task.Run(() => ReadFileWithEncodingFallback(filePath)).ConfigureAwait(false);
+            string format = GetFormatHintFromExtension(filePath);
 
+            return (content, format);
+        }
+
+        [CanBeNull]
+        private static string GetFormatHintFromExtension([NotNull] string filePath)
+        {
             string extension = Path.GetExtension(filePath)?.TrimStart(new[] { '.' }).ToLowerInvariant();
-            string format = null;
-
-            if (!string.IsNullOrEmpty(extension))
+            if (string.IsNullOrEmpty(extension))
             {
-                switch (extension)
-                {
-                    case "md":
-                    case "markdown":
-                    case "mdown":
-                    case "mkdn":
-                    case "mkd":
-                    case "mdtxt":
-                    case "mdtext":
-                    case "text":
-                        format = "markdown";
-                        break;
-                    case "toml":
-                    case "tml":
-                        format = "toml";
-                        break;
-                    case "yaml":
-                    case "yml":
-                        format = "yaml";
-                        break;
-                    case "json":
-                        format = "json";
-                        break;
-                    case "xml":
-                        format = "xml";
-                        break;
-                    default:
-                        format = null;
-                        break;
-                }
+                return null;
             }
 
-            return (List<ModComponent>)await ModComponentSerializationService.DeserializeModComponentFromStringAsync(content, format).ConfigureAwait(false);
+            switch (extension)
+            {
+                case "md":
+                case "markdown":
+                case "mdown":
+                case "mkdn":
+                case "mkd":
+                case "mdtxt":
+                case "mdtext":
+                case "text":
+                    return "markdown";
+                case "toml":
+                case "tml":
+                    return "toml";
+                case "yaml":
+                case "yml":
+                    return "yaml";
+                case "json":
+                    return "json";
+                case "xml":
+                    return "xml";
+                default:
+                    return null;
+            }
         }
 
         public static void SaveToFile([NotNull] List<ModComponent> components, [NotNull] string filePath)

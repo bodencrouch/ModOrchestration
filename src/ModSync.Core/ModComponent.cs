@@ -807,8 +807,10 @@ namespace ModSync.Core
             return Services.ModComponentSerializationService.SerializeSingleComponentAsTomlString(this);
         }
 
+        /// <param name="tomlString">The raw TOML content to deserialize.</param>
+        /// <param name="requireName">See <see cref="Services.ModComponentSerializationService.DeserializeComponent"/>.</param>
         [CanBeNull]
-        public static ModComponent DeserializeTomlComponent([NotNull] string tomlString)
+        public static ModComponent DeserializeTomlComponent([NotNull] string tomlString, bool requireName = true)
         {
             if (tomlString is null)
             {
@@ -816,7 +818,7 @@ namespace ModSync.Core
             }
 
             // Use the unified deserialization service
-            IReadOnlyList<ModComponent> components = Services.ModComponentSerializationService.DeserializeModComponentFromTomlString(tomlString);
+            IReadOnlyList<ModComponent> components = Services.ModComponentSerializationService.DeserializeModComponentFromTomlString(tomlString, requireName);
             return components?.FirstOrDefault();
         }
         public async Task<InstallExitCode> InstallAsync(

@@ -229,9 +229,11 @@ namespace ModSync.Core.Services
         }
 
         #region Loading Functions
+        /// <param name="tomlContent">The raw TOML content to deserialize.</param>
+        /// <param name="requireName">See <see cref="DeserializeComponent"/>.</param>
         [NotNull]
         [ItemNotNull]
-        public static IReadOnlyList<ModComponent> DeserializeModComponentFromTomlString([NotNull] string tomlContent)
+        public static IReadOnlyList<ModComponent> DeserializeModComponentFromTomlString([NotNull] string tomlContent, bool requireName = true)
         {
             Logger.LogVerbose("Loading from TOML string");
             if (tomlContent is null)
@@ -420,7 +422,7 @@ namespace ModSync.Core.Services
                         Logger.LogVerbose($"TOML component does NOT have Instructions field. Available keys: {string.Join(", ", componentDict.Keys)}");
                     }
 
-                    ModComponent thisComponent = DeserializeComponent(componentDict);
+                    ModComponent thisComponent = DeserializeComponent(componentDict, requireName);
 
                     // Assign collected instructions to this component
                     // Only if they weren't already deserialized from componentDict
@@ -753,6 +755,18 @@ namespace ModSync.Core.Services
             return components;
         }
 
+        /// <summary>
+        /// Format-hint aliases that <see cref="DeserializeModComponentFromString"/>'s switch below
+        /// resolves to markdown. Exposed so other callers (e.g. the guide ingest port) can recognize the
+        /// same aliases without maintaining a second copy of this list.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        internal static readonly string[] MarkdownFormatAliases =
+        {
+            "md", "markdown", "mdown", "mkdn", "mkd", "mdtxt", "mdtext", "text",
+        };
+
         [NotNull]
         [ItemNotNull]
         public static IReadOnlyList<ModComponent> DeserializeModComponentFromString(
@@ -932,7 +946,7 @@ namespace ModSync.Core.Services
 
             (string Format, Func<string, IReadOnlyList<ModComponent>> Parse)[] cascade =
             {
-                ("toml", DeserializeModComponentFromTomlString),
+                ("toml", tomlText => DeserializeModComponentFromTomlString(tomlText)),
                 ("markdown", DeserializeModComponentFromMarkdownString),
                 ("yaml", DeserializeModComponentFromYamlString),
             };
@@ -1129,46 +1143,22 @@ namespace ModSync.Core.Services
                     Logger.LogVerbose("ProcessInstructionsAndOptions: No KeyValuePair instruction items, processing individually");
                     var processedInstructions = new List<object>();
 
-                    var currentInstruction = new Dictionary<string, object>(StringComparer.Ordinal);
-
                     foreach (object item in instructionsList)
                     {
                         Logger.LogVerbose($"ProcessInstructionsAndOptions: Processing instruction item of type {item.GetType().Name}");
 
-                        if (item is KeyValuePair<string, object> kvp)
-                        {
-                            Logger.LogVerbose($"ProcessInstructionsAndOptions: KeyValuePair - {kvp.Key} = {kvp.Value}");
-                            currentInstruction[kvp.Key] = kvp.Value;
-
-                            // Check if this completes an instruction (has Action field)
-                            if (kvp.Key.Equals("Action", StringComparison.OrdinalIgnoreCase)
-                                && !string.IsNullOrEmpty(kvp.Value?.ToString()))
-                            {
-                                processedInstructions.Add(new Dictionary<string, object>(currentInstruction, StringComparer.Ordinal));
-                                currentInstruction.Clear();
-                            }
-                        }
-                        else if (item is Dictionary<string, object> dict)
+                        // This branch only runs when hasKeyValuePairs is false, so no item here can
+                        // be a KeyValuePair<string, object> (its GetType().Name always starts with
+                        // "KeyValuePair", which would have made hasKeyValuePairs true above).
+                        if (item is Dictionary<string, object> dict)
                         {
                             Logger.LogVerbose($"ProcessInstructionsAndOptions: Dictionary with {dict.Count} keys: {string.Join(", ", dict.Keys)}");
-                            if (currentInstruction.Count > 0)
-
-                            {
-                                processedInstructions.Add(new Dictionary<string, object>(currentInstruction, StringComparer.Ordinal));
-                                currentInstruction.Clear();
-                            }
                             processedInstructions.Add(dict);
                         }
                         else
                         {
                             Logger.LogVerbose($"ProcessInstructionsAndOptions: Unknown item type {item.GetType().Name}: {item}");
                         }
-                    }
-
-                    if (currentInstruction.Count > 0)
-
-                    {
-                        processedInstructions.Add(new Dictionary<string, object>(currentInstruction, StringComparer.Ordinal));
                     }
 
                     Logger.LogVerbose($"ProcessInstructionsAndOptions: Processed {processedInstructions.Count} instructions");
@@ -1197,46 +1187,22 @@ namespace ModSync.Core.Services
                     Logger.LogVerbose("ProcessInstructionsAndOptions: No KeyValuePair option items, processing individually");
                     var processedOptions = new List<object>();
 
-                    var currentOption = new Dictionary<string, object>(StringComparer.Ordinal);
-
                     foreach (object item in optionsList)
                     {
                         Logger.LogVerbose($"ProcessInstructionsAndOptions: Processing option item of type {item.GetType().Name}");
 
-                        if (item is KeyValuePair<string, object> kvp)
-                        {
-                            Logger.LogVerbose($"ProcessInstructionsAndOptions: KeyValuePair - {kvp.Key} = {kvp.Value}");
-                            currentOption[kvp.Key] = kvp.Value;
-
-                            // Check if this completes an option (has Name field)
-                            if (kvp.Key.Equals("Name", StringComparison.OrdinalIgnoreCase)
-                                && !string.IsNullOrEmpty(kvp.Value?.ToString()))
-                            {
-                                processedOptions.Add(new Dictionary<string, object>(currentOption, StringComparer.Ordinal));
-                                currentOption.Clear();
-                            }
-                        }
-                        else if (item is Dictionary<string, object> dict)
+                        // This branch only runs when hasKeyValuePairs is false, so no item here can
+                        // be a KeyValuePair<string, object> (its GetType().Name always starts with
+                        // "KeyValuePair", which would have made hasKeyValuePairs true above).
+                        if (item is Dictionary<string, object> dict)
                         {
                             Logger.LogVerbose($"ProcessInstructionsAndOptions: Dictionary with {dict.Count} keys: {string.Join(", ", dict.Keys)}");
-                            if (currentOption.Count > 0)
-
-                            {
-                                processedOptions.Add(new Dictionary<string, object>(currentOption, StringComparer.Ordinal));
-                                currentOption.Clear();
-                            }
                             processedOptions.Add(dict);
                         }
                         else
                         {
                             Logger.LogVerbose($"ProcessInstructionsAndOptions: Unknown item type {item.GetType().Name}: {item}");
                         }
-                    }
-
-                    if (currentOption.Count > 0)
-
-                    {
-                        processedOptions.Add(new Dictionary<string, object>(currentOption, StringComparer.Ordinal));
                     }
 
                     Logger.LogVerbose($"ProcessInstructionsAndOptions: Processed {processedOptions.Count} options");
@@ -1355,15 +1321,13 @@ namespace ModSync.Core.Services
 
                     Logger.LogVerbose($"GroupKeyValuePairsIntoInstructions: Processing {key} = {value}");
 
-                    // Check if this is a new instruction (Action field marks the start of a new instruction)
-                    if (!(key is null) && key.Equals("Action", StringComparison.OrdinalIgnoreCase) && value != null)
+                    // A repeated key means the flat KeyValuePair stream has wrapped around to the
+                    // next instruction (field order varies - e.g. Guid may precede or follow Action),
+                    // so use key repetition rather than a hardcoded field name as the boundary signal.
+                    if (!(key is null) && currentInstruction.ContainsKey(key))
                     {
-                        // If we have a current instruction, save it before starting a new one
-                        if (currentInstruction.Count > 0)
-                        {
-                            instructions.Add(new Dictionary<string, object>(currentInstruction, StringComparer.Ordinal));
-                            currentInstruction.Clear();
-                        }
+                        instructions.Add(new Dictionary<string, object>(currentInstruction, StringComparer.Ordinal));
+                        currentInstruction.Clear();
                     }
                     currentInstruction[key] = value;
                 }
@@ -1420,21 +1384,18 @@ namespace ModSync.Core.Services
                     }
 
                     Logger.LogVerbose($"GroupKeyValuePairsIntoOptions: Processing {key} = {value}");
-                    currentOption[key] = value;
 
-                    // Check if this completes an option (has Name field and we've seen a Guid)
-                    if (
-                        key?.Equals("Name", StringComparison.OrdinalIgnoreCase) == true
-                        && !string.IsNullOrEmpty(value?.ToString())
-                        && currentOption.ContainsKey("Guid")
-                        && currentOption.Count > 0
-                    )
+                    // A repeated key means the flat KeyValuePair stream has wrapped around to the
+                    // next option (field order varies - e.g. Guid may precede or follow Name),
+                    // so use key repetition rather than a hardcoded field name as the boundary signal.
+                    if (!(key is null) && currentOption.ContainsKey(key))
                     {
                         Logger.LogVerbose($"GroupKeyValuePairsIntoOptions: Completed option with {currentOption.Count} fields");
 
                         options.Add(new Dictionary<string, object>(currentOption, StringComparer.Ordinal));
                         currentOption.Clear();
                     }
+                    currentOption[key] = value;
                 }
             }
 
@@ -1453,13 +1414,22 @@ namespace ModSync.Core.Services
         /// Deserializes a component from a dictionary with all conditional logic unified.
         /// This is the migrated version from ModComponent.DeserializeComponent.
         /// </summary>
+        /// <param name="componentDict">The raw key/value pairs to deserialize.</param>
+        /// <param name="requireName">
+        /// Whether the "Name" field must be present. Standalone instruction files (TOML/JSON/XML)
+        /// always carry Name and should pass true. Embedded per-component metadata blocks
+        /// (the `&lt;!--&lt;&lt;ModSync&gt;&gt;` markdown comment) intentionally omit Name — it lives in the
+        /// surrounding markdown header — so callers merging that partial data should pass false.
+        /// </param>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0051:Method is too long", Justification = "<Pending>")]
-        public static ModComponent DeserializeComponent([NotNull] IDictionary<string, object> componentDict)
+        public static ModComponent DeserializeComponent([NotNull] IDictionary<string, object> componentDict, bool requireName = true)
         {
             var component = new ModComponent();
 
             component.Guid = GetRequiredValue<Guid>(componentDict, key: "Guid");
-            component.Name = GetRequiredValue<string>(componentDict, key: "Name");
+            component.Name = requireName
+                ? GetRequiredValue<string>(componentDict, key: "Name")
+                : GetValueOrDefault<string>(componentDict, key: "Name") ?? string.Empty;
             _ = Logger.LogVerboseAsync($" == Deserialize next component '{component.Name}' ==");
             component.Author = GetValueOrDefault<string>(componentDict, key: "Author") ?? string.Empty;
             component.Heading = GetValueOrDefault<string>(componentDict, key: "Heading") ?? string.Empty;
@@ -3644,8 +3614,10 @@ namespace ModSync.Core.Services
             return result;
         }
 
+        /// <param name="yamlString">The raw YAML content to deserialize.</param>
+        /// <param name="requireName">See <see cref="DeserializeComponent"/>.</param>
         [CanBeNull]
-        public static ModComponent DeserializeYamlComponent([NotNull] string yamlString)
+        public static ModComponent DeserializeYamlComponent([NotNull] string yamlString, bool requireName = true)
         {
             if (yamlString is null)
             {
@@ -3682,7 +3654,7 @@ namespace ModSync.Core.Services
                 // Pre-process the component dictionary to handle duplicate fields
                 yamlDict = PreprocessComponentDictionary(yamlDict);
 
-                ModComponent component = DeserializeComponent(yamlDict);
+                ModComponent component = DeserializeComponent(yamlDict, requireName);
                 return component;
             }
             catch (Exception ex)
