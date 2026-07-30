@@ -88,9 +88,6 @@
     <Compile Remove="RegexPreviewHighlightingTests.cs" />
     <Compile Remove="MainWindowUITests.cs" />
     <Compile Remove="CheckpointSystemIntegrationTests.cs" />
-    <Compile Remove="DocumentationRoundTripTests.cs" />
-    <Compile Remove="MarkdownFileTests.cs" />
-    <Compile Remove="MarkdownImportTests.cs" />
     <Compile Remove="ModSyncMetadataTests.cs" />
     <Compile Remove="ResourceMetadataSerializationTests.cs" />
   </ItemGroup>
