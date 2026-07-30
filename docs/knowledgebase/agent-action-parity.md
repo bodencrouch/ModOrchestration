@@ -16,7 +16,7 @@ Wizard order from `src/ModSync.GUI/Dialogs/InstallWizardDialog.axaml.cs` and `AG
 | 6 | `AspyrNoticePage` | Acknowledge (K2) | No CLI equivalent | UI |
 | 7 | `ModSelectionPage` | Select mods, filters | `install` without `--select` = select all; `install --select category:X` / `tier:X` | Full (install); Partial (subset only with `--select`) |
 | 8 | `DownloadsExplainPage` | Continue (downloads may run) | `install -d` or `convert -d` (+ FOMOD: TTY / `--fomod-choices` / `--fomod-skip`) | Partial — live download status is `[UI]`; FOMOD configure is Full via CLI (see [fomod-support.md](fomod-support.md)) |
-| 9 | `ValidatePage` | Run validation | `validate --full --dry-run --use-file-selection` (same Core `InstallationValidationPipeline` as GUI) | Full |
+| 9 | `ValidatePage` | Run validation | `validate --full --dry-run --use-file-selection --output json` (same Core `InstallationValidationPipeline` as GUI) | Full |
 | 10 | `InstallStartPage` | Confirm install | `install -y` (runs `InstallationValidationPipeline` / `WizardFull` pre-check unless `--skip-validation`) | Full |
 | 10b | Managed deploy | Opt-in hardlink deploy via active profile | `install --managed` / `--no-managed` / `--profile` (#177); `profile --action activate`; settings toggle still GUI | Full (CLI overrides + profile CRUD) — [managed-deployment.md](managed-deployment.md) |
 | 11 | `InstallingPage` | Watch progress | `install` (console progress) | Full — see [install-lifecycle.md](install-lifecycle.md) |
@@ -68,6 +68,7 @@ Wizard order from `src/ModSync.GUI/Dialogs/InstallWizardDialog.axaml.cs` and `AG
 | Guide ingest | `GuideIngestionTests` | `--stdin` / `--parse-directions` draft + sandboxed paths |
 | Profile CLI | `ProfileCliTests` | `profile` verb CRUD + activate persists `activeProfileName` |
 | Settings CLI | `SettingsCliTests` | `settings list|get|set` merges into `settings.json` |
+| Validate JSON | `ValidateCliJsonTests`, `ValidationPipelineJsonFormatterTests` | `validate --output json` structured stdout |
 | Wizard validation UX | `WizardValidationStagePresenter`, `ValidationPipelineDialogMapper` | Stage cards / dialog mapper parity ([PR #110](https://github.com/th3w1zard1/ModSync/pull/110)) |
 | Version alignment | `ReleaseVersionAlignmentTests` | Release metadata consistency |
 
@@ -88,6 +89,6 @@ Wizard order from `src/ModSync.GUI/Dialogs/InstallWizardDialog.axaml.cs` and `AG
 9. **FOMOD post-download** — GUI prompts after Fetch Downloads (PR #169). CLI: TTY wizard, `--fomod-skip`, `--fomod-choices` / `MODSYNC_FOMOD_CHOICES`, or non-TTY **warn-continue** (marks `warned`; `FomodConfigurationGate` still blocks validate/install until `configured`). See [fomod-support.md](fomod-support.md).
 10. **Guide drafts** — `--parse-directions` / GUI paste drafts are review-flagged; never treat as trusted install instructions without review. See [guide-ingestion.md](guide-ingestion.md).
 11. **Managed / profile CLI** — `install --managed` / `--no-managed` / `--profile` shipped (#177). Profile CRUD via `profile` verb (`list|show|create|delete|activate|clone|rename`). See [managed-deployment.md](managed-deployment.md) and [core-cli-reference.md](core-cli-reference.md).
-12. **Validation presentation vs pipeline** — CLI and GUI share `InstallationValidationPipeline`; stage-card UX / copy-report / go-to-first-issue remain `[UI]` ([gui-validation-surfaces.md](gui-validation-surfaces.md)).
+12. **Validation presentation vs pipeline** — CLI and GUI share `InstallationValidationPipeline`; stage-card UX / copy-report / go-to-first-issue remain `[UI]`. Agents use `validate --output json` for structured reports ([gui-validation-surfaces.md](gui-validation-surfaces.md)).
 
 See [agent-native-audit.md](agent-native-audit.md) for scored principles and [core-cli-reference.md](core-cli-reference.md) for flags.

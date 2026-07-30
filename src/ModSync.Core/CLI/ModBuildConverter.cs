@@ -599,6 +599,9 @@ namespace ModSync.Core.CLI
 
             [Option("use-file-selection", Required = false, Default = false, HelpText = "Only validate components with IsSelected=true in the file (matches GUI after Mod Selection). Without this flag and without --select, all components are validated.")]
             public bool UseFileSelection { get; set; }
+
+            [Option("output", Required = false, Default = "text", HelpText = "Output format: text (default) or json")]
+            public string Output { get; set; }
         }
 
         [Verb("install", HelpText = "Install mods from an instruction file")]
@@ -743,22 +746,62 @@ namespace ModSync.Core.CLI
             Environment.SetEnvironmentVariable("PYTHON_KEYRING_BACKEND", "keyring.backends.null.Keyring");
             // Avoid forcing an empty DISPLAY: some child tools probe X11; leave user/session DISPLAY intact.
 
-            Logger.Initialize();
+            bool validateJsonOutput = ShouldUseValidateJsonOutput(args);
+            if (validateJsonOutput)
+            {
+                Logger.SetMachineReadableConsoleMode(true);
+            }
 
-            var parser = new Parser(with => with.HelpWriter = Console.Out);
+            try
+            {
+                Logger.Initialize();
 
-            return parser.ParseArguments<ConvertOptions, MergeOptions, ValidateOptions, InstallOptions, SetNexusApiKeyOptions, InstallPythonDepsOptions, HolopatcherOptions, ProfileOptions, SettingsOptions>(args)
-            .MapResult(
-                (ConvertOptions opts) => RunConvertAsync(opts).GetAwaiter().GetResult(),
-                (MergeOptions opts) => RunMergeAsync(opts).GetAwaiter().GetResult(),
-                (ValidateOptions opts) => RunValidateAsync(opts).GetAwaiter().GetResult(),
-                (InstallOptions opts) => RunInstallAsync(opts).GetAwaiter().GetResult(),
-                (SetNexusApiKeyOptions opts) => RunSetNexusApiKeyAsync(opts).GetAwaiter().GetResult(),
-                (InstallPythonDepsOptions opts) => RunInstallPythonDepsAsync(opts).GetAwaiter().GetResult(),
-                (HolopatcherOptions opts) => RunHolopatcherAsync(opts).GetAwaiter().GetResult(),
-                (ProfileOptions opts) => RunProfileAsync(opts),
-                (SettingsOptions opts) => RunSettingsAsync(opts),
-                errs => 1);
+                var parser = new Parser(with => with.HelpWriter = Console.Out);
+
+                return parser.ParseArguments<ConvertOptions, MergeOptions, ValidateOptions, InstallOptions, SetNexusApiKeyOptions, InstallPythonDepsOptions, HolopatcherOptions, ProfileOptions, SettingsOptions>(args)
+                .MapResult(
+                    (ConvertOptions opts) => RunConvertAsync(opts).GetAwaiter().GetResult(),
+                    (MergeOptions opts) => RunMergeAsync(opts).GetAwaiter().GetResult(),
+                    (ValidateOptions opts) => RunValidateAsync(opts).GetAwaiter().GetResult(),
+                    (InstallOptions opts) => RunInstallAsync(opts).GetAwaiter().GetResult(),
+                    (SetNexusApiKeyOptions opts) => RunSetNexusApiKeyAsync(opts).GetAwaiter().GetResult(),
+                    (InstallPythonDepsOptions opts) => RunInstallPythonDepsAsync(opts).GetAwaiter().GetResult(),
+                    (HolopatcherOptions opts) => RunHolopatcherAsync(opts).GetAwaiter().GetResult(),
+                    (ProfileOptions opts) => RunProfileAsync(opts),
+                    (SettingsOptions opts) => RunSettingsAsync(opts),
+                    errs => 1);
+            }
+            finally
+            {
+                if (validateJsonOutput)
+                {
+                    Logger.SetMachineReadableConsoleMode(false);
+                }
+            }
+        }
+
+        private static bool ShouldUseValidateJsonOutput([NotNull] string[] args)
+        {
+            if (args.Length == 0 || !string.Equals(args[0], "validate", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (string.Equals(args[i], "--output", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    return string.Equals(args[i + 1], "json", StringComparison.OrdinalIgnoreCase);
+                }
+
+                if (args[i].StartsWith("--output=", StringComparison.OrdinalIgnoreCase))
+                {
+                    string value = args[i].Substring("--output=".Length);
+                    return string.Equals(value, "json", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            return false;
         }
 
         private static void SetVerboseMode(bool verbose)
@@ -2953,16 +2996,40 @@ componentName: null,
             };
         }
 
+        private static bool IsValidateJsonOutput([NotNull] ValidateOptions opts) =>
+            string.Equals(opts.Output, "json", StringComparison.OrdinalIgnoreCase);
+
+        private static int WriteValidateJsonError([NotNull] string error, int exitCode = 1)
+        {
+            Console.WriteLine(ValidationPipelineJsonFormatter.SerializeError(error, exitCode));
+            return exitCode;
+        }
+
         private static async Task<int> RunValidateAsync(ValidateOptions opts)
         {
             SetVerboseMode(opts.Verbose);
             s_errorCollector = new ErrorCollector();
+            bool jsonOutput = IsValidateJsonOutput(opts);
+
+            if (!jsonOutput
+                && !string.IsNullOrWhiteSpace(opts.Output)
+                && !string.Equals(opts.Output, "text", StringComparison.OrdinalIgnoreCase))
+            {
+                await Logger.LogErrorAsync($"Error: Unknown validate output format '{opts.Output}'. Use text or json.").ConfigureAwait(false);
+                return 1;
+            }
 
             try
             {
                 if (!File.Exists(opts.InputPath))
                 {
-                    await Logger.LogErrorAsync($"Error: Input file not found: {opts.InputPath}").ConfigureAwait(false);
+                    string message = $"Input file not found: {opts.InputPath}";
+                    if (jsonOutput)
+                    {
+                        return WriteValidateJsonError(message);
+                    }
+
+                    await Logger.LogErrorAsync($"Error: {message}").ConfigureAwait(false);
                     return 1;
                 }
 
@@ -2970,24 +3037,45 @@ componentName: null,
                 {
                     if (string.IsNullOrEmpty(opts.GameDirectory) || string.IsNullOrEmpty(opts.SourceDirectory))
                     {
-                        await Logger.LogErrorAsync("Error: Full validation and dry-run modes require both --game-dir and --source-dir").ConfigureAwait(false);
+                        const string message = "Full validation and dry-run modes require both --game-dir and --source-dir";
+                        if (jsonOutput)
+                        {
+                            return WriteValidateJsonError(message);
+                        }
+
+                        await Logger.LogErrorAsync($"Error: {message}").ConfigureAwait(false);
                         return 1;
                     }
 
                     if (!Directory.Exists(opts.GameDirectory))
                     {
-                        await Logger.LogErrorAsync($"Error: Game directory not found: {opts.GameDirectory}").ConfigureAwait(false);
+                        string message = $"Game directory not found: {opts.GameDirectory}";
+                        if (jsonOutput)
+                        {
+                            return WriteValidateJsonError(message);
+                        }
+
+                        await Logger.LogErrorAsync($"Error: {message}").ConfigureAwait(false);
                         return 1;
                     }
 
                     if (!Directory.Exists(opts.SourceDirectory))
                     {
-                        await Logger.LogErrorAsync($"Error: Source directory not found: {opts.SourceDirectory}").ConfigureAwait(false);
+                        string message = $"Source directory not found: {opts.SourceDirectory}";
+                        if (jsonOutput)
+                        {
+                            return WriteValidateJsonError(message);
+                        }
+
+                        await Logger.LogErrorAsync($"Error: {message}").ConfigureAwait(false);
                         return 1;
                     }
                 }
 
-                await Logger.LogAsync($"Loading instruction file: {opts.InputPath}").ConfigureAwait(false);
+                if (!jsonOutput)
+                {
+                    await Logger.LogAsync($"Loading instruction file: {opts.InputPath}").ConfigureAwait(false);
+                }
 
                 List<ModComponent> components;
                 try
@@ -2999,7 +3087,13 @@ componentName: null,
                 }
                 catch (Exception ex)
                 {
-                    await Logger.LogErrorAsync($"Error loading instruction file: {ex.Message}").ConfigureAwait(false);
+                    string message = $"Error loading instruction file: {ex.Message}";
+                    if (jsonOutput)
+                    {
+                        return WriteValidateJsonError(message);
+                    }
+
+                    await Logger.LogErrorAsync(message).ConfigureAwait(false);
                     if (opts.Verbose)
                     {
                         await Logger.LogErrorAsync("Stack trace:").ConfigureAwait(false);
@@ -3018,12 +3112,21 @@ componentName: null,
 
                 if (components is null || components.Count == 0)
                 {
-                    await Logger.LogErrorAsync("Error: No components loaded from instruction file.").ConfigureAwait(false);
+                    const string message = "No components loaded from instruction file.";
+                    if (jsonOutput)
+                    {
+                        return WriteValidateJsonError(message);
+                    }
+
+                    await Logger.LogErrorAsync($"Error: {message}").ConfigureAwait(false);
                     return 1;
                 }
 
-                await Logger.LogAsync($"Loaded {components.Count} component(s) from instruction file.").ConfigureAwait(false);
-                await Logger.LogAsync().ConfigureAwait(false);
+                if (!jsonOutput)
+                {
+                    await Logger.LogAsync($"Loaded {components.Count} component(s) from instruction file.").ConfigureAwait(false);
+                    await Logger.LogAsync().ConfigureAwait(false);
+                }
 
                 if (opts.FullValidation || opts.DryRun || opts.DryRunOnly)
                 {
@@ -3037,7 +3140,7 @@ componentName: null,
                 bool hasExplicitSelect = opts.Select != null && opts.Select.Any();
                 if (hasExplicitSelect)
                 {
-                    if (!opts.ErrorsOnly)
+                    if (!opts.ErrorsOnly && !jsonOutput)
                     {
                         await Logger.LogAsync("Applying selection filters...").ConfigureAwait(false);
                     }
@@ -3048,11 +3151,17 @@ componentName: null,
 
                     if (componentsToValidate.Count == 0)
                     {
-                        await Logger.LogErrorAsync("Error: No components match the selection criteria.").ConfigureAwait(false);
+                        const string message = "No components match the selection criteria.";
+                        if (jsonOutput)
+                        {
+                            return WriteValidateJsonError(message);
+                        }
+
+                        await Logger.LogErrorAsync($"Error: {message}").ConfigureAwait(false);
                         return 1;
                     }
 
-                    if (!opts.ErrorsOnly)
+                    if (!opts.ErrorsOnly && !jsonOutput)
                     {
                         await Logger.LogAsync($"{componentsToValidate.Count} component(s) selected for validation.").ConfigureAwait(false);
                     }
@@ -3062,11 +3171,17 @@ componentName: null,
                     componentsToValidate = components.Where(c => c.IsSelected).ToList();
                     if (componentsToValidate.Count == 0)
                     {
-                        await Logger.LogErrorAsync("Error: No components are marked IsSelected in the instruction file.").ConfigureAwait(false);
+                        const string message = "No components are marked IsSelected in the instruction file.";
+                        if (jsonOutput)
+                        {
+                            return WriteValidateJsonError(message);
+                        }
+
+                        await Logger.LogErrorAsync($"Error: {message}").ConfigureAwait(false);
                         return 1;
                     }
 
-                    if (!opts.ErrorsOnly)
+                    if (!opts.ErrorsOnly && !jsonOutput)
                     {
                         await Logger.LogAsync($"{componentsToValidate.Count} component(s) marked selected in file will be validated.").ConfigureAwait(false);
                     }
@@ -3094,6 +3209,15 @@ componentName: null,
                 ValidationPipelineResult pipelineResult = await InstallationValidationPipeline.RunAsync(
                     components,
                     pipelineOptions).ConfigureAwait(false);
+
+                if (jsonOutput)
+                {
+                    Console.WriteLine(ValidationPipelineJsonFormatter.SerializeReport(
+                        pipelineResult,
+                        componentsToValidate.Count,
+                        opts.InputPath));
+                    return pipelineResult.ExitCode;
+                }
 
                 await LogValidationPipelineOutputAsync(pipelineResult, componentsToValidate.Count, opts.ErrorsOnly, opts.DryRunOnly).ConfigureAwait(false);
 
@@ -3131,6 +3255,11 @@ componentName: null,
             }
             catch (Exception ex)
             {
+                if (jsonOutput)
+                {
+                    return WriteValidateJsonError($"Error during validation: {ex.Message}");
+                }
+
                 await Logger.LogErrorAsync($"Error during validation: {ex.Message}").ConfigureAwait(false);
                 if (opts.Verbose)
                 {
