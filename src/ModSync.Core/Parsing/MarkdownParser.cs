@@ -822,7 +822,7 @@ namespace ModSync.Core.Parsing
                 _logVerbose($"    Detected YAML format, attempting to deserialize...");
                 try
                 {
-                    ModComponent yamlComponent = Services.ModComponentSerializationService.DeserializeYamlComponent(metadataText);
+                    ModComponent yamlComponent = Services.ModComponentSerializationService.DeserializeYamlComponent(metadataText, requireName: false);
                     if (yamlComponent != null)
                     {
 
@@ -848,7 +848,7 @@ namespace ModSync.Core.Parsing
                         tomlString = "[[thisMod]]\n" + metadataText;
                     }
 
-                    var tomlComponent = ModComponent.DeserializeTomlComponent(tomlString);
+                    var tomlComponent = ModComponent.DeserializeTomlComponent(tomlString, requireName: false);
                     if (tomlComponent != null)
                     {
 
