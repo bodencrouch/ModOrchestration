@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 
 using ModSync.Core;
@@ -219,6 +220,173 @@ ___";
 			// Options require the TOML-format metadata block to be parsed.
 			// This test documents that the markdown fields survive while the metadata block
 			// is only partially parsed (component-level fields, not option sub-structure).
+		}
+
+		#endregion
+
+		#region Markdown round-trip — Choose tree and branch instructions are preserved (U8, AE1)
+
+		[Test]
+		public void C2_ChooseComponent_EmitAndReingest_PreservesChooseTreeAndBranchInstructions()
+		{
+			// AE1: build the component in-memory (no corpus dependency), emit it through the real
+			// GenerateModDocumentation path, then re-ingest and confirm the Choose tree - the instruction,
+			// both branches, and each branch's own instructions - is identical.
+			var optionA = new Option
+			{
+				Guid = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+				Name = "Option A",
+				Description = "First branch: move a texture into Override",
+				Instructions = new ObservableCollection<Instruction>
+				{
+					new Instruction
+					{
+						Action = Instruction.ActionType.Move,
+						Source = new List<string> { "<<modDirectory>>\\optionA.tpc" },
+						Destination = "<<kotorDirectory>>\\Override",
+					},
+				},
+			};
+
+			var optionB = new Option
+			{
+				Guid = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+				Name = "Option B",
+				Description = "Second branch: delete a conflicting file",
+				Instructions = new ObservableCollection<Instruction>
+				{
+					new Instruction
+					{
+						Action = Instruction.ActionType.Delete,
+						Source = new List<string> { "<<modDirectory>>\\optionB_conflict.tpc" },
+					},
+				},
+			};
+
+			var chooseInstruction = new Instruction
+			{
+				Action = Instruction.ActionType.Choose,
+				Source = new List<string> { optionA.Guid.ToString(), optionB.Guid.ToString() },
+			};
+
+			var component = new ModComponent
+			{
+				Guid = Guid.Parse("44444444-4444-4444-4444-444444444444"),
+				Name = "Choose Component",
+				Author = "TestAuthor",
+				Description = "Tests full Choose-tree round-trip",
+				Instructions = new ObservableCollection<Instruction> { chooseInstruction },
+				Options = new ObservableCollection<Option> { optionA, optionB },
+			};
+
+			string emitted = ModComponentSerializationService.GenerateModDocumentation(new List<ModComponent> { component });
+			MarkdownParserResult reparsed = _parser.Parse(emitted);
+
+			Assert.That(reparsed.Components, Has.Count.EqualTo(1), "Should re-ingest exactly one component");
+			ModComponent reComponent = reparsed.Components[0];
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(reComponent.Guid, Is.EqualTo(component.Guid), "Component GUID must survive");
+				Assert.That(reComponent.Instructions, Has.Count.EqualTo(1), "The Choose instruction must survive as the component's only instruction");
+				Assert.That(reComponent.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Choose));
+				Assert.That(reComponent.Instructions[0].Source, Is.EquivalentTo(chooseInstruction.Source),
+					"The Choose instruction's option-GUID references must survive unchanged");
+
+				Assert.That(reComponent.Options, Has.Count.EqualTo(2), "Both Choose branches must survive");
+			});
+
+			Option reOptionA = reComponent.Options.Single(o => o.Guid == optionA.Guid);
+			Option reOptionB = reComponent.Options.Single(o => o.Guid == optionB.Guid);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(reOptionA.Name, Is.EqualTo(optionA.Name));
+				Assert.That(reOptionA.Instructions, Has.Count.EqualTo(1), "Option A's own branch instruction must survive");
+				Assert.That(reOptionA.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Move));
+				Assert.That(reOptionA.Instructions[0].Source, Is.EquivalentTo(optionA.Instructions[0].Source));
+				Assert.That(reOptionA.Instructions[0].Destination, Is.EqualTo(optionA.Instructions[0].Destination));
+
+				Assert.That(reOptionB.Name, Is.EqualTo(optionB.Name));
+				Assert.That(reOptionB.Instructions, Has.Count.EqualTo(1), "Option B's own branch instruction must survive");
+				Assert.That(reOptionB.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Delete));
+				Assert.That(reOptionB.Instructions[0].Source, Is.EquivalentTo(optionB.Instructions[0].Source));
+			});
+		}
+
+		[Test]
+		public void C2_MixedChooseAndPlainComponents_PreservesCountAndOrder()
+		{
+			// Edge case: multiple components with mixed Choose/non-Choose content preserve count and order.
+			var plainComponent = new ModComponent
+			{
+				Guid = Guid.Parse("55555555-5555-5555-5555-555555555555"),
+				Name = "Plain Component",
+				Author = "TestAuthor",
+				Description = "A component with a single unconditional instruction",
+				Instructions = new ObservableCollection<Instruction>
+				{
+					new Instruction
+					{
+						Action = Instruction.ActionType.Extract,
+						Source = new List<string> { "<<modDirectory>>\\archive.7z" },
+					},
+				},
+			};
+
+			var chooseOption = new Option
+			{
+				Guid = Guid.Parse("66666666-6666-6666-6666-666666666666"),
+				Name = "Only Option",
+				Instructions = new ObservableCollection<Instruction>
+				{
+					new Instruction
+					{
+						Action = Instruction.ActionType.Move,
+						Source = new List<string> { "<<modDirectory>>\\only.tpc" },
+						Destination = "<<kotorDirectory>>\\Override",
+					},
+				},
+			};
+
+			var chooseComponent = new ModComponent
+			{
+				Guid = Guid.Parse("77777777-7777-7777-7777-777777777777"),
+				Name = "Choose Component 2",
+				Author = "TestAuthor",
+				Description = "A second component with its own Choose tree",
+				Instructions = new ObservableCollection<Instruction>
+				{
+					new Instruction
+					{
+						Action = Instruction.ActionType.Choose,
+						Source = new List<string> { chooseOption.Guid.ToString() },
+					},
+				},
+				Options = new ObservableCollection<Option> { chooseOption },
+			};
+
+			var originalOrder = new List<ModComponent> { plainComponent, chooseComponent };
+
+			string emitted = ModComponentSerializationService.GenerateModDocumentation(originalOrder);
+			MarkdownParserResult reparsed = _parser.Parse(emitted);
+
+			Assert.That(reparsed.Components, Has.Count.EqualTo(2), "Both components must survive");
+			Assert.That(reparsed.Components[0].Guid, Is.EqualTo(plainComponent.Guid), "Plain component must stay first");
+			Assert.That(reparsed.Components[1].Guid, Is.EqualTo(chooseComponent.Guid), "Choose component must stay second");
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(reparsed.Components[0].Instructions, Has.Count.EqualTo(1));
+				Assert.That(reparsed.Components[0].Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Extract));
+				Assert.That(reparsed.Components[0].Options, Is.Empty, "Plain component has no Options");
+
+				Assert.That(reparsed.Components[1].Instructions, Has.Count.EqualTo(1));
+				Assert.That(reparsed.Components[1].Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Choose));
+				Assert.That(reparsed.Components[1].Options, Has.Count.EqualTo(1));
+				Assert.That(reparsed.Components[1].Options[0].Instructions, Has.Count.EqualTo(1));
+				Assert.That(reparsed.Components[1].Options[0].Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Move));
+			});
 		}
 
 		#endregion
