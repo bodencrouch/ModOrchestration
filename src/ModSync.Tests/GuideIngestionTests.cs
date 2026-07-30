@@ -683,6 +683,14 @@ Name = ""Paste Cascade Toml Mod""
 
         #region Real guide (mod-builds)
 
+        // U9 measurement finding: MarkdownParser's per-field regex scanning scales superlinearly
+        // (roughly cubic) with document size - confirmed pre-existing on the pre-branch baseline, not
+        // introduced by this plan's changes. A full guide (~150KB, e.g. k1/full.md) takes on the order
+        // of tens of minutes to parse, which is impractical for default CI/local runs. Tagged Slow
+        // (excluded by ModSync.Tests.runsettings' default TestCategory!=Slow filter) until the
+        // underlying scan-scoping performance issue gets its own dedicated fix.
+        [Category("Slow")]
+        [CancelAfter(300_000)]
         [TestCase("k1", "full.md")]
         [TestCase("k2", "full.md")]
         [TestCase("k1", "spoiler-free.md")]

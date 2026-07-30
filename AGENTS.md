@@ -48,7 +48,7 @@ scripts/
   agents/                    # Helper scripts for agent workflows
 docs/                        # Runbooks and documentation
 vendor/                      # Third-party binaries
-mod-builds/                  # Clone here: github.com/th3w1zard1/mod-builds
+mod-builds/                  # Clone here: github.com/KOTOR-Community-Portal/mod-builds (dev branch)
 ```
 
 ## Build
@@ -176,9 +176,9 @@ Example launch (after `mod-builds` exists at repo root and template dirs are cre
 
 `./scripts/agents/launch_gui_desktop.sh --instruction-file ./mod-builds/TOMLs/KOTOR1_Full.toml --kotor-dir ./tmp/kotor_template --mod-dir ./tmp/mod_downloads`
 
-Clone `mod-builds` at the repo root if missing:
+Clone `mod-builds` at the repo root if missing (the canonical guide content lives on the `dev` branch; there is no `TOMLs/` directory in this repo - vendor a TOML instruction file separately, e.g. from the frozen `oldrepublicwizard/mod-builds` snapshot, if a launch command needs one):
 
-`git clone https://github.com/th3w1zard1/mod-builds ./mod-builds`
+`git clone -b dev https://github.com/KOTOR-Community-Portal/mod-builds ./mod-builds`
 
 Typical local desktop flow:
 
