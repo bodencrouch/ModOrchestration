@@ -254,6 +254,75 @@ ___
         }
 
         [Test]
+        public void DraftInstructions_K2CPHDVisasNestedConditional_DecomposesIntoDistinctInstructions()
+        {
+            // AE8: an unconditional deletion followed by "if also using HD Visas, additionally delete
+            // these three more" must decompose into two distinct instructions - the conditional half must
+            // never merge into the unconditional one, nor be silently dropped from it.
+            ModComponent component = CreateComponent(
+                "Delete portraits001.tga and portraits002.tga before moving to override, " +
+                "and if also using HD Visas, additionally delete hdvisas01.tga, hdvisas02.tga, and hdvisas03.tga.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(2),
+                    "The unconditional and HD-Visas-conditional deletions must be captured as distinct instructions");
+                Assert.That(component.Instructions.Count(i => i.Action == Instruction.ActionType.Delete), Is.EqualTo(2));
+                Assert.That(results[0].HasConditionalDrafts, Is.True,
+                    "The HD-Visas-conditional deletion must be flagged as conditional, not applied unconditionally");
+                Assert.That(results[0].ConditionalDrafts.Count, Is.EqualTo(1));
+                Assert.That(results[0].ConditionalDrafts[0], Does.Contain("HD Visas"));
+                Assert.That(component.InstallationWarning, Does.Contain("HD Visas"),
+                    "The conditional note should be surfaced on the component for review");
+            });
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_NestedConditional_SemicolonVariant_StillTagsCondition()
+        {
+            // Same AE8 shape, but the guide phrases the conditional clause after a semicolon rather than
+            // "and if" - the existing semicolon splitter already separates the two clauses, so this
+            // guards the "bare" conditional-clause form (no unconditional prefix in the same fragment).
+            ModComponent component = CreateComponent(
+                "Delete these files before moving to override; " +
+                "if also using HD Visas, additionally delete these three more files.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(2));
+                Assert.That(results[0].HasConditionalDrafts, Is.True);
+                Assert.That(results[0].ConditionalDrafts[0], Does.Contain("HD Visas"));
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_NonConditionalProse_UnaffectedByConditionalClauseSplitter()
+        {
+            // Regression guard: ordinary prose with no "if also using" clause must parse exactly as before.
+            ModComponent component = CreateComponent(MoveFoldersProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].HasConditionalDrafts, Is.False);
+                Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Move), Is.True);
+            });
+        }
+
+        [Test]
         public void DraftInstructions_UnparseableProse_DegradesGracefullyToNoDrafts()
         {
             // Pure commentary (no action verb): recognized as informational, not a gap.

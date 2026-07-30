@@ -463,6 +463,25 @@ namespace ModSync.Core.Parsing
             [NotNull] ModComponent parentComponent,
             [NotNull] out IReadOnlyList<string> unparsedGaps)
         {
+            return ParseInstructions(installationInstructions, downloadInstructions, parentComponent, out unparsedGaps, out _);
+        }
+
+        /// <summary>
+        /// Parses natural language instructions into structured Instruction objects, reporting both unparsed
+        /// gaps (see the four-argument overload) and conditional-draft notes: a drafted instruction whose
+        /// source clause read "if also using &lt;mod&gt;, additionally/also &lt;action&gt;" (the K2CP+HD-Visas
+        /// pattern). That clause always decomposes into its own instruction rather than merging into - or
+        /// being silently dropped from - the surrounding unconditional clause; the note records which mod the
+        /// draft is conditional on so the reviewer knows not to apply it unconditionally.
+        /// </summary>
+        [NotNull]
+        public ObservableCollection<Instruction> ParseInstructions(
+            [NotNull] string installationInstructions,
+            [CanBeNull] string downloadInstructions,
+            [NotNull] ModComponent parentComponent,
+            [NotNull] out IReadOnlyList<string> unparsedGaps,
+            [NotNull] out IReadOnlyList<string> conditionalDrafts)
+        {
             if (installationInstructions is null)
             {
                 throw new ArgumentNullException(nameof(installationInstructions));
@@ -475,6 +494,7 @@ namespace ModSync.Core.Parsing
 
             var instructions = new ObservableCollection<Instruction>();
             var gaps = new List<string>();
+            var conditionalNotes = new List<string>();
 
             _logVerbose($"[NLParser] Parsing instructions for component: {parentComponent.Name}");
 
@@ -483,12 +503,12 @@ namespace ModSync.Core.Parsing
             string normalizedInstructions = StripMarkdownEmphasis(installationInstructions);
 
             // Split into logical units (sentences/clauses)
-            List<string> units = SplitIntoProcessingUnits(normalizedInstructions);
+            List<ProcessingUnit> units = SplitIntoProcessingUnits(normalizedInstructions);
             _logVerbose($"[NLParser] Found {units.Count} instruction units to parse");
 
-            foreach (string unit in units)
+            foreach (ProcessingUnit unit in units)
             {
-                List<Instruction> parsedInstructions = ParseInstructionUnit(unit, parentComponent, gaps);
+                List<Instruction> parsedInstructions = ParseInstructionUnit(unit.Text, parentComponent, gaps);
                 foreach (Instruction instruction in parsedInstructions)
                 {
                     instructions.Add(instruction);
@@ -496,6 +516,12 @@ namespace ModSync.Core.Parsing
                         ? string.Join(", ", instruction.Source.Take(3))
                         : "(no source)";
                     _logVerbose($"[NLParser] Created {instruction.Action} instruction: {sourcePreview}");
+
+                    if (unit.Condition != null)
+                    {
+                        conditionalNotes.Add(
+                            $"{instruction.Action} ({sourcePreview}) applies only if also using '{unit.Condition}' - verify before installing.");
+                    }
                 }
             }
 
@@ -512,17 +538,56 @@ namespace ModSync.Core.Parsing
 
             _logInfo($"[NLParser] Generated {instructions.Count} instructions for '{parentComponent.Name}'");
             unparsedGaps = gaps;
+            conditionalDrafts = conditionalNotes;
             return instructions;
         }
 
         /// <summary>
+        /// A single logical instruction unit to parse, optionally tagged with the mod name it is
+        /// conditional on (e.g. "delete these three more files" is only conditional text when it follows
+        /// "if also using HD Visas,"). <see cref="Condition"/> is null for ordinary unconditional units.
+        /// </summary>
+        private readonly struct ProcessingUnit
+        {
+            [NotNull] public string Text { get; }
+            [CanBeNull] public string Condition { get; }
+
+            public ProcessingUnit([NotNull] string text, [CanBeNull] string condition = null)
+            {
+                Text = text;
+                Condition = condition;
+            }
+        }
+
+        /// <summary>
+        /// Matches the K2CP+HD-Visas style nested conditional: an unconditional action clause followed by
+        /// "if (you're) (also) using &lt;mod&gt;, additionally/also &lt;action&gt;". Captures the mod name
+        /// and the conditional action text separately from the unconditional prefix so each becomes its own
+        /// processing unit instead of one clause silently absorbing (or dropping) the other.
+        /// </summary>
+        private static readonly Regex s_conditionalClausePattern = new Regex(
+            @"^(?<main>.+?)(?:,?\s+and\s+)?,?\s*if\s+(?:you'?re\s+)?(?:also\s+)?using\s+(?<condition>[^,]+?)\s*,\s*(?:additionally|also)?\s*(?<conditional>.+)$",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        /// <summary>
+        /// Matches the same conditional clause as <see cref="s_conditionalClausePattern"/> when it has
+        /// already been split off from its preceding unconditional clause (e.g. by an earlier semicolon
+        /// or "then" split) and so has no "main" prefix of its own to capture.
+        /// </summary>
+        private static readonly Regex s_bareConditionalClausePattern = new Regex(
+            @"^if\s+(?:you'?re\s+)?(?:also\s+)?using\s+(?<condition>[^,]+?)\s*,\s*(?:additionally|also)?\s*(?<conditional>.+)$",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        /// <summary>
         /// Splits instruction text into logical processing units (sentences/clauses).
-        /// Handles complex multi-clause instructions.
+        /// Handles complex multi-clause instructions, including a nested "if also using X, additionally Y"
+        /// conditional clause, which decomposes into a separate tagged unit rather than being merged into
+        /// (or silently dropped from) the surrounding unconditional clause.
         /// </summary>
         [NotNull]
-        private static List<string> SplitIntoProcessingUnits([NotNull] string text)
+        private static List<ProcessingUnit> SplitIntoProcessingUnits([NotNull] string text)
         {
-            var units = new List<string>();
+            var units = new List<ProcessingUnit>();
 
             // First, split on sentence boundaries (periods followed by space or newline)
             // But be careful not to split on file extensions
@@ -542,18 +607,54 @@ namespace ModSync.Core.Parsing
 
                 foreach (string clause in clauses)
                 {
-                    string cleaned = clause.Trim().TrimEnd('.');
-                    if (cleaned.Length > 15) // Ignore very short fragments
+                    string cleaned = clause.Trim().TrimEnd('.', ';').Trim();
+                    if (cleaned.Length <= 15) // Ignore very short fragments
                     {
-                        units.Add(cleaned);
+                        continue;
                     }
+
+                    Match bareConditionalMatch = s_bareConditionalClausePattern.Match(cleaned);
+                    if (bareConditionalMatch.Success)
+                    {
+                        string bareCondition = bareConditionalMatch.Groups["condition"].Value.Trim();
+                        string bareConditional = bareConditionalMatch.Groups["conditional"].Value.Trim();
+
+                        if (bareConditional.Length > 0)
+                        {
+                            units.Add(new ProcessingUnit(bareConditional, bareCondition));
+                        }
+
+                        continue;
+                    }
+
+                    Match conditionalMatch = s_conditionalClausePattern.Match(cleaned);
+                    if (conditionalMatch.Success)
+                    {
+                        string main = conditionalMatch.Groups["main"].Value.Trim().TrimEnd('.', ';').Trim();
+                        string condition = conditionalMatch.Groups["condition"].Value.Trim();
+                        string conditional = conditionalMatch.Groups["conditional"].Value.Trim();
+
+                        if (main.Length > 15)
+                        {
+                            units.Add(new ProcessingUnit(main));
+                        }
+
+                        if (conditional.Length > 0)
+                        {
+                            units.Add(new ProcessingUnit(conditional, condition));
+                        }
+
+                        continue;
+                    }
+
+                    units.Add(new ProcessingUnit(cleaned));
                 }
             }
 
             // If no units found, just use the whole text
             if (units.Count == 0 && !string.IsNullOrWhiteSpace(text))
             {
-                units.Add(text.Trim());
+                units.Add(new ProcessingUnit(text.Trim()));
             }
 
             return units;
