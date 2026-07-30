@@ -799,7 +799,7 @@ namespace ModSync.Core.Parsing
                 return value;
             }
 
-            string[] lines = value.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            string[] lines = value.Split(MarkdownUtilities.newLineSeparator, StringSplitOptions.None);
             bool anyStripped = false;
             for (int i = 0; i < lines.Length; i++)
             {

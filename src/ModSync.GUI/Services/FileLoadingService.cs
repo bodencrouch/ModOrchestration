@@ -284,11 +284,12 @@ namespace ModSync.Services
             try
             {
                 MarkdownParserResult parseResult = null;
-                MarkdownImportProfile configuredProfile;
                 bool alreadyDraftedByPort = false;
 
                 if (editorMode)
                 {
+                    MarkdownImportProfile configuredProfile;
+
                     // UI elements must be created and shown on the UI thread
 #pragma warning disable MA0004 // Use Task.
                     await Dispatcher.UIThread.InvokeAsync(async () =>
@@ -348,6 +349,17 @@ namespace ModSync.Services
                     // DraftInstructionService directly: this covers file-open (draftInstructionsFromProse:
                     // false, per its own caller) and paste (draftInstructionsFromProse: true) with the same
                     // draft-flag value each caller already passed in - no behavior change, only the mechanism.
+                    // The port always parses with the default profile, so a custom profile has no effect
+                    // here (only the editor-mode dialog path above supports one) - flag that explicitly
+                    // rather than silently dropping it if a future caller passes one.
+                    if (profile != null)
+                    {
+#pragma warning disable MA0004 // Use Task.
+                        await Logger.LogWarningAsync(
+                            "[LoadMarkdownContentAsync] A custom MarkdownImportProfile was provided but is not supported outside editor mode; using the default profile.");
+#pragma warning restore MA0004 // Use Task.
+                    }
+
 #pragma warning disable MA0004 // Use Task.
                     Core.Ports.Guides.GuideIngestResult ingestResult = await Task.Run(() =>
                         Core.Ports.Guides.GuideIngestService.Instance.IngestFromText(

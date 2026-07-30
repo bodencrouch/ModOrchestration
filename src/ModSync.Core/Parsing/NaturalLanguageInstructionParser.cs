@@ -619,7 +619,13 @@ namespace ModSync.Core.Parsing
                         continue;
                     }
 
-                    Match bareConditionalMatch = s_bareConditionalClausePattern.Match(cleaned);
+                    // Both conditional-clause patterns require "using X,"; skip the regex work entirely
+                    // for the overwhelming majority of clauses that don't contain it.
+                    bool mayBeConditional = cleaned.IndexOf("using", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                    Match bareConditionalMatch = mayBeConditional
+                        ? s_bareConditionalClausePattern.Match(cleaned)
+                        : Match.Empty;
                     if (bareConditionalMatch.Success)
                     {
                         string bareCondition = bareConditionalMatch.Groups["condition"].Value.Trim();
@@ -633,7 +639,9 @@ namespace ModSync.Core.Parsing
                         continue;
                     }
 
-                    Match conditionalMatch = s_conditionalClausePattern.Match(cleaned);
+                    Match conditionalMatch = mayBeConditional
+                        ? s_conditionalClausePattern.Match(cleaned)
+                        : Match.Empty;
                     if (conditionalMatch.Success)
                     {
                         string main = conditionalMatch.Groups["main"].Value.Trim().TrimEnd('.', ';').Trim();
@@ -827,13 +835,19 @@ namespace ModSync.Core.Parsing
         {
             instruction = null;
 
+            // Both patterns below require "cleanlist"; skip the regex work entirely otherwise.
+            if (unit.IndexOf("cleanlist", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
             Match fileMatch = s_cleanlistFileNamePattern.Match(unit);
             if (fileMatch.Success)
             {
                 instruction = new Instruction
                 {
                     Action = Instruction.ActionType.CleanList,
-                    Source = new List<string> { ModDirectoryPlaceholderValue + @"\" + fileMatch.Value },
+                    Source = new List<string> { DraftInstructionService.ModDirectoryPlaceholder + @"\" + fileMatch.Value },
                     Destination = @"<<kotorDirectory>>\Override",
                     Overwrite = true,
                 };
@@ -849,8 +863,6 @@ namespace ModSync.Core.Parsing
 
             return false;
         }
-
-        [NotNull] private const string ModDirectoryPlaceholderValue = "<<modDirectory>>";
 
         /// <summary>
         /// Creates an Instruction from a regex match.

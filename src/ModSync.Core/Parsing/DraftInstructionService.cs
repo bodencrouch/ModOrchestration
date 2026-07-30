@@ -74,7 +74,7 @@ namespace ModSync.Core.Parsing
         public const string ReviewFlagMessage =
             "DRAFT INSTRUCTIONS: parsed from guide prose by the natural-language importer. Review before installing - never auto-trusted.";
 
-        [NotNull] private const string ModDirectoryPlaceholder = "<<modDirectory>>";
+        [NotNull] internal const string ModDirectoryPlaceholder = "<<modDirectory>>";
         [NotNull] private const string KotorDirectoryPlaceholder = "<<kotorDirectory>>";
         [NotNull] private const string LegacyGameDirectoryPlaceholder = "<<gameDirectory>>";
 
@@ -229,16 +229,7 @@ namespace ModSync.Core.Parsing
                 throw new ArgumentNullException(nameof(component));
             }
 
-            if (string.IsNullOrWhiteSpace(component.InstallationWarning))
-            {
-                component.InstallationWarning = ReviewFlagMessage;
-                return;
-            }
-
-            if (component.InstallationWarning.IndexOf(ReviewFlagMessage, StringComparison.Ordinal) < 0)
-            {
-                component.InstallationWarning = ReviewFlagMessage + Environment.NewLine + component.InstallationWarning;
-            }
+            AppendWarningIfMissing(component, ReviewFlagMessage, prepend: true);
         }
 
         /// <summary>
@@ -253,14 +244,28 @@ namespace ModSync.Core.Parsing
         {
             foreach (string note in conditionalDrafts)
             {
-                if (string.IsNullOrWhiteSpace(component.InstallationWarning))
-                {
-                    component.InstallationWarning = note;
-                }
-                else if (component.InstallationWarning.IndexOf(note, StringComparison.Ordinal) < 0)
-                {
-                    component.InstallationWarning += Environment.NewLine + note;
-                }
+                AppendWarningIfMissing(component, note, prepend: false);
+            }
+        }
+
+        /// <summary>
+        /// Adds <paramref name="text"/> to a component's <see cref="ModComponent.InstallationWarning"/>
+        /// unless it's already present. <paramref name="prepend"/> controls whether new text goes before
+        /// or after any existing warning content.
+        /// </summary>
+        private static void AppendWarningIfMissing([NotNull] ModComponent component, [NotNull] string text, bool prepend)
+        {
+            if (string.IsNullOrWhiteSpace(component.InstallationWarning))
+            {
+                component.InstallationWarning = text;
+                return;
+            }
+
+            if (component.InstallationWarning.IndexOf(text, StringComparison.Ordinal) < 0)
+            {
+                component.InstallationWarning = prepend
+                    ? text + Environment.NewLine + component.InstallationWarning
+                    : component.InstallationWarning + Environment.NewLine + text;
             }
         }
 

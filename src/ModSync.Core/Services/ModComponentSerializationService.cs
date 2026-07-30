@@ -755,6 +755,18 @@ namespace ModSync.Core.Services
             return components;
         }
 
+        /// <summary>
+        /// Format-hint aliases that <see cref="DeserializeModComponentFromString"/>'s switch below
+        /// resolves to markdown. Exposed so other callers (e.g. the guide ingest port) can recognize the
+        /// same aliases without maintaining a second copy of this list.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        internal static readonly string[] MarkdownFormatAliases =
+        {
+            "md", "markdown", "mdown", "mkdn", "mkd", "mdtxt", "mdtext", "text",
+        };
+
         [NotNull]
         [ItemNotNull]
         public static IReadOnlyList<ModComponent> DeserializeModComponentFromString(

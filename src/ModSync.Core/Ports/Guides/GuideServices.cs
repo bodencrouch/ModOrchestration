@@ -27,12 +27,6 @@ namespace ModSync.Core.Ports.Guides
     {
         public static GuideIngestService Instance { get; } = new GuideIngestService();
 
-        [NotNull]
-        private static readonly string[] s_markdownFormatAliases =
-        {
-            "md", "markdown", "mdown", "mkdn", "mkd", "mdtxt", "mdtext", "text",
-        };
-
         public GuideIngestResult IngestFromText(string content, string formatHint = null, bool parseDirections = false)
         {
             if (content is null)
@@ -41,7 +35,7 @@ namespace ModSync.Core.Ports.Guides
             }
 
             string format = string.IsNullOrWhiteSpace(formatHint) ? null : formatHint.Trim().ToLowerInvariant();
-            bool isMarkdown = format != null && s_markdownFormatAliases.Contains(format);
+            bool isMarkdown = format != null && ModComponentSerializationService.MarkdownFormatAliases.Contains(format);
 
             if (format is null)
             {
