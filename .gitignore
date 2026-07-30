@@ -435,3 +435,5 @@ package-lock.json
 pnpm-lock.yaml
 
 clutter/
+.compound-engineering/
+.claude/
