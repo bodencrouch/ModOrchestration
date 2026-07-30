@@ -113,6 +113,39 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public void SettingsCli_ExplicitSettingsDir_WritesThereEvenWhenFileIsMissing()
+        {
+            // The directory exists but has no settings.json yet. An explicit --settings-dir
+            // must still be honored; falling back to the legacy AppData location here would
+            // write to the user's real settings file.
+            string settingsPath = Path.Combine(_settingsDirectory, "settings.json");
+            Assert.That(File.Exists(settingsPath), Is.False, "precondition: no settings.json yet");
+
+            int setExit = ModBuildConverter.Run(new[]
+            {
+                "settings",
+                "--action", "set",
+                "--key", "managedDeploymentEnabled",
+                "--value", "true",
+                "--settings-dir", _settingsDirectory,
+            });
+
+            Assert.That(setExit, Is.EqualTo(0));
+            Assert.That(File.Exists(settingsPath), Is.True, "explicit --settings-dir must receive the write");
+
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(settingsPath));
+            Assert.That(document.RootElement.GetProperty("managedDeploymentEnabled").GetBoolean(), Is.True);
+        }
+
+        [Test]
+        public void SettingsFileStore_ResolveSettingsFilePath_HonorsExplicitDirectory()
+        {
+            string resolved = SettingsFileStore.ResolveSettingsFilePath(_settingsDirectory);
+
+            Assert.That(resolved, Is.EqualTo(Path.Combine(_settingsDirectory, "settings.json")));
+        }
+
+        [Test]
         public void SettingsFileStore_ParseCliValue_ParsesBooleansAndNumbers()
         {
             Assert.Multiple(() =>

@@ -44,6 +44,15 @@ namespace ModSync.Core.Services.Settings
         {
             string directory = ResolveSettingsDirectory(settingsDirectory);
             string settingsPath = Path.Combine(directory, "settings.json");
+
+            // An explicit --settings-dir is authoritative: never redirect it to the legacy
+            // location, or callers pointing at a scratch directory would read and write the
+            // user's real settings file instead.
+            if (!string.IsNullOrWhiteSpace(settingsDirectory))
+            {
+                return settingsPath;
+            }
+
             string legacySettingsPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "KOTORModSync",
