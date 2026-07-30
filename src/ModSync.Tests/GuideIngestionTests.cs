@@ -323,6 +323,64 @@ ___
         }
 
         [Test]
+        public void DraftInstructions_RedrobCleanlistWithNamedFile_DraftsCleanListInstruction()
+        {
+            // AE7: a redrob-style per-mod deletion driven by cleanlist_k1.txt cannot be enumerated from the
+            // guide text. Before this fix the parser silently resolved it to a nonsensical fixed file list
+            // (e.g. deleting a literal path made of prose words) instead of never guessing.
+            ModComponent component = CreateComponent(
+                "Delete the files listed in cleanlist_k1.txt for your installed mods before running the patcher.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(1));
+                Assert.That(results[0].UnparsedGaps, Is.Empty);
+                Assert.That(component.Instructions, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.CleanList));
+                Assert.That(component.Instructions[0].Source.Any(s => s.Contains("cleanlist_k1.txt")), Is.True);
+            });
+
+            AssertInstructionIsSandboxed(component.Instructions[0]);
+        }
+
+        [Test]
+        public void DraftInstructions_RedrobCleanlistWithoutNamedFile_SurfacesAsGapNotWrongFixedList()
+        {
+            // AE7 edge case: a bare "cleanlist" mention with no nameable file must never be resolved to a
+            // fabricated fixed file list - it surfaces as a reviewable gap instead.
+            ModComponent component = CreateComponent(
+                "Before installing, delete any files listed in the cleanlist that correspond to mods you already have installed.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(0));
+                Assert.That(results[0].UnparsedGaps, Is.Not.Empty);
+                Assert.That(component.Instructions, Is.Empty,
+                    "Must never fabricate a fixed Delete file list from an unnameable cleanlist reference");
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_LiteralFileDeletion_UnaffectedByCleanlistDetection()
+        {
+            // Regression guard: an ordinary, literal file-deletion entry (no cleanlist reference) drafts
+            // exactly as before.
+            ModComponent component = CreateComponent(DeleteBeforeMoveProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Delete), Is.True);
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.CleanList), Is.False);
+        }
+
+        [Test]
         public void DraftInstructions_UnparseableProse_DegradesGracefullyToNoDrafts()
         {
             // Pure commentary (no action verb): recognized as informational, not a gap.

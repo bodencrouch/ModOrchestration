@@ -698,6 +698,22 @@ namespace ModSync.Core.Parsing
                 return instructions;
             }
 
+            // AE7: redrob-style cleanlist deletion is conditioned on an externally-maintained file, not
+            // enumerable from the guide text. Detect it before the generic pattern list runs so a Delete
+            // pattern never mismatches part of this prose into a wrong fixed file list - either draft a
+            // CleanList instruction that defers resolution to the referenced file, or (when no specific
+            // file is named) surface it as a gap. Either way, this unit never falls through to the
+            // generic patterns below.
+            if (TryHandleCleanlistReference(unit, parentComponent, unparsedGaps, out Instruction cleanlistInstruction))
+            {
+                if (cleanlistInstruction != null)
+                {
+                    instructions.Add(cleanlistInstruction);
+                }
+
+                return instructions;
+            }
+
             // Try each instruction pattern
             foreach (InstructionPattern pattern in s_instructionPatterns)
             {
@@ -769,6 +785,66 @@ namespace ModSync.Core.Parsing
 
             return actionVerbs.Any(verb => lower.IndexOf(" " + verb + " ", StringComparison.OrdinalIgnoreCase) >= 0 || lower.StartsWith(verb + " ", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Matches an explicit cleanlist file name (e.g. <c>cleanlist_k1.txt</c>) - redrob's convention -
+        /// referenced anywhere in the unit.
+        /// </summary>
+        private static readonly Regex s_cleanlistFileNamePattern = new Regex(
+            @"\bcleanlist[\w\-]*\.txt\b", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Matches a bare mention of "the cleanlist" with no specific file named - too ambiguous to draft
+        /// a real instruction from, but still a genuine actionable reference, not commentary.
+        /// </summary>
+        private static readonly Regex s_bareCleanlistMentionPattern = new Regex(
+            @"\bcleanlist\b", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// AE7: detects a redrob-style deletion driven by an externally maintained cleanlist file - a
+        /// per-mod deletion list that cannot be enumerated from the guide text alone. When the unit names
+        /// a specific cleanlist file, drafts a <see cref="Instruction.ActionType.CleanList"/> instruction
+        /// referencing it (resolution of which files it deletes is deferred to install time, exactly like
+        /// <see cref="Instruction.ExecuteCleanListAsync"/> already does - this never fabricates a fixed file
+        /// list). When only a bare "cleanlist" mention appears with no nameable file, the conditional nature
+        /// is preserved as an unparsed gap instead of guessing.
+        /// </summary>
+        /// <returns>
+        /// true when the unit is a cleanlist reference and has been fully handled (whether or not an
+        /// instruction was produced) - the caller must not fall through to the generic pattern list.
+        /// </returns>
+        private static bool TryHandleCleanlistReference(
+            [NotNull] string unit,
+            [NotNull] ModComponent parentComponent,
+            [CanBeNull] List<string> unparsedGaps,
+            [CanBeNull] out Instruction instruction)
+        {
+            instruction = null;
+
+            Match fileMatch = s_cleanlistFileNamePattern.Match(unit);
+            if (fileMatch.Success)
+            {
+                instruction = new Instruction
+                {
+                    Action = Instruction.ActionType.CleanList,
+                    Source = new List<string> { ModDirectoryPlaceholderValue + @"\" + fileMatch.Value },
+                    Destination = @"<<kotorDirectory>>\Override",
+                    Overwrite = true,
+                };
+                instruction.SetParentComponent(parentComponent);
+                return true;
+            }
+
+            if (s_bareCleanlistMentionPattern.IsMatch(unit))
+            {
+                unparsedGaps?.Add(unit);
+                return true;
+            }
+
+            return false;
+        }
+
+        [NotNull] private const string ModDirectoryPlaceholderValue = "<<modDirectory>>";
 
         /// <summary>
         /// Creates an Instruction from a regex match.
