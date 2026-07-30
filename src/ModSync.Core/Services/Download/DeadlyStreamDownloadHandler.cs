@@ -24,11 +24,13 @@ namespace ModSync.Core.Services.Download
 
 
         private readonly CookieContainer _cookieContainer;
+        private readonly bool _handlerManagesCookies;
 
-        public DeadlyStreamDownloadHandler(HttpClient httpClient)
+        public DeadlyStreamDownloadHandler(HttpClient httpClient, CookieContainer cookieContainer = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-            _cookieContainer = new CookieContainer();
+            _handlerManagesCookies = cookieContainer != null;
+            _cookieContainer = cookieContainer ?? new CookieContainer();
             Logger.LogVerbose("[DeadlyStream] Initializing download handler with session cookie management");
 
 
@@ -144,15 +146,14 @@ namespace ModSync.Core.Services.Download
                 }
 
                 await Logger.LogVerboseAsync($"[DeadlyStream] Requesting page: {url}").ConfigureAwait(false);
-                var request = new HttpRequestMessage(HttpMethod.Get, url);
-                ApplyCookiesToRequest(request, validatedUri);
-                HttpResponseMessage pageResponse = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-                _ = pageResponse.EnsureSuccessStatusCode();
-                ExtractAndStoreCookies(pageResponse, validatedUri);
-                await Logger.LogVerboseAsync($"[DeadlyStream] Page response received (StatusCode: {pageResponse.StatusCode})").ConfigureAwait(false);
+                string html = await FetchDeadlyStreamPageHtmlAsync(url, validatedUri, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrEmpty(html))
+                {
+                    await Logger.LogWarningAsync("[DeadlyStream] Failed to fetch page HTML for filename resolution").ConfigureAwait(false);
+                    return new List<string>();
+                }
 
-                string html = await pageResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-                pageResponse.Dispose();
+                await Logger.LogVerboseAsync($"[DeadlyStream] Page response received, HTML length: {html.Length}").ConfigureAwait(false);
                 string csrfKey = ExtractCsrfKey(html);
                 string downloadPageUrl = !string.IsNullOrEmpty(csrfKey)
                     ? $"{url}?do=download&csrfKey={csrfKey}"
@@ -313,6 +314,11 @@ namespace ModSync.Core.Services.Download
 
         private void ApplyCookiesToRequest(HttpRequestMessage request, Uri uri)
         {
+            if (_handlerManagesCookies)
+            {
+                return;
+            }
+
             try
             {
                 string cookieHeader = _cookieContainer.GetCookieHeader(uri);
@@ -378,19 +384,21 @@ namespace ModSync.Core.Services.Download
                 }
 
                 await Logger.LogVerboseAsync($"[DeadlyStream] Requesting page: {url}").ConfigureAwait(false);
-                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                string html = await FetchDeadlyStreamPageHtmlAsync(url, validatedUri, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrEmpty(html))
+                {
+                    string emptyPageMessage = "DeadlyStream download failed: could not load mod page (site may be blocking automated access).\n\n" +
+                                              $"Please try downloading manually from: {url}";
+                    progress?.Report(new DownloadProgress
+                    {
+                        Status = DownloadStatus.Failed,
+                        ErrorMessage = emptyPageMessage,
+                        ProgressPercentage = 100,
+                        EndTime = DateTime.Now,
+                    });
+                    return DownloadResult.Failed(emptyPageMessage);
+                }
 
-
-                ApplyCookiesToRequest(request, validatedUri);
-
-                HttpResponseMessage pageResponse = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-                _ = pageResponse.EnsureSuccessStatusCode();
-                await Logger.LogVerboseAsync($"[DeadlyStream] Page response received (StatusCode: {pageResponse.StatusCode})").ConfigureAwait(false);
-
-
-                ExtractAndStoreCookies(pageResponse, validatedUri);
-
-                string html = await pageResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                 await Logger.LogVerboseAsync($"[DeadlyStream] Downloaded HTML content, length: {html.Length} characters").ConfigureAwait(false);
 
 
@@ -430,7 +438,6 @@ namespace ModSync.Core.Services.Download
                         {
                             await Logger.LogVerboseAsync($"[DeadlyStream] Found {confirmedLinks.Count} files to download").ConfigureAwait(false);
                             downloadPageResponse.Dispose();
-                            pageResponse.Dispose();
 
                             var multiFileDownloads = new List<string>();
                             int multiFileIndex = 0;
@@ -500,9 +507,6 @@ namespace ModSync.Core.Services.Download
                     downloadPageResponse.Dispose();
                 }
 
-                pageResponse.Dispose();
-
-
                 List<string> downloadLinks = ExtractAllDownloadLinks(html, url);
 
                 if (downloadLinks is null || downloadLinks.Count == 0)
@@ -535,7 +539,6 @@ namespace ModSync.Core.Services.Download
                         EndTime = DateTime.Now,
                     });
 
-                    pageResponse.Dispose();
                     return DownloadResult.Failed(userMessage);
                 }
 
@@ -828,6 +831,18 @@ namespace ModSync.Core.Services.Download
                 return null;
             }
 
+            Match inputMatch = Regex.Match(
+                html,
+                @"name=[""']csrfKey[""']\s+value=[""']([^""']+)[""']",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)
+            );
+            if (inputMatch.Success)
+            {
+                Logger.LogVerbose($"[DeadlyStream] Extracted csrfKey from hidden input: {inputMatch.Groups[1].Value}");
+                return inputMatch.Groups[1].Value;
+            }
+
             Match jsMatch = Regex.Match(
                 html,
                 @"csrfKey:\s*[""']([^""']+)[""']",
@@ -855,6 +870,78 @@ namespace ModSync.Core.Services.Download
 
             Logger.LogWarning("[DeadlyStream] Could not extract csrfKey from page");
             return null;
+        }
+
+        private static bool IsCloudflareChallengePage(string html)
+        {
+            if (string.IsNullOrEmpty(html))
+            {
+                return true;
+            }
+
+            if (html.IndexOf("data-focus", StringComparison.OrdinalIgnoreCase) >= 0
+                || html.IndexOf("ipsButton", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            return html.IndexOf("One moment, please", StringComparison.OrdinalIgnoreCase) >= 0
+                   || html.IndexOf("cf-browser-verification", StringComparison.OrdinalIgnoreCase) >= 0
+                   || html.IndexOf("Checking your browser", StringComparison.OrdinalIgnoreCase) >= 0
+                   || html.IndexOf("Just a moment...", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private async Task<string> FetchDeadlyStreamPageHtmlAsync(
+            string url,
+            Uri validatedUri,
+            CancellationToken cancellationToken,
+            int maxAttempts = 3)
+        {
+            string html = null;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                ApplyCookiesToRequest(request, validatedUri);
+
+                using (HttpResponseMessage pageResponse = await _httpClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken).ConfigureAwait(false))
+                {
+                    _ = pageResponse.EnsureSuccessStatusCode();
+                    ExtractAndStoreCookies(pageResponse, validatedUri);
+                    html = await pageResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                }
+
+                if (!IsCloudflareChallengePage(html))
+                {
+                    return html;
+                }
+
+                await Logger.LogWarningAsync(
+                    $"[DeadlyStream] Cloudflare challenge detected on attempt {attempt}/{maxAttempts} for {url} (html length: {html?.Length ?? 0})").ConfigureAwait(false);
+
+                if (attempt == maxAttempts && !string.IsNullOrEmpty(html))
+                {
+                    try
+                    {
+                        string debugPath = Path.Combine(Path.GetTempPath(), "deadlystream_cloudflare_debug.html");
+                        File.WriteAllText(debugPath, html);
+                        await Logger.LogVerboseAsync($"[DeadlyStream] Saved challenge HTML to {debugPath}").ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Ignore debug write failures
+                    }
+                }
+
+                if (attempt < maxAttempts)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2 * attempt), cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            return html;
         }
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0051:Method is too long", Justification = "<Pending>")]

@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Net;
 using System.Net.Http;
 
 namespace ModSync.Core.Services.Download
@@ -27,13 +28,18 @@ namespace ModSync.Core.Services.Download
             string nexusModsApiKey = null,
             int timeoutMinutes = 180)
         {
+            CookieContainer sharedCookieContainer = null;
+
             // Create HttpClient if not provided
             if (httpClient is null)
             {
+                sharedCookieContainer = new CookieContainer();
                 var handler = new HttpClientHandler
                 {
-                    AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
+                    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
                     MaxConnectionsPerServer = 128,
+                    CookieContainer = sharedCookieContainer,
+                    UseCookies = true,
                 };
                 httpClient = new HttpClient(handler)
                 {
@@ -50,7 +56,7 @@ namespace ModSync.Core.Services.Download
             // 2. Generic fallback handler last (DirectDownload - catches ANY http/https)
             var handlers = new List<IDownloadHandler>
             {
-                new DeadlyStreamDownloadHandler(httpClient),
+                new DeadlyStreamDownloadHandler(httpClient, sharedCookieContainer),
                 new MegaDownloadHandler(),
                 new NexusModsDownloadHandler(httpClient, apiKey),
                 new GameFrontDownloadHandler(httpClient),
