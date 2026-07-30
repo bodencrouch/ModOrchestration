@@ -9,10 +9,10 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Win32.SafeHandles;
 using ModSync.Core.Services.Download;
 using ModSync.Core.Services.FileSystem;
 using ModSync.Core.Utility;
-using Microsoft.Win32.SafeHandles;
 using Newtonsoft.Json;
 
 namespace ModSync.Core.Services

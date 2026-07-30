@@ -8,18 +8,14 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-
 using JetBrains.Annotations;
-
 using ModSync.Core.Services.Installation;
 using ModSync.Core.Utility;
-
 using Newtonsoft.Json;
-
 using Tomlyn;
 using Tomlyn.Model;
 using Tomlyn.Syntax;

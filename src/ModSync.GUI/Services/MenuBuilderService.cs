@@ -3,29 +3,24 @@
 // See LICENSE.txt file in the project root for full license information.
 
 using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
-
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
-
-using System.IO;
-
 using ModSync.Core;
 using ModSync.Core.Ports.Updates;
-using ModSync.Core.Utility;
 using ModSync.Core.Services;
 using ModSync.Core.Services.Download;
+using ModSync.Core.Utility;
 using ModSync.Dialogs;
-
 using ReactiveUI;
-
 using static ModSync.Core.Services.ModManagementService;
 
 namespace ModSync.Services

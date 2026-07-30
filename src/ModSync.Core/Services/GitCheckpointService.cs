@@ -9,9 +9,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
+using LibGit2Sharp;
 using ModSync.Core.Services.Checkpoints;
 using ModSync.Core.Utility;
-using LibGit2Sharp;
 
 namespace ModSync.Core.Services
 {
