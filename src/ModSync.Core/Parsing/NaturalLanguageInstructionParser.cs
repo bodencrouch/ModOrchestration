@@ -447,6 +447,22 @@ namespace ModSync.Core.Parsing
             [CanBeNull] string downloadInstructions,
             [NotNull] ModComponent parentComponent)
         {
+            return ParseInstructions(installationInstructions, downloadInstructions, parentComponent, out _);
+        }
+
+        /// <summary>
+        /// Parses natural language instructions into structured Instruction objects, additionally reporting
+        /// processing units that read as actionable prose (contain an action verb) but matched no known
+        /// pattern - a gap the caller should surface for review rather than silently drop. Units recognized
+        /// as pure commentary (<see cref="IsInformationalOnly"/>) are not gaps; they are correctly skipped.
+        /// </summary>
+        [NotNull]
+        public ObservableCollection<Instruction> ParseInstructions(
+            [NotNull] string installationInstructions,
+            [CanBeNull] string downloadInstructions,
+            [NotNull] ModComponent parentComponent,
+            [NotNull] out IReadOnlyList<string> unparsedGaps)
+        {
             if (installationInstructions is null)
             {
                 throw new ArgumentNullException(nameof(installationInstructions));
@@ -458,6 +474,7 @@ namespace ModSync.Core.Parsing
             }
 
             var instructions = new ObservableCollection<Instruction>();
+            var gaps = new List<string>();
 
             _logVerbose($"[NLParser] Parsing instructions for component: {parentComponent.Name}");
 
@@ -471,7 +488,7 @@ namespace ModSync.Core.Parsing
 
             foreach (string unit in units)
             {
-                List<Instruction> parsedInstructions = ParseInstructionUnit(unit, parentComponent);
+                List<Instruction> parsedInstructions = ParseInstructionUnit(unit, parentComponent, gaps);
                 foreach (Instruction instruction in parsedInstructions)
                 {
                     instructions.Add(instruction);
@@ -494,6 +511,7 @@ namespace ModSync.Core.Parsing
             }
 
             _logInfo($"[NLParser] Generated {instructions.Count} instructions for '{parentComponent.Name}'");
+            unparsedGaps = gaps;
             return instructions;
         }
 
@@ -560,10 +578,15 @@ namespace ModSync.Core.Parsing
         }
 
         /// <summary>
-        /// Parses a single instruction unit into zero or more Instructions.
+        /// Parses a single instruction unit into zero or more Instructions. When <paramref name="unparsedGaps"/>
+        /// is supplied, a unit that contains an action verb but matches no known pattern is appended to it -
+        /// distinct from a unit recognized as pure commentary, which is skipped without being a gap.
         /// </summary>
         [NotNull]
-        private List<Instruction> ParseInstructionUnit([NotNull] string unit, [NotNull] ModComponent parentComponent)
+        private List<Instruction> ParseInstructionUnit(
+            [NotNull] string unit,
+            [NotNull] ModComponent parentComponent,
+            [CanBeNull] List<string> unparsedGaps = null)
         {
             var instructions = new List<Instruction>();
 
@@ -592,10 +615,11 @@ namespace ModSync.Core.Parsing
                 }
             }
 
-            // If no pattern matched but it looks like an action, log it
+            // If no pattern matched but it looks like an action, this is a reviewable gap rather than a silent drop.
             if (instructions.Count == 0 && ContainsActionVerb(unit))
             {
                 _logVerbose($"[NLParser] No pattern matched for unit with action verb: {unit.Substring(0, Math.Min(80, unit.Length))}...");
+                unparsedGaps?.Add(unit);
             }
 
             return instructions;

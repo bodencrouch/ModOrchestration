@@ -22,10 +22,25 @@ namespace ModSync.Core.Parsing
 
         public int DraftInstructionCount { get; }
 
-        public DraftInstructionResult([NotNull] ModComponent component, int draftInstructionCount)
+        /// <summary>
+        /// Directions prose that contained an action verb but matched no known instruction pattern.
+        /// Never populated with commentary/informational prose - only genuine unparsed gaps. Callers
+        /// should render these (e.g. "N of M directions produced no draft") rather than drop them silently.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        public IReadOnlyList<string> UnparsedGaps { get; }
+
+        public bool HasUnparsedGaps => UnparsedGaps.Count > 0;
+
+        public DraftInstructionResult(
+            [NotNull] ModComponent component,
+            int draftInstructionCount,
+            [CanBeNull][ItemNotNull] IReadOnlyList<string> unparsedGaps = null)
         {
             Component = component ?? throw new ArgumentNullException(nameof(component));
             DraftInstructionCount = draftInstructionCount;
+            UnparsedGaps = unparsedGaps ?? Array.Empty<string>();
         }
     }
 
@@ -53,7 +68,10 @@ namespace ModSync.Core.Parsing
         /// Generates draft instructions for every component that has natural-language Directions prose
         /// but no authored instructions. Components that already have instructions are never touched.
         /// </summary>
-        /// <returns>One result per component that received at least one draft instruction.</returns>
+        /// <returns>
+        /// One result per component that has Directions prose to draft from - including components where
+        /// zero instructions were successfully drafted, so callers can render unparsed gaps for review.
+        /// </returns>
         [NotNull]
         [ItemNotNull]
         public static IReadOnlyList<DraftInstructionResult> GenerateDraftInstructions(
@@ -79,12 +97,14 @@ namespace ModSync.Core.Parsing
                 }
 
                 ObservableCollection<Instruction> parsed;
+                IReadOnlyList<string> unparsedGaps;
                 try
                 {
                     parsed = parser.ParseInstructions(
                         component.Directions,
                         string.IsNullOrWhiteSpace(component.DownloadInstructions) ? null : component.DownloadInstructions,
-                        component);
+                        component,
+                        out unparsedGaps);
                 }
                 catch (Exception ex)
                 {
@@ -111,8 +131,14 @@ namespace ModSync.Core.Parsing
                 {
                     ApplyReviewFlag(component);
                     info($"[DraftInstructions] Drafted {added} instruction(s) from prose for '{component.Name}' - flagged for review.");
-                    results.Add(new DraftInstructionResult(component, added));
                 }
+
+                if (unparsedGaps.Count > 0)
+                {
+                    info($"[DraftInstructions] {unparsedGaps.Count} direction(s) for '{component.Name}' produced no draft - review needed.");
+                }
+
+                results.Add(new DraftInstructionResult(component, added, unparsedGaps));
             }
 
             return results;

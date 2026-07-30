@@ -140,6 +140,7 @@ ___
                 Assert.That(results, Has.Count.EqualTo(1), "Component with parseable prose should receive drafts");
                 Assert.That(component.Instructions, Is.Not.Empty, "Draft instructions should be attached to the component");
                 Assert.That(results[0].DraftInstructionCount, Is.EqualTo(component.Instructions.Count));
+                Assert.That(results[0].UnparsedGaps, Is.Empty, "Prose that fully matches known patterns has zero gaps");
             });
 
             Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Move), Is.True,
@@ -255,13 +256,37 @@ ___
         [Test]
         public void DraftInstructions_UnparseableProse_DegradesGracefullyToNoDrafts()
         {
+            // Pure commentary (no action verb): recognized as informational, not a gap.
             ModComponent component = CreateComponent("A fan favorite retexture bundle. Many enjoy this excellent work.");
 
             IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
 
             Assert.Multiple(() =>
             {
-                Assert.That(results, Is.Empty, "Unparseable prose should degrade to today's behavior");
+                Assert.That(results, Has.Count.EqualTo(1),
+                    "A component with Directions prose should still appear in results even when nothing drafts");
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(0));
+                Assert.That(results[0].UnparsedGaps, Is.Empty, "Pure commentary is not an unparsed gap");
+                Assert.That(component.Instructions, Is.Empty);
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_ActionableButUnmatchedProse_SurfacesAsUnparsedGap()
+        {
+            // Contains an action verb ("select") but is phrased in a way no pattern in the list matches
+            // (no file/folder/version noun for the "select" patterns to anchor on).
+            ModComponent component = CreateComponent("Select whichever seems best for your taste, honestly.");
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(results[0].DraftInstructionCount, Is.EqualTo(0));
+                Assert.That(results[0].UnparsedGaps, Is.Not.Empty,
+                    "Actionable prose that matches no pattern must surface as a reviewable gap, not silently drop");
+                Assert.That(results[0].HasUnparsedGaps, Is.True);
                 Assert.That(component.Instructions, Is.Empty);
             });
         }
@@ -498,10 +523,11 @@ Name = ""Paste Cascade Toml Mod""
             IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(components);
 
             Assert.That(results, Is.Not.Empty, $"Real guide prose ({gameFolder}/{guideFile}) should draft instructions for at least one component");
+            Assert.That(results.Any(r => r.DraftInstructionCount > 0), Is.True,
+                $"Real guide prose ({gameFolder}/{guideFile}) should draft instructions for at least one component");
 
             foreach (DraftInstructionResult result in results)
             {
-                Assert.That(result.Component.Instructions, Is.Not.Empty);
                 foreach (Instruction instruction in result.Component.Instructions)
                 {
                     AssertInstructionIsSandboxed(instruction);
@@ -552,7 +578,13 @@ Name = ""Paste Cascade Toml Mod""
 
             foreach (DraftInstructionResult draft in ingested.DraftResults)
             {
-                Assert.That(draft.Component.InstallationWarning, Does.Contain(DraftInstructionService.ReviewFlagMessage));
+                // DraftResults now includes components whose Directions produced zero drafts (U2 gap
+                // reporting) - only components that actually drafted instructions get the review flag.
+                if (draft.DraftInstructionCount > 0)
+                {
+                    Assert.That(draft.Component.InstallationWarning, Does.Contain(DraftInstructionService.ReviewFlagMessage));
+                }
+
                 foreach (Instruction instruction in draft.Component.Instructions)
                 {
                     AssertInstructionIsSandboxed(instruction);
