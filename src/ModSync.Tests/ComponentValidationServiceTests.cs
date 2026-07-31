@@ -341,6 +341,29 @@ namespace ModSync.Tests
         [Test]
         public async Task AnalyzeDownloadNecessityAsync_WithFilesInResourceRegistry_ReturnsNoDownloads()
         {
+            // ResourceRegistry alone only records that a URL's archive is KNOWN to contain these
+            // files (see DownloadCacheService, which populates it from a resolved-URL cache) - it does
+            // not mean the archive is physically present in the mod directory right now. To genuinely
+            // exercise "no download necessary," the archive itself must actually exist on disk
+            // (matching how ComponentValidationService.AnalyzeDownloadNecessityAsync really decides
+            // this: it scans modArchiveDirectory for real archive files and their real contents, and
+            // only treats a pattern as satisfied if it matches something actually present).
+            //
+            // NOTE (2026-07-30): before the ModComponent.ResourceRegistry defensive-copy-getter bug was
+            // fixed, `component.ResourceRegistry["mod.zip"] = ...` below was silently discarded, and
+            // this test only "passed" because AnalyzeDownloadNecessityAsync's pattern-matching fell
+            // through to its "not on disk and not in ResourceRegistry - skipping" branch, not because
+            // it exercised the ResourceRegistry-aware code path its name claims to test. Now that the
+            // registry assignment actually persists, the archive must be real on disk for the assertion
+            // ("no download needed") to hold for the right reason.
+            // ComponentValidationService's archive-contents matching branch only fires for patterns
+            // that reference the archive name itself (e.g. "<<modDirectory>>/mod.zip*/file1.txt") - a
+            // plain "<<modDirectory>>/file1.txt" pattern (as used by this component's instructions
+            // below) is only satisfied by the literal file existing directly in modArchiveDirectory,
+            // so write real loose files rather than packing them into an archive.
+            File.WriteAllText(Path.Combine(_modDirectory, "file1.txt"), "placeholder");
+            File.WriteAllText(Path.Combine(_modDirectory, "file2.txt"), "placeholder");
+
             var component = new ModComponent
             {
                 Name = "Test Component",
@@ -370,7 +393,7 @@ namespace ModSync.Tests
 
             Assert.Multiple(() =>
             {
-                Assert.That(urls, Is.Empty, "Should not require downloads when files are in ResourceRegistry");
+                Assert.That(urls, Is.Empty, "Should not require downloads when the archive naming the ResourceRegistry-tracked files is already present on disk");
                 Assert.That(simulationFailed, Is.False, "Simulation should not fail");
             });
         }

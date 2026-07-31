@@ -278,8 +278,20 @@ namespace ModSync.Tests
 
         #region Resource Registry Edge Cases
 
+        /// <summary>
+        /// NOTE (2026-07-30): renamed/re-asserted from an original "SelectsCorrectArchive" test that
+        /// expected the system to silently auto-pick one of two archives both containing "file.txt"
+        /// when the instruction's Source pattern ("&lt;&lt;modDirectory&gt;&gt;/file.txt") doesn't
+        /// reference either archive's name. The real (intentional) behavior - confirmed via the
+        /// service's own log message, "File 'file.txt' found in multiple archives... Please add an
+        /// explicit Extract instruction to specify which archive to use" - is to refuse to guess and
+        /// fail safely, rather than silently extracting from an arbitrary one of two archives whose
+        /// contents may differ (they do in this test's own setup: "archive1 content" vs "archive2
+        /// content"). Silently picking one would be the actual bug; this test now asserts the safe,
+        /// explicit-disambiguation-required behavior instead.
+        /// </summary>
         [Test]
-        public async Task ResourceRegistry_MultipleArchives_SelectsCorrectArchive()
+        public async Task ResourceRegistry_MultipleArchivesWithAmbiguousPattern_FailsSafelyRatherThanGuessing()
         {
             string archive1 = CreateTestZip("archive1.zip", new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -338,9 +350,10 @@ namespace ModSync.Tests
 
             Assert.Multiple(() =>
             {
-                Assert.That(result, Is.EqualTo(Instruction.ActionExitCode.Success), "Should extract from one of the archives");
-                Assert.That(File.Exists(Path.Combine(_kotorDirectory, "Override", "file.txt")), Is.True,
-                    "File should be extracted and moved");
+                Assert.That(result, Is.Not.EqualTo(Instruction.ActionExitCode.Success),
+                    "Should not silently guess which of two archives with differing content to extract from");
+                Assert.That(File.Exists(Path.Combine(_kotorDirectory, "Override", "file.txt")), Is.False,
+                    "No file should be extracted when the source archive is ambiguous");
             });
         }
 
@@ -393,7 +406,63 @@ namespace ModSync.Tests
 
         #endregion
 
+        #region Defensive-Copy Property Regression Tests
+
+        /// <summary>
+        /// Regression test for a real bug (found 2026-07-30): <see cref="ModComponent.ResourceRegistry"/>'s
+        /// getter used to return a brand-new defensive-copy dictionary on every access. Code across the
+        /// codebase (MarkdownParser, ComponentMergeService, DownloadManagementService,
+        /// ModComponentSerializationService, DownloadCacheService, GUI DownloadLinksControl, etc.) mutates
+        /// the registry via `component.ResourceRegistry[key] = value` directly on the property result -
+        /// with a defensive-copy getter, that indexer assignment silently wrote into a throwaway copy and
+        /// the mutation was lost. This test asserts indexer-assignment mutations are visible on a
+        /// subsequent read of the same property.
+        /// </summary>
+        [Test]
+        public void ResourceRegistry_IndexerAssignment_PersistsAcrossReads()
+        {
+            var component = new ModComponent { Guid = Guid.NewGuid(), Name = "Indexer Assignment Test" };
+
+            component.ResourceRegistry["https://example.com/mod-page"] = new ResourceMetadata
+            {
+                Files = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase),
+                HandlerMetadata = new Dictionary<string, object>(StringComparer.Ordinal),
+            };
+
+            Assert.That(component.ResourceRegistry.Count, Is.EqualTo(1),
+                "Indexer assignment on component.ResourceRegistry must persist - a defensive-copy getter " +
+                "would silently discard it, leaving Count at 0.");
+            Assert.That(component.ResourceRegistry.ContainsKey("https://example.com/mod-page"), Is.True);
+        }
+
+        /// <summary>
+        /// Same defensive-copy hazard, but for <c>.Remove(key)</c> instead of indexer assignment
+        /// (used by ComponentMergeService and the GUI's DownloadLinksControl).
+        /// </summary>
+        [Test]
+        public void ResourceRegistry_Remove_PersistsAcrossReads()
+        {
+            var component = new ModComponent { Guid = Guid.NewGuid(), Name = "Remove Persistence Test" };
+            component.ResourceRegistry = new Dictionary<string, ResourceMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["https://example.com/mod-page"] = new ResourceMetadata
+                {
+                    Files = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase),
+                    HandlerMetadata = new Dictionary<string, object>(StringComparer.Ordinal),
+                },
+            };
+
+            component.ResourceRegistry.Remove("https://example.com/mod-page");
+
+            Assert.That(component.ResourceRegistry.Count, Is.EqualTo(0),
+                "Remove() on component.ResourceRegistry must persist - a defensive-copy getter would " +
+                "return the removal target unaffected on the next read.");
+        }
+
+        #endregion
+
         #region Helper Methods
+
 
         private string CreateTestZip(string fileName, Dictionary<string, string> files)
         {

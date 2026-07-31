@@ -185,9 +185,16 @@ namespace ModSync.Tests
 
             var (urls, failed) = await _validationService.AnalyzeDownloadNecessityAsync(component, _modDirectory);
 
+            // NOTE (2026-07-30): AnalyzeDownloadNecessityAsync's `simulationFailed` return value means
+            // "the simulation determined one or more files still need downloading" (implemented as
+            // `urlsNeedingDownload.Count > 0` in ComponentValidationService), not "an error occurred."
+            // Asserting both "a download URL was identified" and "failed is False" is self-contradictory
+            // given that definition - fixed to assert `failed` is True, matching the fact that this test
+            // deliberately sets up a component whose required file is NOT present on disk (only known via
+            // ResourceRegistry), so a download genuinely is necessary.
             Assert.Multiple(() =>
             {
-                Assert.That(failed, Is.False, "Analysis should not fail");
+                Assert.That(failed, Is.True, "A download being necessary is exactly what makes the simulation report 'failed' (nothing to catch/retry here - see NOTE above)");
                 Assert.That(urls, Is.Not.Empty, "Should identify download URL");
                 Assert.That(urls, Contains.Item("http://example.com/mod.zip"), "Should include ResourceRegistry URL");
             });

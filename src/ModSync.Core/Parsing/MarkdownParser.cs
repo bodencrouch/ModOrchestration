@@ -582,15 +582,20 @@ namespace ModSync.Core.Parsing
                             .Distinct(StringComparer.OrdinalIgnoreCase)
                             .ToList();
 
-                        component.ResourceRegistry = new Dictionary<string, ResourceMetadata>(StringComparer.Ordinal);
+                        // NOTE: ResourceRegistry's getter returns a defensive copy (see
+                        // ModComponent.ResourceRegistry), so mutating component.ResourceRegistry[link]
+                        // directly would silently write into a throwaway copy and be lost. Build the
+                        // dictionary locally, then assign it once via the setter.
+                        var newResourceRegistry = new Dictionary<string, ResourceMetadata>(StringComparer.Ordinal);
                         foreach (string link in links)
                         {
-                            component.ResourceRegistry[link] = new ResourceMetadata
+                            newResourceRegistry[link] = new ResourceMetadata
                             {
                                 Files = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase),
                                 HandlerMetadata = new Dictionary<string, object>(StringComparer.Ordinal),
                             };
                         }
+                        component.ResourceRegistry = newResourceRegistry;
 
                         _logVerbose($"  Extracted {component.ResourceRegistry.Count} mod links from Name field");
                     }

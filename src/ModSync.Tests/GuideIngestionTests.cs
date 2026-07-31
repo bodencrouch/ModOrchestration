@@ -1115,6 +1115,32 @@ ___
                 : tomlOutput.Substring(nameIndex);
         }
 
+        /// <summary>
+        /// Regression test for a real bug (found 2026-07-30, K2 mod-build download session):
+        /// markdown ingestion parsed each component's <c>**Name:** [Label](url)</c> link correctly
+        /// (confirmed via debug instrumentation that the regex match and local `links` list were
+        /// non-empty), but the resulting <see cref="ModComponent.ResourceRegistry"/> was always empty
+        /// after ingestion - MarkdownParser.cs mutated the registry via
+        /// `component.ResourceRegistry[link] = ...` directly on the property result, and
+        /// <see cref="ModComponent.ResourceRegistry"/>'s getter used to return a brand-new defensive
+        /// copy on every access, so the mutation was silently discarded before it was ever visible.
+        /// Converting a full guide through this path used to produce a TOML with zero download URLs
+        /// across every component, making the CLI's download automation entirely non-functional.
+        /// </summary>
+        [Test]
+        public void IngestMarkdown_NameFieldLink_PopulatesResourceRegistry()
+        {
+            GuideIngestResult result = GuideIngestService.Instance.IngestFromText(MarkdownGuide, formatHint: "markdown", parseDirections: false);
+
+            Assert.That(result.Components, Is.Not.Empty, "Expected at least one parsed component");
+            ModComponent component = result.Components[0];
+
+            Assert.That(component.ResourceRegistry, Is.Not.Empty,
+                "The mod-page URL in the component's **Name:** field must survive into ResourceRegistry " +
+                "- this is what the CLI's DeadlyStream/Nexus/MEGA download handlers resolve against.");
+            Assert.That(component.ResourceRegistry.ContainsKey("https://example.com/guide-ingestion-test-mod.zip"), Is.True);
+        }
+
         [Test]
         public void CliConvert_StdinCombinedWithInput_Fails()
         {

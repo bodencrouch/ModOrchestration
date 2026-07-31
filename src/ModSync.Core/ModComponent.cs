@@ -245,11 +245,26 @@ namespace ModSync.Core
             }
         }
 
+        // NOTE: unlike the other collection-typed properties on this class (Category, Language,
+        // ExcludedDownloads), this getter intentionally returns the LIVE backing dictionary, not a
+        // defensive copy. ResourceRegistry is a mutable Dictionary<> (not IReadOnlyList<>), and ~25+
+        // call sites throughout src/ModSync.Core and src/ModSync.GUI (ComponentMergeService,
+        // DownloadManagementService, ModComponentSerializationService, DownloadCacheService,
+        // MarkdownParser, DownloadLinksControl.axaml.cs, GUI FileLoadingService, etc.) all mutate it
+        // via `component.ResourceRegistry[key] = value` / `.Remove(key)` directly on the property
+        // result. A defensive-copy getter silently discards every one of those mutations, since the
+        // indexer/Remove call operates on a throwaway copy that's never written back through the
+        // setter - this was a real, previously-undetected bug (see MarkdownParser.cs's link
+        // extraction, which is how it was originally found: markdown-ingested mod links were being
+        // silently dropped). Returning the live dictionary makes all of those call sites behave as
+        // originally intended. The setter still defensively copies *in* on assignment, so replacing
+        // the whole property (`component.ResourceRegistry = newDict`) still protects against the
+        // caller mutating `newDict` afterward and unexpectedly affecting this component.
         [NotNull]
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0016:Prefer using collection abstraction instead of implementation", Justification = "<Pending>")]
         public Dictionary<string, ResourceMetadata> ResourceRegistry
         {
-            get => new Dictionary<string, ResourceMetadata>(_resourceRegistry, StringComparer.OrdinalIgnoreCase);
+            get => _resourceRegistry;
             set
             {
                 if (_resourceRegistry == value)
@@ -257,7 +272,13 @@ namespace ModSync.Core
                     return;
                 }
 
-                _resourceRegistry = new Dictionary<string, ResourceMetadata>(value, StringComparer.OrdinalIgnoreCase);
+                // Treat `component.ResourceRegistry = null` as "clear the registry" rather than
+                // throwing - callers (e.g. ComponentValidationService's null-safety tests) expect
+                // assigning null to reset to an empty, non-null registry, matching the [NotNull]
+                // contract on this property's own type.
+                _resourceRegistry = value is null
+                    ? new Dictionary<string, ResourceMetadata>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, ResourceMetadata>(value, StringComparer.OrdinalIgnoreCase);
                 OnPropertyChanged();
             }
         }
