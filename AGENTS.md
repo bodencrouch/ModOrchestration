@@ -260,6 +260,61 @@ Widescreen-only pages are added dynamically after the base install when needed.
 - `InstallStartPage`
   - review page before the real install begins
 
+## Install order is load-bearing — NEVER append a fixed step at the end
+
+**Hard rule: if step N fails, you may not fix it by installing it after step N+k.
+Restore the snapshot taken before step N, fix the cause, then replay N onward
+in guide order.** There is no shortcut, and "I'll just install it at the end"
+is always wrong, even for a single loose-file mod.
+
+This is not stylistic. KOTOR installs are order-dependent *and* destructive:
+
+1. **Loose files are last-writer-wins.** The guide's ordering *is* its
+   conflict-resolution policy. When two mods ship the same filename, the guide
+   expects the later step's copy to survive. Installing an early step last
+   inverts that silently — no error, no log line, just the wrong asset.
+2. **Patchers accumulate shared state.** TSLPatcher/HoloPatcher append rows to
+   `spells.2da`, `feat.2da`, `appearance.2da`, `dialog.tlk` and then bake the
+   resulting row indices into `2DAMEMORY` tokens that are compiled into `.ncs`
+   scripts. Running an early mod late puts its rows at indices every later mod
+   already assumed differently.
+3. **Some steps are order-critical barriers.** K1 step 181 (Remove Duplicate
+   TGA/TPC) exists because a stale `.tpc` shadowing a newer `.tga` *crashes the
+   game*. Any step that adds `.tga` files must run before it, or the dedupe has
+   to be re-run afterward.
+
+### Measured consequence (2026-08-05, K1 full build)
+
+Remediation installs were appended after step 192 instead of being replayed in
+order. Diffing the live `Override/` against `snap_0192` found **103 files
+differing and 59 removed**. Concrete regressions included:
+
+- `dan14_sherruk.utc` — step 145's patch overwrote the version that step 177
+  (NPC Alignment Fix) had produced, discarding that mod's alignment edits.
+- `feat.2da` — steps 143 and 169 appended their rows after all of 144-192.
+- `ia_class9_004.tpc` — step 168 replaced a higher-resolution texture placed by
+  a later step with its own smaller one.
+
+None of these surfaced as an error. Every patcher reported success.
+
+### The only correct failure protocol
+
+```
+step N fails
+  -> restore snapshot_before(N)          # verify hashes match, or ABORT
+  -> diagnose and fix the actual cause
+  -> re-run step N, verify
+  -> replay N+1 .. end IN GUIDE ORDER
+```
+
+If a step is genuinely unresolvable (missing archive, CAPTCHA-walled host),
+**halt the run there** and report it. Do not continue past it and do not
+backfill it later — a build assembled on top of a skipped step is not a
+reference install, and silently backfilling produces a build that looks
+complete while being wrong in ways no log records.
+
+Snapshots exist precisely so this is cheap. Use them.
+
 ## Full-build workflow expectation
 
 For `KOTOR1_Full.toml` / `KOTOR2_Full.toml` tests:

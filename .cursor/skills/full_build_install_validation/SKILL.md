@@ -13,8 +13,30 @@ Use this skill when the task explicitly involves:
 
 ## Read first
 
+- **`docs/knowledgebase/modbuild-paranoia-doctrine.md` — MANDATORY, READ BEFORE TOUCHING A GAME DIRECTORY.**
+  The modbuild is **not idempotent**. A doubt is a defect. Never continue past an
+  unresolved issue; never append a missed step out of order (restore-and-replay instead);
+  never run two writers against one game dir; snapshot before every step; verify from the
+  filesystem, never from intent. If provenance of the base is uncertain, **start over**.
 - `docs/local_desktop_agent_runbook.md`
 - `.cursor/skills/local_desktop_gui_testing/SKILL.md`
+
+## Non-negotiable invariants (summary — full text in the doctrine)
+
+1. Base must be **proven factory-fresh** (fresh Steam install; record a step-0 `BASELINE`).
+2. **Stop on any error or doubt.** Roll back → diagnose to root cause → fix → verify → resume.
+   Continuing while an earlier step is `blocked`/`failed`/`unverified` is forbidden, even if
+   you believe later steps don't depend on it — that is a guess about a non-idempotent system.
+3. **One writer per game directory.** Prove no other writer exists via process check, not mtime.
+4. **Snapshot before every step** (`rsync -a --link-dest`, ~1s); full-tree when the step touches
+   `modules/`, `dialog.tlk`, `lips/`, `streamvoice/`, `movies/`.
+5. **Verify from the filesystem**: patcher exit code AND zero `[Error]` lines AND expected file
+   delta AND guide-specified deletions absent via `find -iname` (globs are case-sensitive; the
+   engine is not). Note some patchers exit 0 even on failure.
+6. **No silent skips.** Every step gets a ledger record; a missing step number is a defect.
+7. **Follow the guide literally**, including trailing Installation/Download notes; quote the
+   instruction verbatim in the ledger.
+8. **Verify mod identity by content, not filename** (K1 `LDA_/LKO_/LTS_` vs K2 `DAN_/DXN_/OND_`).
 
 ## Required repo state
 

@@ -242,6 +242,36 @@ namespace ModSync.Core.Utility
             return aspyrScore >= threshold ? DetectedGame.Kotor2Aspyr : DetectedGame.Kotor2Legacy;
         }
 
+        /// <summary>
+        /// Resolves the directory ModSync should treat as the game content root for installs.
+        /// Aspyr KOTOR 2 Steam/Linux lays out content under <c>steamassets/</c>; if the user
+        /// passes the install parent, rewrite to that folder so mods land in
+        /// <c>steamassets/override</c> instead of a useless sibling <c>Override/</c> at the root.
+        /// </summary>
+        [NotNull]
+        public static string ResolveInstallGameDirectory([NotNull] string gameDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(gameDirectory))
+            {
+                throw new ArgumentException("Game directory must be provided.", nameof(gameDirectory));
+            }
+
+            string full = Path.GetFullPath(ExpandPath(gameDirectory));
+            string steamassets = Path.Combine(full, "steamassets");
+            string steamOverride = Path.Combine(steamassets, "override");
+            bool looksLikeAspyrParent =
+                Directory.Exists(steamOverride)
+                && (File.Exists(Path.Combine(steamassets, "dialog.tlk"))
+                    || File.Exists(Path.Combine(steamassets, "chitin.key")));
+
+            if (looksLikeAspyrParent)
+            {
+                return Path.GetFullPath(steamassets);
+            }
+
+            return full;
+        }
+
         private const int EvidenceLimit = 6;
 
         private static readonly IReadOnlyDictionary<GameInstallVariant, IReadOnlyList<string>> DetailedSignatureMap =

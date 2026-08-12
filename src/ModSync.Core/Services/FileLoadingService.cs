@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -39,6 +40,14 @@ namespace ModSync.Core.Services
             string content = ReadFileWithEncodingFallback(filePath);
             string format = GetFormatHintFromExtension(filePath);
 
+            if (string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase))
+            {
+                return Ports.Guides.GuideIngestService.Instance.IngestFromText(
+                    content,
+                    formatHint: "markdown",
+                    parseDirections: true).Components;
+            }
+
             return ModComponentSerializationService.DeserializeModComponentFromString(content, format);
         }
 
@@ -47,6 +56,19 @@ namespace ModSync.Core.Services
         public static async Task<List<ModComponent>> LoadFromFileAsync([NotNull] string filePath)
         {
             (string content, string format) = await ReadFileContentAndFormatHintAsync(filePath).ConfigureAwait(false);
+
+            // Prose Markdown guides must run NaturalLanguageInstructionParser so Directions
+            // become executable instructions (GUI paste/file-open and CLI install share this).
+            if (string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase))
+            {
+                Ports.Guides.GuideIngestResult ingested = await Task.Run(() =>
+                    Ports.Guides.GuideIngestService.Instance.IngestFromText(
+                        content,
+                        formatHint: "markdown",
+                        parseDirections: true)).ConfigureAwait(false);
+                return ingested.Components.ToList();
+            }
+
             return (List<ModComponent>)await ModComponentSerializationService.DeserializeModComponentFromStringAsync(content, format).ConfigureAwait(false);
         }
 

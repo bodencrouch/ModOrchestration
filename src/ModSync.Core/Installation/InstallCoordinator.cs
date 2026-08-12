@@ -32,14 +32,26 @@ namespace ModSync.Core.Installation
         public CheckpointManager CheckpointManager { get; }
         public Services.GitCheckpointService CheckpointService { get; private set; }
 
-        public async Task<ResumeResult> InitializeAsync([NotNull] IList<ModComponent> components, [NotNull] DirectoryInfo destinationPath, CancellationToken cancellationToken)
+        public async Task<ResumeResult> InitializeAsync(
+            [NotNull] IList<ModComponent> components,
+            [NotNull] DirectoryInfo destinationPath,
+            CancellationToken cancellationToken,
+            bool preserveInputOrder = false)
         {
             await CheckpointManager.InitializeAsync(components, destinationPath).ConfigureAwait(false);
             if (!MainConfig.NoCheckpoint)
             {
                 // EnsureSnapshotAsync does a full recursive copy + zip of the whole game
                 // directory — skip it entirely when checkpointing is disabled.
+                // On slow external disks this can look like a hang (near-zero CPU, futex wait
+                // on I/O) with no log lines after "Starting installation...".
+                await Logger.LogAsync(
+                    "Creating install backup snapshot (full game-directory copy + zip). "
+                    + "This can take several minutes on large installs or slow disks; "
+                    + "use --no-checkpoint to skip."
+                ).ConfigureAwait(false);
                 await CheckpointManager.EnsureSnapshotAsync(destinationPath, cancellationToken).ConfigureAwait(false);
+                await Logger.LogAsync("Install backup snapshot ready.").ConfigureAwait(false);
             }
 
             ReleaseCheckpointService();
@@ -50,11 +62,17 @@ namespace ModSync.Core.Installation
                 // baseline snapshot entirely (it re-syncs the whole game directory and is
                 // prohibitively slow on large installs / slow storage). No rollback capability
                 // is available for this session.
-                List<ModComponent> orderedNoCheckpoint = GetOrderedInstallList(components);
+                List<ModComponent> orderedNoCheckpoint = preserveInputOrder
+                    ? components.ToList()
+                    : GetOrderedInstallList(components);
                 return new ResumeResult(CheckpointManager.State.SessionId, orderedNoCheckpoint);
             }
 
             // Initialize Git-based checkpoint system
+            await Logger.LogAsync(
+                "Initializing Git checkpoint baseline (copies the full game tree into .modsync). "
+                + "This can also take several minutes; use --no-checkpoint to skip."
+            ).ConfigureAwait(false);
             CheckpointService = new Services.GitCheckpointService(destinationPath.FullName);
             _checkpointServiceDirectory = NormalizeDirectoryKey(destinationPath.FullName);
             RegisterCheckpointService(_checkpointServiceDirectory, CheckpointService);
@@ -64,7 +82,9 @@ namespace ModSync.Core.Installation
                 CheckpointManager.State.BaselineCheckpointId = baselineCommitId;
 
                 await CheckpointManager.SaveAsync().ConfigureAwait(false);
-                List<ModComponent> ordered = GetOrderedInstallList(components);
+                List<ModComponent> ordered = preserveInputOrder
+                    ? components.ToList()
+                    : GetOrderedInstallList(components);
                 return new ResumeResult(CheckpointManager.State.SessionId, ordered);
             }
             catch

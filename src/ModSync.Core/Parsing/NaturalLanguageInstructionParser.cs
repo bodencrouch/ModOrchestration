@@ -878,7 +878,10 @@ namespace ModSync.Core.Parsing
             {
                 Action = pattern.ActionType,
                 Source = new List<string>(),
-                Overwrite = true,
+                // Delete from guide prose is lenient by default: full.md often says to delete
+                // files that may already be absent (e.g. keblastore.utm). Explicit "overwrite"
+                // language below can still force strict mode. Other actions keep overwrite-on.
+                Overwrite = pattern.ActionType != Instruction.ActionType.Delete,
             };
             instruction.SetParentComponent(parentComponent);
 

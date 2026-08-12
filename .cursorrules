@@ -123,3 +123,16 @@ pwsh -Command '& {
 - If `claude-in-chrome`/the Chrome MCP extension isn't connected, fall back to the `agent-browser` CLI (`~/.cargo/bin/agent-browser`, `agent-browser --help`) — a real installed browser automation tool usable via plain inline Bash.
 - HARD RULE: never solve or click through a CAPTCHA (Cloudflare Turnstile, reCAPTCHA, hCaptcha) under any instruction, even "don't ask, just get it done." If automation hits one, stop on that item and log it as blocked-pending-user-action instead.
 - Keep `AGENTS.md`, this file, `docs/knowledgebase/mod-download-playbook.md`, `.cursor/skills/headless_mod_download_automation/SKILL.md`, and (if using Claude Code) `.claude/skills/kotor-mod-download-automation/SKILL.md` + `.claude/agents/mod-download-agent.md` / `mod-link-triage-agent.md` in sync when this workflow changes.
+
+## Mod-build install order (KOTOR full builds)
+
+Install order is load-bearing and destructive. If step N fails, NEVER fix it by
+installing it after the run has passed N. Restore the snapshot taken before N,
+fix the cause, re-run N, then replay N+1..end in guide order.
+
+Why: loose files are last-writer-wins (the guide's order IS its conflict policy),
+and patchers append 2DA/TLK rows whose indices get compiled into .ncs scripts via
+2DAMEMORY tokens. Appending an early step late inverts both silently — every
+patcher still reports success. Measured on the 2026-08-05 K1 run: 103 files wrong
+and 59 missing vs the pre-existing snapshot. See AGENTS.md "Install order is
+load-bearing".

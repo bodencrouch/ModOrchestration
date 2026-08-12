@@ -256,7 +256,9 @@ namespace ModSync.Services
                 }
 
 #pragma warning disable MA0004 // Use Task.
-                return await LoadMarkdownContentAsync(fileContents, editorMode, onComponentsLoaded, tryAutoGenerate, profile, draftInstructionsFromProse: false);
+                // Loading a .md guide must run NaturalLanguageInstructionParser so Directions
+                // become executable instructions (same product path as paste / convert --parse-directions).
+                return await LoadMarkdownContentAsync(fileContents, editorMode, onComponentsLoaded, tryAutoGenerate, profile, draftInstructionsFromProse: true);
 #pragma warning restore MA0004 // Use Task.
             }
             catch (Exception ex)

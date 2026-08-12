@@ -9,5 +9,6 @@ namespace ModSync.Core
     {
         public const string Holopatcher = "Holopatcher";
         public const string KPatcher = "KPatcher";
+        public const string OdyPatcher = "OdyPatcher";
     }
 }

@@ -637,11 +637,17 @@ namespace ModSync.Core.CLI
             [Option("concurrent", Required = false, Default = false, HelpText = "Run downloads concurrently (faster; harder to debug)")]
             public bool Concurrent { get; set; }
 
-            [Option("patcher-engine", Required = false, HelpText = "Override TSLPatcher backend: Holopatcher or KPatcher (else use settings.json default)")]
+            [Option("patcher-engine", Required = false, HelpText = "Override patcher backend: Holopatcher, KPatcher, or OdyPatcher")]
             public string PatcherEngine { get; set; }
 
             [Option("kpatcher-path", Required = false, HelpText = "Full path to KPatcher executable when patcher-engine=KPatcher")]
             public string KPatcherPath { get; set; }
+
+            [Option("odypatcher-path", Required = false, HelpText = "Full path to OdyPatcher when patcher-engine=OdyPatcher")]
+            public string OdyPatcherPath { get; set; }
+
+            [Option("direct-markdown", Required = false, Default = false, HelpText = "Use Markdown as the sole install authority; reject generated or unresolved actions and skip widescreen and 4GB Patcher")]
+            public bool DirectMarkdown { get; set; }
 
             [Option("continue-on-missing-sources", Required = false, Default = false, HelpText = "Skip mods whose archives are missing and continue installing the rest (partial install)")]
             public bool ContinueOnMissingSources { get; set; }
@@ -3277,6 +3283,38 @@ componentName: null,
 
             try
             {
+                if (opts.DirectMarkdown)
+                {
+                    if (!string.Equals(Path.GetExtension(opts.InputPath), ".md", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await Logger.LogErrorAsync("Direct Markdown mode requires a .md input file.").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    // Strict default: checkpoints + validation + stop-on-error.
+                    // Automation may opt into --no-checkpoint / --skip-validation / --best-effort
+                    // (and related continue flags) — log a warning but do not hard-reject, otherwise
+                    // unattended installs hang forever on zip/git baselines (see F1) or cannot run
+                    // at all against incomplete archive sets.
+                    if (opts.Download || opts.Managed || opts.UseFileSelection
+                        || (opts.Select != null && opts.Select.Any()))
+                    {
+                        await Logger.LogErrorAsync(
+                            "Direct Markdown mode installs the full guide in order and does not support --download, --managed, --use-file-selection, or --select."
+                        ).ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    if (opts.NoCheckpoint || opts.SkipValidation || opts.BestEffort
+                        || opts.ContinueOnMissingSources || opts.ContinueOnModFailure)
+                    {
+                        await Logger.LogWarningAsync(
+                            "Direct Markdown automation overrides active (--no-checkpoint / --skip-validation / --best-effort / continue-*). "
+                            + "Guide order is preserved, but fail-closed checkpoint/validation guarantees are weakened."
+                        ).ConfigureAwait(false);
+                    }
+                }
+
                 if (!File.Exists(opts.InputPath))
                 {
                     await Logger.LogErrorAsync($"Error: Input file not found: {opts.InputPath}").ConfigureAwait(false);
@@ -3287,6 +3325,18 @@ componentName: null,
                 {
                     await Logger.LogErrorAsync($"Error: Game directory not found: {opts.GameDirectory}").ConfigureAwait(false);
                     return 1;
+                }
+
+                string resolvedGameDir = PathUtilities.ResolveInstallGameDirectory(opts.GameDirectory);
+                if (!string.Equals(
+                        Path.GetFullPath(opts.GameDirectory),
+                        resolvedGameDir,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    await Logger.LogWarningAsync(
+                        $"Aspyr KOTOR 2 layout detected: using content root '{resolvedGameDir}' "
+                        + $"(steamassets) instead of '{opts.GameDirectory}' so Override/modules writes hit the live game data."
+                    ).ConfigureAwait(false);
                 }
 
                 string sourceDir = opts.SourceDirectory;
@@ -3304,7 +3354,7 @@ componentName: null,
 
                 EnsureConfigInitialized();
                 s_config.sourcePath = new DirectoryInfo(sourceDir);
-                s_config.destinationPath = new DirectoryInfo(opts.GameDirectory);
+                s_config.destinationPath = new DirectoryInfo(resolvedGameDir);
 
                 if (opts.BestEffort)
                 {
@@ -3326,6 +3376,21 @@ componentName: null,
                     await Logger.LogVerboseAsync($"KPatcher path override: {opts.KPatcherPath.Trim()}").ConfigureAwait(false);
                 }
 
+                if (!string.IsNullOrWhiteSpace(opts.OdyPatcherPath))
+                {
+                    s_config.odyPatcherExecutablePath = opts.OdyPatcherPath.Trim();
+                    await Logger.LogVerboseAsync($"OdyPatcher path override: {opts.OdyPatcherPath.Trim()}").ConfigureAwait(false);
+                }
+
+                if (opts.DirectMarkdown
+                    && !string.Equals(MainConfig.PatcherEngine, PatcherEngines.OdyPatcher, StringComparison.OrdinalIgnoreCase))
+                {
+                    await Logger.LogErrorAsync(
+                        "Direct Markdown mode requires --patcher-engine OdyPatcher."
+                    ).ConfigureAwait(false);
+                    return 1;
+                }
+
                 s_config.continueInstallOnMissingSources = opts.ContinueOnMissingSources;
                 s_config.continueInstallOnModFailure = opts.ContinueOnModFailure;
                 s_config.noCheckpoint = opts.NoCheckpoint;
@@ -3342,10 +3407,16 @@ componentName: null,
 
                 await Logger.LogAsync($"Loading instruction file: {opts.InputPath}").ConfigureAwait(false);
 
-                List<ModComponent> components = await FileLoadingService.LoadFromFileAsync(opts.InputPath).ConfigureAwait(false);
-
-                // Handle dependency resolution
-                components = (List<ModComponent>)HandleDependencyResolutionErrors(components, opts.IgnoreErrors, "Install");
+                List<ModComponent> components;
+                if (opts.DirectMarkdown)
+                {
+                    components = await DirectMarkdownInstallPreflight.LoadGuideAsync(opts.InputPath).ConfigureAwait(false);
+                }
+                else
+                {
+                    components = await FileLoadingService.LoadFromFileAsync(opts.InputPath).ConfigureAwait(false);
+                    components = (List<ModComponent>)HandleDependencyResolutionErrors(components, opts.IgnoreErrors, "Install");
+                }
 
                 if (components is null || components.Count == 0)
                 {
@@ -3365,6 +3436,67 @@ componentName: null,
                 {
                     await Logger.LogAsync("Applying component selection...").ConfigureAwait(false);
                     ApplySelectionFilters(components, opts.Select);
+                }
+
+                if (opts.DirectMarkdown)
+                {
+                    DirectMarkdownInstallPreflightResult directResult = DirectMarkdownInstallPreflight.Apply(components);
+                    await Logger.LogAsync(
+                        $"Direct Markdown NLP: draftedFromProse={directResult.DraftedFromProse}, 4GB Patcher skipped={directResult.SkippedFourGb}, widescreen skipped={directResult.SkippedWidescreen}."
+                    ).ConfigureAwait(false);
+
+                    if (!directResult.IsReady)
+                    {
+                        bool allowPartial = opts.BestEffort || opts.ContinueOnModFailure;
+                        if (!allowPartial)
+                        {
+                            await Logger.LogErrorAsync(
+                                $"Direct Markdown preflight stopped before game writes: {directResult.UnresolvedComponents.Count} selected component(s) have no reviewed executable actions in the Markdown."
+                            ).ConfigureAwait(false);
+                            foreach (string componentName in directResult.UnresolvedComponents.Take(25))
+                            {
+                                await Logger.LogErrorAsync($"  - {componentName}").ConfigureAwait(false);
+                            }
+
+                            if (directResult.UnresolvedComponents.Count > 25)
+                            {
+                                await Logger.LogErrorAsync(
+                                    $"  - ... and {directResult.UnresolvedComponents.Count - 25} more"
+                                ).ConfigureAwait(false);
+                            }
+                            return 1;
+                        }
+
+                        // Best-effort / continue-on-failure: install what NLP drafted; skip the rest.
+                        var unresolvedNames = new HashSet<string>(
+                            directResult.UnresolvedComponents,
+                            StringComparer.OrdinalIgnoreCase);
+                        int deselected = 0;
+                        foreach (ModComponent component in components)
+                        {
+                            if (component.IsSelected
+                                && unresolvedNames.Contains(component.Name ?? string.Empty))
+                            {
+                                component.IsSelected = false;
+                                deselected++;
+                            }
+                        }
+
+                        await Logger.LogWarningAsync(
+                            $"Direct Markdown NLP coverage incomplete: deselected {deselected} component(s) with no executable actions; continuing with drafted mods (--best-effort / --continue-on-mod-failure)."
+                        ).ConfigureAwait(false);
+                        foreach (string componentName in directResult.UnresolvedComponents.Take(15))
+                        {
+                            await Logger.LogWarningAsync($"  - skipped (undrafted): {componentName}").ConfigureAwait(false);
+                        }
+
+                        if (directResult.UnresolvedComponents.Count > 15)
+                        {
+                            await Logger.LogWarningAsync(
+                                $"  - ... and {directResult.UnresolvedComponents.Count - 15} more"
+                            ).ConfigureAwait(false);
+                        }
+                    }
                 }
 
                 if (opts.BestEffort && string.IsNullOrWhiteSpace(MainConfig.NexusModsApiKey))
@@ -3502,7 +3634,8 @@ componentName: null,
                     },
                     cancellationToken: default,
                     profileOverride: profileOverride,
-                    managedDeploymentOverride: managedOverride
+                    managedDeploymentOverride: managedOverride,
+                    preserveInputOrder: opts.DirectMarkdown
                 ).ConfigureAwait(false);
 
                 if (InstallationService.LastManagedInstallResult != null)

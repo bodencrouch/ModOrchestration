@@ -198,7 +198,9 @@ namespace ModSync.Core
 
         /// <summary>
         /// Which backend runs TSLPatcher-style installs (<c>--install --game-dir --tslpatchdata</c>).
-        /// Use <see cref="PatcherEngines.Holopatcher"/> (Resources holopatcher / PyKotor) or <see cref="PatcherEngines.KPatcher"/> (external KPatcher CLI).
+        /// Use <see cref="PatcherEngines.Holopatcher"/> (Resources holopatcher / PyKotor),
+        /// <see cref="PatcherEngines.KPatcher"/> (external KPatcher CLI), or
+        /// <see cref="PatcherEngines.OdyPatcher"/> (external OdyPatcher CLI).
         /// </summary>
         public static string PatcherEngine { get; private set; } = PatcherEngines.Holopatcher;
         /// <summary>Instance accessor for <see cref="PatcherEngine"/>.</summary>
@@ -215,6 +217,15 @@ namespace ModSync.Core
         {
             get => KPatcherExecutablePath;
             set => KPatcherExecutablePath = value;
+        }
+
+        /// <summary>Optional full path to OdyPatcher when <see cref="PatcherEngine"/> is <see cref="PatcherEngines.OdyPatcher"/>.</summary>
+        public static string OdyPatcherExecutablePath { get; private set; }
+        /// <summary>Instance accessor for <see cref="OdyPatcherExecutablePath"/>.</summary>
+        public string odyPatcherExecutablePath
+        {
+            get => OdyPatcherExecutablePath;
+            set => OdyPatcherExecutablePath = value;
         }
 
         /// <summary>Determines whether file-system watchers are enabled. Mutate via <see cref="enableFileWatcher"/>.</summary>

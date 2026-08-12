@@ -687,12 +687,87 @@ Exception Type: {ex.GetType().FullName}";
             return (null, false);
         }
 
-        /// <summary>Runs TSLPatcher/HoloPatcher/KPatcher with the same CLI shape HoloPatcher expects for <c>--install</c>.</summary>
+        /// <summary>Resolves the OdyPatcher CLI executable from its configured path, PATH, or app directories.</summary>
+        public static async Task<(string path, bool found)> FindOdyPatcherExecutableAsync(string baseDir = null, string resourcesDir = null)
+        {
+            if (!string.IsNullOrWhiteSpace(MainConfig.OdyPatcherExecutablePath))
+            {
+                string configured = MainConfig.OdyPatcherExecutablePath.Trim();
+                if (File.Exists(configured))
+                {
+                    await Logger.LogVerboseAsync($"[OdyPatcher] Using configured executable: {configured}").ConfigureAwait(false);
+                    return (configured, true);
+                }
+
+                await Logger.LogWarningAsync($"[OdyPatcher] Configured path not found: {configured}").ConfigureAwait(false);
+            }
+
+            baseDir = baseDir ?? UtilityHelper.GetBaseDirectory();
+            resourcesDir = resourcesDir ?? UtilityHelper.GetResourcesDirectory(baseDir);
+            string[] names = { "odypatcher", "odypatcher.exe", "OdyPatcher", "OdyPatcher.exe" };
+
+            string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            foreach (string dir in pathEnv.Split(new[] { Path.PathSeparator }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                foreach (string name in names)
+                {
+                    try
+                    {
+                        string candidate = Path.Combine(dir.Trim(), name);
+                        if (File.Exists(candidate))
+                        {
+                            return (candidate, true);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore malformed PATH entries.
+                    }
+                }
+            }
+
+            foreach (string name in names)
+            {
+                string nextToApp = Path.Combine(baseDir, name);
+                if (File.Exists(nextToApp))
+                {
+                    return (nextToApp, true);
+                }
+
+                string inResources = Path.Combine(resourcesDir, name);
+                if (File.Exists(inResources))
+                {
+                    return (inResources, true);
+                }
+            }
+
+            return (null, false);
+        }
+
+        /// <summary>Runs the selected TSLPatcher-compatible CLI backend.</summary>
         public static async Task<(int exitCode, string stdout, string stderr)> RunTslPatcherCliAsync(
             string args,
             Services.FileSystem.IFileSystemProvider fileSystemProvider = null)
         {
             string engine = MainConfig.PatcherEngine ?? PatcherEngines.Holopatcher;
+            if (string.Equals(engine, PatcherEngines.OdyPatcher, StringComparison.OrdinalIgnoreCase))
+            {
+                (string odyPath, bool odyFound) = await FindOdyPatcherExecutableAsync().ConfigureAwait(false);
+                if (!odyFound)
+                {
+                    return (1, string.Empty, "OdyPatcher executable not found. Set --odypatcher-path or install odypatcher on PATH.");
+                }
+
+                string odyArgs = args.TrimStart();
+                await Logger.LogVerboseAsync($"[OdyPatcher] {odyPath} {odyArgs}").ConfigureAwait(false);
+                if (fileSystemProvider != null)
+                {
+                    return await fileSystemProvider.ExecuteProcessAsync(odyPath, odyArgs).ConfigureAwait(false);
+                }
+
+                return await PlatformAgnosticMethods.ExecuteProcessAsync(odyPath, odyArgs).ConfigureAwait(false);
+            }
+
             if (string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase))
             {
                 (string kPath, bool kFound) = await FindKPatcherExecutableAsync().ConfigureAwait(false);
@@ -738,7 +813,32 @@ Exception Type: {ex.GetType().FullName}";
                 string resourcesDir = UtilityHelper.GetResourcesDirectory(baseDir);
                 string engine = MainConfig.PatcherEngine ?? PatcherEngines.Holopatcher;
 
-                if (string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(engine, PatcherEngines.OdyPatcher, StringComparison.OrdinalIgnoreCase))
+                {
+                    (string odyPath, bool odyFound) = await FindOdyPatcherExecutableAsync(baseDir, resourcesDir).ConfigureAwait(false);
+                    if (!odyFound)
+                    {
+                        return (false,
+                            "OdyPatcher was selected but no executable was found. Set --odypatcher-path or add odypatcher to PATH.");
+                    }
+
+                    try
+                    {
+                        await PlatformAgnosticMethods.MakeExecutableAsync(new FileInfo(odyPath)).ConfigureAwait(false);
+                    }
+                    catch (Exception e)
+                    {
+                        await Logger.LogExceptionAsync(e).ConfigureAwait(false);
+                        patcherIsExecutable = false;
+                    }
+
+                    (int, string, string) odyResult = await PlatformAgnosticMethods.ExecuteProcessAsync(
+                        odyPath,
+                        "--help"
+                    ).ConfigureAwait(false);
+                    patcherTestExecute = odyResult.Item1 == 0;
+                }
+                else if (string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase))
                 {
                     (string kPath, bool kFound) = await FindKPatcherExecutableAsync(baseDir, resourcesDir).ConfigureAwait(false);
                     if (!kFound)
@@ -1048,7 +1148,8 @@ Exception Type: {ex.GetType().FullName}";
             [CanBeNull] Action<int, int, string> progressCallback = null,
             CancellationToken cancellationToken = default,
             [CanBeNull] string profileOverride = null,
-            bool? managedDeploymentOverride = null)
+            bool? managedDeploymentOverride = null,
+            bool preserveInputOrder = false)
         {
             if (allComponents is null)
             {
@@ -1056,7 +1157,11 @@ Exception Type: {ex.GetType().FullName}";
             }
 
             return await RunWithManagedInstallSessionAsync(
-                () => InstallAllSelectedComponentsCoreAsync(allComponents, progressCallback, cancellationToken),
+                () => InstallAllSelectedComponentsCoreAsync(
+                    allComponents,
+                    progressCallback,
+                    cancellationToken,
+                    preserveInputOrder),
                 profileOverride,
                 managedDeploymentOverride).ConfigureAwait(false);
         }
@@ -1064,7 +1169,8 @@ Exception Type: {ex.GetType().FullName}";
         private static async Task<ModComponent.InstallExitCode> InstallAllSelectedComponentsCoreAsync(
             [NotNull][ItemNotNull] List<ModComponent> allComponents,
             [CanBeNull] Action<int, int, string> progressCallback,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool preserveInputOrder)
         {
             if (allComponents is null)
             {
@@ -1105,7 +1211,11 @@ Exception Type: {ex.GetType().FullName}";
             {
                 DirectoryInfo destination = MainConfig.DestinationPath
                                             ?? throw new InvalidOperationException("DestinationPath must be set before installing.");
-                ResumeResult resume = await coordinator.InitializeAsync(allComponents, destination, cancellationToken).ConfigureAwait(false);
+                ResumeResult resume = await coordinator.InitializeAsync(
+                    allComponents,
+                    destination,
+                    cancellationToken,
+                    preserveInputOrder).ConfigureAwait(false);
                 var orderedComponents = resume.OrderedComponents.Where(component => component.IsSelected).ToList();
                 int total = orderedComponents.Count;
                 ModComponent.InstallExitCode exitCode = ModComponent.InstallExitCode.Success;
@@ -1246,7 +1356,8 @@ Exception Type: {ex.GetType().FullName}";
             [CanBeNull] Action<int, int, string> progressCallback = null,
             CancellationToken cancellationToken = default,
             [CanBeNull] string profileOverride = null,
-            bool? managedDeploymentOverride = null)
+            bool? managedDeploymentOverride = null,
+            bool preserveInputOrder = false)
         {
             if (allComponents is null)
             {
@@ -1258,7 +1369,8 @@ Exception Type: {ex.GetType().FullName}";
                 progressCallback,
                 cancellationToken,
                 profileOverride,
-                managedDeploymentOverride);
+                managedDeploymentOverride,
+                preserveInputOrder);
         }
 
     }

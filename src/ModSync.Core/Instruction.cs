@@ -1340,26 +1340,44 @@ namespace ModSync.Core
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*PlaintextLog\s*=\s*0\s*$", replacement: "PlaintextLog=1");
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*LookupGameFolder\s*=\s*1\s*$", replacement: "LookupGameFolder=0");
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*ConfirmMessage\s*=\s*.*$", replacement: "ConfirmMessage=N/A");
+
+                    string engine = MainConfig.PatcherEngine ?? PatcherEngines.Holopatcher;
+                    bool useKpatcher = string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase);
+                    bool useOdyPatcher = string.Equals(engine, PatcherEngines.OdyPatcher, StringComparison.OrdinalIgnoreCase);
+                    bool useExternalPatcher = useKpatcher || useOdyPatcher;
+
+                    // OdyPatcher rejects --flag=value (and shell/ProcessStartInfo quote collapsing of
+                    // --flag="value" into --flag=value). Always use space-separated forms.
+                    // Quote paths so spaces survive ProcessStartInfo argument parsing.
+                    string gameDirArg = QuoteProcessArgument(MainConfig.DestinationPath?.FullName);
+                    string tslPatchDataArg = QuoteProcessArgument(tslPatcherDirectory.FullName);
                     var argList = new List<string>
                     {
                         "--install",
-                        $"--game-dir=\"{MainConfig.DestinationPath}\"",
-                        $"--tslpatchdata=\"{tslPatcherDirectory}\"",
+                        "--game-dir",
+                        gameDirArg,
+                        "--tslpatchdata",
+                        tslPatchDataArg,
                     };
+                    if (useOdyPatcher)
+                    {
+                        // Headless: no GUI window, no confirmation prompt.
+                        argList.Add("--cli");
+                        argList.Add("-y");
+                    }
+
                     if (!string.IsNullOrEmpty(Arguments))
                     {
-                        argList.Add($"--namespace-option-index={Arguments}");
+                        argList.Add("--namespace-option-index");
+                        argList.Add(Arguments.Trim());
                     }
 
                     string args = string.Join(separator: " ", argList);
                     string baseDir = UtilityHelper.GetBaseDirectory();
                     string resourcesDir = UtilityHelper.GetResourcesDirectory(baseDir);
 
-                    string engine = MainConfig.PatcherEngine ?? PatcherEngines.Holopatcher;
-                    bool useKpatcher = string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase);
-
                     (string holopatcherPath, bool usePythonVersion, bool found) = (null, false, false);
-                    if (!useKpatcher)
+                    if (!useExternalPatcher)
                     {
                         (holopatcherPath, usePythonVersion, found) = await Services.InstallationService.FindHolopatcherAsync(resourcesDir, baseDir).ConfigureAwait(false);
                         if (!found)
@@ -1382,9 +1400,9 @@ namespace ModSync.Core
                     int exitCode;
                     string output;
                     string error;
-                    if (useKpatcher)
+                    if (useExternalPatcher)
                     {
-                        await Logger.LogAsync($"Using KPatcher CLI: {args}").ConfigureAwait(false);
+                        await Logger.LogAsync($"Using {engine} CLI: {args}").ConfigureAwait(false);
                         (exitCode, output, error) = await Services.InstallationService.RunTslPatcherCliAsync(args, _fileSystemProvider).ConfigureAwait(false);
                     }
                     else
@@ -1515,6 +1533,26 @@ namespace ModSync.Core
             }
         }
         [NotNull]
+        /// <summary>
+        /// Quote a path for <see cref="System.Diagnostics.ProcessStartInfo.Arguments"/> so spaces
+        /// survive parsing. Do not use <c>--flag="value"</c>: that collapses to <c>--flag=value</c>,
+        /// which OdyPatcher rejects.
+        /// </summary>
+        private static string QuoteProcessArgument([CanBeNull] string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "\"\"";
+            }
+
+            if (value.IndexOfAny(new[] { ' ', '\t', '"' }) < 0)
+            {
+                return value;
+            }
+
+            return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
         private async Task<List<string>> VerifyInstall([ItemNotNull] IReadOnlyList<string> sourcePaths = null)
         {
             if (_fileSystemProvider is null)

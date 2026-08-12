@@ -179,6 +179,10 @@ ___
             Assert.That(results, Has.Count.EqualTo(1), "Delete-before-move prose from mod-builds should draft");
             Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Delete), Is.True,
                 "Prose that deletes files before moving should draft a Delete instruction");
+            Assert.That(
+                component.Instructions.Where(i => i.Action == Instruction.ActionType.Delete),
+                Has.All.Matches<Instruction>(i => !i.Overwrite),
+                "Guide-prose Deletes must be lenient (Overwrite=false) so missing targets like keblastore.utm do not fail");
 
             foreach (Instruction instruction in component.Instructions)
             {
