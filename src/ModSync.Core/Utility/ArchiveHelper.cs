@@ -1177,6 +1177,13 @@ namespace ModSync.Core.Utility
 
                     var folderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+                    // An archive either already contains its own top-level folder ("Mod Name/TSLPatcher.exe")
+                    // or is flat ("TSLPatcher.exe"), in which case extracting it yields a folder named after
+                    // the archive. Both are common and nothing in the file tells us which convention a given
+                    // mod used, so BOTH candidate paths are checked against the pattern. Unconditionally
+                    // prefixing the archive name doubled the folder for self-rooted archives
+                    // ("Character Start Up Changes/Character Start Up Changes/TSLPatcher.exe") and the real
+                    // file could never match, failing the install on a file that was present all along.
                     foreach (IArchiveEntry entry in archive.Entries)
                     {
                         string entryPath = entry.Key.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
@@ -1185,20 +1192,23 @@ namespace ModSync.Core.Utility
                             ? archiveRoot
                             : $"{archiveRoot}{Path.DirectorySeparatorChar}{entryPath}";
 
-                        if (PathHelper.WildcardPathMatch(pathWithRoot, relativePattern))
+                        foreach (string candidate in CandidateEntryPaths(entryPath, pathWithRoot))
                         {
-                            return new ArchiveMatchResult
+                            if (PathHelper.WildcardPathMatch(candidate, relativePattern))
                             {
-                                IsArchiveFile = true,
-                                CouldOpen = true,
-                                Matches = true,
-                            };
-                        }
+                                return new ArchiveMatchResult
+                                {
+                                    IsArchiveFile = true,
+                                    CouldOpen = true,
+                                    Matches = true,
+                                };
+                            }
 
-                        string folder = entry.IsDirectory ? pathWithRoot : Path.GetDirectoryName(pathWithRoot);
-                        if (!string.IsNullOrEmpty(folder))
-                        {
-                            folderPaths.Add(folder.TrimEnd(Path.DirectorySeparatorChar));
+                            string candidateFolder = entry.IsDirectory ? candidate : Path.GetDirectoryName(candidate);
+                            if (!string.IsNullOrEmpty(candidateFolder))
+                            {
+                                folderPaths.Add(candidateFolder.TrimEnd(Path.DirectorySeparatorChar));
+                            }
                         }
                     }
 
@@ -1220,6 +1230,27 @@ namespace ModSync.Core.Utility
                     CouldOpen = false,
                     Matches = false,
                 };
+            }
+        }
+
+        /// <summary>
+        /// The paths an archive entry can legitimately be referred to by: the entry exactly as stored
+        /// (for archives that carry their own top-level folder) and the entry prefixed with the archive
+        /// name (for flat archives, where extraction creates that folder). Duplicates are collapsed so a
+        /// flat-vs-rooted archive never yields the same path twice.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static IEnumerable<string> CandidateEntryPaths(
+            [CanBeNull] string entryPath,
+            [NotNull] string pathWithRoot)
+        {
+            yield return pathWithRoot;
+
+            if (!string.IsNullOrEmpty(entryPath)
+                && !string.Equals(entryPath, pathWithRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                yield return entryPath;
             }
         }
 

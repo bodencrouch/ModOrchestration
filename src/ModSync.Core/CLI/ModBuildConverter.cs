@@ -3382,14 +3382,14 @@ componentName: null,
                     await Logger.LogVerboseAsync($"OdyPatcher path override: {opts.OdyPatcherPath.Trim()}").ConfigureAwait(false);
                 }
 
-                if (opts.DirectMarkdown
-                    && !string.Equals(MainConfig.PatcherEngine, PatcherEngines.OdyPatcher, StringComparison.OrdinalIgnoreCase))
-                {
-                    await Logger.LogErrorAsync(
-                        "Direct Markdown mode requires --patcher-engine OdyPatcher."
-                    ).ConfigureAwait(false);
-                    return 1;
-                }
+                // Direct Markdown mode describes where install instructions come from (the guide's prose
+                // and structure); it says nothing about which patcher backend should run them. Forcing
+                // OdyPatcher here made it impossible to reproduce a hand install with the CLI, because a
+                // person following the guide runs the patcher each mod actually ships (HoloPatcher /
+                // TSLPatcher). The two engines do not agree byte-for-byte -- notably TLK Replace vs
+                // append-all -- so pinning the automated path to a different engine than the manual one
+                // guarantees a diff that no parser fix can close. Engine selection stays with
+                // --patcher-engine.
 
                 s_config.continueInstallOnMissingSources = opts.ContinueOnMissingSources;
                 s_config.continueInstallOnModFailure = opts.ContinueOnModFailure;
@@ -3440,6 +3440,22 @@ componentName: null,
 
                 if (opts.DirectMarkdown)
                 {
+                    // Components whose guide entry carries no "Installation Instructions" prose have nothing
+                    // for the NLP parser to read - their install semantics live in the mod-page link plus the
+                    // archive's own layout. That is exactly what the local-archive generator resolves: it
+                    // derives a search term from the component's mod link, matches it against the archives in
+                    // --source-dir, and reads the archive to decide TSLPatcher vs loose-file. `convert` and
+                    // `merge` already expose this as --auto-generate-local; install skipped it entirely, which
+                    // is why guide components with no prose reached preflight with zero actions.
+                    EnsureConfigInitialized();
+                    s_config.sourcePath = new DirectoryInfo(sourceDir);
+                    int generated = await ComponentProcessingService
+                        .TryGenerateFromLocalArchivesAsync(components)
+                        .ConfigureAwait(false);
+                    await Logger.LogAsync(
+                        $"Direct Markdown: generated instructions from local archives for {generated} component(s) with no prose."
+                    ).ConfigureAwait(false);
+
                     DirectMarkdownInstallPreflightResult directResult = DirectMarkdownInstallPreflight.Apply(components);
                     await Logger.LogAsync(
                         $"Direct Markdown NLP: draftedFromProse={directResult.DraftedFromProse}, 4GB Patcher skipped={directResult.SkippedFourGb}, widescreen skipped={directResult.SkippedWidescreen}."

@@ -139,9 +139,19 @@ namespace ModSync.Core.Parsing
             ),
 
 			// === EXTRACT PATTERNS ===
-			// "Extract/Unzip the mod"
+			// "Extract the mod" / "Extract redrob's mod" -- the component's own archive, no explicit source.
+			// Must precede the explicit-source pattern below so possessive phrasing does not fall through to it.
 			new InstructionPattern(
-                @"(?:extract|unzip|decompress|unpack)\s+(?:the\s+)?(?<source>[\w\s\-_/\\]+?)(?:\s+to\s+(?<destination>[\w\s\-_/\\]+?))?",
+                @"(?:extract|unzip|decompress|unpack)\s+(?:the\s+)?(?:[\w\-]+(?:'s|’s)\s+)?mod\b",
+                Instruction.ActionType.Extract,
+                RegexOptions.IgnoreCase
+            ),
+			// "Extract <archive.zip>" / "Unzip <folder\path>".
+			// The source must be a real filename or path token. A lazy [\w\s]+? here matches a SINGLE
+			// letter, because the trailing group is optional and nothing forces the quantifier to expand:
+			// "extract redrob's mod from its archive" yielded source "r" -> "<<modDirectory>>\r".
+			new InstructionPattern(
+                @"(?:extract|unzip|decompress|unpack)\s+(?:the\s+)?(?<source>[\w\-_]+(?:\.[\w\-_]+)+|[\w\-_]+[/\\][\w\-_./\\]*)(?:\s+to\s+(?<destination>[\w\s\-_./\\]+?))?(?=[,.;:]|\s*$|\s+(?:from|and|then|before|after|into)\b)",
                 Instruction.ActionType.Extract,
                 RegexOptions.IgnoreCase
             ),
@@ -326,11 +336,10 @@ namespace ModSync.Core.Parsing
                 Instruction.ActionType.Extract,
                 RegexOptions.IgnoreCase
             ),
-            new InstructionPattern(
-                @"(?:extract|unzip|decompress)\s+(?<source>[\w\s\-_/\\]+?)(?:\s+to\s+(?<destination>[\w\s\-_/\\]+?))?",
-                Instruction.ActionType.Extract,
-                RegexOptions.IgnoreCase
-            ),
+            // NOTE: the former catch-all "(?:extract|unzip|decompress)\s+(?<source>[\w\s\-_/\\]+?)..."
+            // lived here. It is a duplicate of the pattern above and had the same single-letter-source
+            // defect; because matching is first-match-wins, it still fired whenever the earlier
+            // patterns missed. Removed -- the two Extract patterns above supersede it.
 
 			// === PATCHER/INSTALLER ===
 			// Must cover all variations
@@ -911,7 +920,15 @@ namespace ModSync.Core.Parsing
             }
 
             // === Extract Destination ===
-            if (match.Groups["destination"].Success)
+            // Choose/Extract/Delete reject a Destination outright (see ComponentValidation). Destination
+            // inference scans the WHOLE processing unit, so a sentence carrying two clauses --
+            // "Delete po_pzaalbar3.tga before moving the files to your override" -- would attach the move
+            // clause's "to your override" to the Delete and emit an instruction that cannot validate.
+            if (!ActionAcceptsDestination(pattern.ActionType))
+            {
+                instruction.Destination = null;
+            }
+            else if (match.Groups["destination"].Success)
             {
                 string destText = match.Groups["destination"].Value.Trim();
                 instruction.Destination = NormalizeDestination(destText, unit);
@@ -1309,6 +1326,18 @@ namespace ModSync.Core.Parsing
         /// Infers destination from context when not explicitly stated.
         /// </summary>
         [NotNull]
+        /// <summary>
+        /// Whether an action may carry a Destination at all. Mirrors the rules enforced in
+        /// <c>ComponentValidation</c>: Choose, Extract and Delete reject Destination outright, so the
+        /// parser must not infer one for them.
+        /// </summary>
+        private static bool ActionAcceptsDestination(Instruction.ActionType actionType)
+        {
+            return actionType != Instruction.ActionType.Choose
+                && actionType != Instruction.ActionType.Extract
+                && actionType != Instruction.ActionType.Delete;
+        }
+
         private static string InferDestination([NotNull] string fullUnit, Instruction.ActionType actionType)
         {
             string lower = fullUnit.ToLowerInvariant();

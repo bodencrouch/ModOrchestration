@@ -442,3 +442,5 @@ clutter/
 .cursor/hooks/state/
 kotor_auto_workdir/
 .autoclaw/
+kotor_manual_workdir/
+modbuild_oracles/

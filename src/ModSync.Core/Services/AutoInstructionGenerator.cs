@@ -60,16 +60,6 @@ namespace ModSync.Core.Services
                     return result;
                 }
 
-                string firstModLink = component.ResourceRegistry.Keys.FirstOrDefault();
-                if (string.IsNullOrWhiteSpace(firstModLink))
-                {
-                    result.SkipReason = "No valid mod links found";
-                    return result;
-                }
-
-                string searchTerm = ExtractSearchTermFromModLink(firstModLink, component.Name);
-                Logger.LogVerbose($"[TryGenerateInstructions] Component '{component.Name}': Searching for archive matching '{searchTerm}'");
-
                 var allArchives = ArchiveHelper.DefaultArchiveSearchPatterns
                     .SelectMany(ext => MainConfig.SourcePath.GetFiles(ext, SearchOption.TopDirectoryOnly))
                     .Where(f => f.Exists)
@@ -81,49 +71,19 @@ namespace ModSync.Core.Services
                     return result;
                 }
 
-                Logger.LogVerbose($"[TryGenerateInstructions] Component '{component.Name}': Found {allArchives.Count} archives to check");
+                ArchiveResolution resolution = ResolveArchiveFor(component, allArchives);
 
-                string searchTermLower = searchTerm.ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "");
-                FileInfo matchingArchive = allArchives
-                    .OrderByDescending(f =>
-                    {
-                        string fileWithoutExt = Path.GetFileNameWithoutExtension(f.Name);
-                        string fileNameNormalized = fileWithoutExt.ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "");
-                        if (fileNameNormalized.Equals(searchTermLower))
-                        {
-                            return 100;
-                        }
-
-                        if (fileNameNormalized.Contains(searchTermLower))
-                        {
-                            return 50;
-                        }
-
-                        if (searchTermLower.Contains(fileNameNormalized))
-                        {
-                            return 25;
-                        }
-
-                        return 0;
-                    })
-                    .ThenByDescending(f => f.LastWriteTime)
-                    .FirstOrDefault(f =>
-                    {
-                        string fileWithoutExt = Path.GetFileNameWithoutExtension(f.Name);
-                        string fileNameNormalized = fileWithoutExt.ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "");
-                        return fileNameNormalized.Contains(searchTermLower) || searchTermLower.Contains(fileNameNormalized);
-                    });
-
-                if (matchingArchive is null)
+                if (!resolution.IsResolved)
                 {
-                    result.SkipReason = $"No matching archive found for '{searchTerm}'";
+                    result.SkipReason = DescribeUnresolved(resolution);
+                    LogUnresolved(component.Name, resolution);
                     return result;
                 }
 
-                Logger.LogVerbose($"[TryGenerateInstructions] Component '{component.Name}': Selected archive '{matchingArchive.Name}'");
+                LogResolved(component.Name, resolution);
 
                 int instructionCountBefore = component.Instructions.Count;
-                bool generated = GenerateInstructions(component, matchingArchive.FullName);
+                bool generated = GenerateFromArchiveOrExtractedFolder(component, resolution.Archive);
 
                 if (generated)
                 {
@@ -147,37 +107,55 @@ namespace ModSync.Core.Services
             }
         }
 
-        private static string ExtractSearchTermFromModLink(string firstModLink, string componentName)
+        /// <summary>
+        /// Resolves the component's archive through the tier chain in <see cref="ArchiveResolver"/>.
+        /// <para>
+        /// This replaced a scored best-guess (exact 100 / contains 50 / reverse-contains 25, then take
+        /// the most recently modified). Reverse containment matched a component against any archive
+        /// whose name was a substring of the component's, which is how "Gammorean Reskin Pack" was
+        /// mapped to "Quanons_HK47_Reskin.rar". Scoring cannot express "I do not know", and a wrong
+        /// archive installs the wrong mod while every step reports success, so the chain narrows and
+        /// reports ambiguity instead of ranking.
+        /// </para>
+        /// </summary>
+        [NotNull]
+        private static ArchiveResolution ResolveArchiveFor(
+            [NotNull] ModComponent component,
+            [NotNull] IReadOnlyList<FileInfo> allArchives)
         {
-            string searchTerm;
-            if (firstModLink.Contains("://"))
-            {
-                var uri = new Uri(firstModLink);
-                string lastSegment = uri.Segments.LastOrDefault()?.TrimEnd('/') ?? string.Empty;
-                if (!string.IsNullOrEmpty(lastSegment) && NetFrameworkCompatibility.Contains(lastSegment, '-', StringComparison.Ordinal))
-                {
-                    Match match = Regex.Match(lastSegment, @"^\d+-(.+)$", RegexOptions.Compiled, TimeSpan.FromSeconds(5));
-                    searchTerm = match.Success ? match.Groups[1].Value : lastSegment;
-                }
-                else
-                {
-                    searchTerm = lastSegment;
-                }
-                if (Path.HasExtension(searchTerm))
-                {
-                    searchTerm = Path.GetFileNameWithoutExtension(searchTerm);
-                }
-            }
-            else
-            {
-                string fileName = Path.GetFileName(firstModLink);
-                searchTerm = Path.HasExtension(fileName) ? Path.GetFileNameWithoutExtension(fileName) : fileName;
-            }
-            if (string.IsNullOrWhiteSpace(searchTerm))
-            {
-                searchTerm = componentName;
-            }
-            return searchTerm;
+            var componentUrls = component.ResourceRegistry.Keys
+                .Where(k => !string.IsNullOrWhiteSpace(k))
+                .ToList();
+
+            ArchiveResolver.GameMarker targetGame =
+                string.Equals(MainConfig.TargetGame, "K1", StringComparison.OrdinalIgnoreCase)
+                    ? ArchiveResolver.GameMarker.Kotor1
+                    : string.Equals(MainConfig.TargetGame, "TSL", StringComparison.OrdinalIgnoreCase)
+                        ? ArchiveResolver.GameMarker.Kotor2
+                        : ArchiveResolver.GameMarker.None;
+
+            return ArchiveResolver.Resolve(component.Name, componentUrls, allArchives, targetGame);
+        }
+
+        [NotNull]
+        private static string DescribeUnresolved([NotNull] ArchiveResolution resolution)
+        {
+            return resolution.Candidates.Count > 0
+                ? $"{resolution.Reason} Candidates: {string.Join(", ", resolution.Candidates)}"
+                : resolution.Reason;
+        }
+
+        private static void LogUnresolved([NotNull] string componentName, [NotNull] ArchiveResolution resolution)
+        {
+            Logger.LogWarning(
+                $"[TryGenerateInstructions] Component '{componentName}': UNRESOLVED. {DescribeUnresolved(resolution)}");
+        }
+
+        private static void LogResolved([NotNull] string componentName, [NotNull] ArchiveResolution resolution)
+        {
+            Logger.LogVerbose(
+                $"[TryGenerateInstructions] Component '{componentName}': resolved to "
+                + $"'{resolution.Archive.Name}' via tier {resolution.Tier}. {resolution.Reason}");
         }
 
         public static bool TryGenerateInstructionsFromArchive([NotNull] ModComponent component)
@@ -204,92 +182,34 @@ namespace ModSync.Core.Services
                     return false;
                 }
 
-                string firstModLink = component.ResourceRegistry.Keys.FirstOrDefault();
-                if (string.IsNullOrWhiteSpace(firstModLink))
-                {
-                    return false;
-                }
-
-                string searchTerm;
-                if (firstModLink.Contains("://"))
-                {
-                    var uri = new Uri(firstModLink);
-                    string lastSegment = uri.Segments.LastOrDefault()?.TrimEnd('/') ?? string.Empty;
-                    if (!string.IsNullOrEmpty(lastSegment) && NetFrameworkCompatibility.Contains(lastSegment, '-', StringComparison.Ordinal))
-                    {
-                        Match match = Regex.Match(lastSegment, @"^\d+-(.+)$", RegexOptions.Compiled, TimeSpan.FromSeconds(5));
-                        searchTerm = match.Success ? match.Groups[1].Value : lastSegment;
-                    }
-                    else
-                    {
-                        searchTerm = lastSegment;
-                    }
-                    if (Path.HasExtension(searchTerm))
-                    {
-                        searchTerm = Path.GetFileNameWithoutExtension(searchTerm);
-                    }
-                }
-                else
-                {
-                    string fileName = Path.GetFileName(firstModLink);
-                    searchTerm = Path.HasExtension(fileName) ? Path.GetFileNameWithoutExtension(fileName) : fileName;
-                }
-                if (string.IsNullOrWhiteSpace(searchTerm))
-                {
-                    searchTerm = component.Name;
-                }
-                Logger.LogVerbose($"[TryGenerateInstructions] Component '{component.Name}': Searching for archive matching '{searchTerm}'");
                 var allArchives = ArchiveHelper.DefaultArchiveSearchPatterns
-                        .SelectMany(ext => MainConfig.SourcePath.GetFiles(ext, SearchOption.TopDirectoryOnly))
-                        .Where(f => f.Exists)
-                        .ToList();
+                    .SelectMany(ext => MainConfig.SourcePath.GetFiles(ext, SearchOption.TopDirectoryOnly))
+                    .Where(f => f.Exists)
+                    .ToList();
+
                 if (allArchives.Count == 0)
                 {
-                    Logger.LogVerbose($"[TryGenerateInstructions] Component '{component.Name}': No archives found in directory");
+                    Logger.LogVerbose(
+                        $"[TryGenerateInstructions] Component '{component.Name}': No archives found in directory");
                     return false;
                 }
-                Logger.LogVerbose($"[TryGenerateInstructions] Component '{component.Name}': Found {allArchives.Count} archives to check");
-                string searchTermLower = searchTerm.ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "");
-                FileInfo matchingArchive = allArchives
-                    .OrderByDescending(f =>
-                    {
-                        string fileWithoutExt = Path.GetFileNameWithoutExtension(f.Name);
-                        string fileNameNormalized = fileWithoutExt.ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "");
-                        if (fileNameNormalized.Equals(searchTermLower))
-                        {
-                            return 100;
-                        }
 
-                        if (fileNameNormalized.Contains(searchTermLower))
-                        {
-                            return 50;
-                        }
+                ArchiveResolution resolution = ResolveArchiveFor(component, allArchives);
 
-                        if (searchTermLower.Contains(fileNameNormalized))
-                        {
-                            return 25;
-                        }
-
-                        return 0;
-                    })
-                    .ThenByDescending(f => f.LastWriteTime)
-                    .FirstOrDefault(f =>
-                    {
-                        string fileWithoutExt = Path.GetFileNameWithoutExtension(f.Name);
-                        string fileNameNormalized = fileWithoutExt.ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "");
-                        return fileNameNormalized.Contains(searchTermLower) || searchTermLower.Contains(fileNameNormalized);
-                    });
-                if (matchingArchive is null)
+                if (!resolution.IsResolved)
                 {
-                    Logger.LogVerbose($"[TryGenerateInstructions] Component '{component.Name}': No matching archive found for '{searchTerm}'");
+                    LogUnresolved(component.Name, resolution);
                     return false;
                 }
-                Logger.LogVerbose($"[TryGenerateInstructions] Component '{component.Name}': Selected archive '{matchingArchive.Name}'");
-                bool generated = GenerateInstructions(component, matchingArchive.FullName);
+
+                LogResolved(component.Name, resolution);
+
+                bool generated = GenerateFromArchiveOrExtractedFolder(component, resolution.Archive);
                 if (generated)
                 {
                     component.IsDownloaded = true;
                 }
+
                 return generated;
             }
             catch (Exception ex)
@@ -297,6 +217,150 @@ namespace ModSync.Core.Services
                 Logger.LogException(ex, $"Failed to auto-generate instructions for component '{component.Name}'");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Decides whether an extracted folder may be used as the description of a mod's layout,
+        /// INSTEAD of the archive beside it.
+        /// <para>
+        /// The archive wins whenever it can be listed, because the archive is what actually gets
+        /// extracted at install time and is therefore the only thing instruction paths can be
+        /// validated against. An extracted folder can contain files the archive does not - install
+        /// residue, or a stray second executable. `Darth_Malaks_Lightsaber_K1` holds both
+        /// "Darth Malak's Lightsaber.exe" (from the archive) and a "TSLPatcher.exe" that exists only
+        /// on disk; naming the latter produced a Source path present in no archive and failed
+        /// validation.
+        /// </para>
+        /// <para>
+        /// The folder is used only when the archive cannot be listed at all, and even then only if it
+        /// actually contains files. Directory existence is NOT proof of content: the library holds
+        /// folders left by an earlier failed extraction with the directory tree present and zero files
+        /// inside (`Ultimate Kashyyyk ...` = 0 files, 3 directories; `PMHA05 HD` likewise). Generating
+        /// from one of those emits instructions that copy nothing while every step reports success.
+        /// A folder holding only empty subdirectories is empty, so the check recurses.
+        /// </para>
+        /// </summary>
+        /// <param name="archiveEntries">
+        /// The archive's entry paths when the listing succeeded, so the caller can generate from them
+        /// without opening the archive a second time. Null whenever the listing was not performed or
+        /// could not be read - "unknown", never "the archive is empty". Most components in a mod
+        /// library have a sibling extracted folder, so without this the archive would be opened and
+        /// enumerated twice for nearly every component.
+        /// </param>
+        private static bool IsExtractedFolderTrustworthy(
+            [NotNull] string folderPath,
+            [NotNull] string archivePath,
+            [NotNull] string componentName,
+            [CanBeNull] out IReadOnlyList<string> archiveEntries)
+        {
+            archiveEntries = null;
+
+            if (!Directory.Exists(folderPath))
+            {
+                return false;
+            }
+
+            List<string> entries = ListArchiveEntryPaths(archivePath);
+            if (entries.Count > 0)
+            {
+                // Archive readable - it is authoritative.
+                archiveEntries = entries;
+                return false;
+            }
+
+            bool hasFiles;
+            try
+            {
+                hasFiles = Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories).Any();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[AutoInstructionGenerator] Could not inspect '{folderPath}': {ex.Message}");
+                return false;
+            }
+
+            if (!hasFiles)
+            {
+                Logger.LogWarning(
+                    $"[AutoInstructionGenerator] Component '{componentName}': archive could not be listed and "
+                    + $"extracted folder '{Path.GetFileName(folderPath)}' contains no files (failed earlier "
+                    + "extraction); no usable source for this component.");
+                return false;
+            }
+
+            Logger.LogWarning(
+                $"[AutoInstructionGenerator] Component '{componentName}': archive '{Path.GetFileName(archivePath)}' "
+                + "could not be listed; falling back to the populated extracted folder.");
+            return true;
+        }
+
+        /// <summary>
+        /// Lists an archive's file entries, returning an empty list when the archive cannot be opened
+        /// or listed. Callers treat "empty" as "unknown", never as "the archive is empty".
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> ListArchiveEntryPaths([NotNull] string archivePath)
+        {
+            try
+            {
+                (IArchive archive, FileStream stream) = ArchiveHelper.OpenArchive(archivePath);
+                if (archive is null || stream is null)
+                {
+                    return new List<string>();
+                }
+
+                using (stream)
+                using (archive)
+                {
+                    return SafeListArchiveEntries(archive, archivePath).ToList();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogVerbose($"[AutoInstructionGenerator] Could not list '{archivePath}': {ex.Message}");
+                return new List<string>();
+            }
+        }
+
+        /// <summary>
+        /// Generates a component's instructions from its archive, falling back to the archive's
+        /// already-extracted folder only when the archive itself cannot be listed.
+        /// <para>
+        /// Only a folder whose name equals the archive's base name is considered. Folder names in the
+        /// mod library do not reliably correspond to their archives ("C_DrdWar.rar" sits beside both
+        /// "C_DrdWar" and "War Droid Mk 1 HD"), and analyzing a folder that the archive does not
+        /// expand into would produce paths that never materialize.
+        /// </para>
+        /// </summary>
+        private static bool GenerateFromArchiveOrExtractedFolder(
+            [NotNull] ModComponent component,
+            [NotNull] FileInfo matchingArchive)
+        {
+            string baseName = Path.GetFileNameWithoutExtension(matchingArchive.Name);
+            string siblingFolder = Path.Combine(matchingArchive.DirectoryName ?? string.Empty, baseName);
+
+            if (IsExtractedFolderTrustworthy(
+                siblingFolder,
+                matchingArchive.FullName,
+                component.Name,
+                out IReadOnlyList<string> archiveEntries))
+            {
+                Logger.LogVerbose(
+                    $"[TryGenerateInstructions] Component '{component.Name}': using extracted folder "
+                    + $"'{baseName}' as the source of truth for '{matchingArchive.Name}'");
+
+                if (GenerateInstructionsFromDirectory(component, siblingFolder, matchingArchive.Name))
+                {
+                    return true;
+                }
+
+                Logger.LogVerbose(
+                    $"[TryGenerateInstructions] Component '{component.Name}': extracted folder yielded no "
+                    + "instructions, falling back to reading the archive");
+            }
+
+            return GenerateInstructions(component, matchingArchive.FullName, archiveEntries);
         }
 
         private static bool IsRemoveDuplicateTgaTpcMod([NotNull] ModComponent component)
@@ -1047,6 +1111,24 @@ namespace ModSync.Core.Services
 
         public static bool GenerateInstructions([NotNull] ModComponent component, [NotNull] string archivePath)
         {
+            return GenerateInstructions(component, archivePath, precomputedFileList: null);
+        }
+
+        /// <summary>
+        /// Generates a component's instructions from an archive.
+        /// </summary>
+        /// <param name="precomputedFileList">
+        /// The archive's entry paths when a caller has already listed them, letting the archive be
+        /// opened and enumerated once per component instead of twice. Pass null when the listing is
+        /// unknown, which sends this through the normal open-and-analyze path (including the 7zip CLI
+        /// fallback and the .exe handling an unreadable archive needs). An empty list means the same
+        /// as null - "unknown" - and never "the archive has no entries".
+        /// </param>
+        private static bool GenerateInstructions(
+            [NotNull] ModComponent component,
+            [NotNull] string archivePath,
+            [CanBeNull] IReadOnlyList<string> precomputedFileList)
+        {
             if (component is null)
             {
                 throw new ArgumentNullException(nameof(component));
@@ -1068,6 +1150,15 @@ namespace ModSync.Core.Services
                 return GenerateDelDuplicateInstruction(component);
             }
 
+            if (precomputedFileList != null && precomputedFileList.Count > 0)
+            {
+                Logger.LogVerbose(
+                    $"[AutoInstructionGenerator] Reusing the {precomputedFileList.Count}-entry listing already read "
+                    + $"from '{Path.GetFileName(archivePath)}'");
+                ArchiveAnalysis precomputedAnalysis = AnalyzeArchiveFromFileList(precomputedFileList);
+                return GenerateAllInstructions(component, archivePath, precomputedFileList, precomputedAnalysis);
+            }
+
             string fileExtension = Path.GetExtension(archivePath).ToLowerInvariant();
             bool isExeFile = string.Equals(fileExtension, ".exe", StringComparison.Ordinal);
 
@@ -1087,8 +1178,8 @@ namespace ModSync.Core.Services
                 using (stream)
                 using (archive)
                 {
-                    ArchiveAnalysis analysis = AnalyzeArchive(archive, archivePath);
-                    return GenerateAllInstructions(component, archivePath, archive, analysis);
+                    ArchiveAnalysis analysis = AnalyzeArchive(archive, archivePath, out IReadOnlyList<string> fileList);
+                    return GenerateAllInstructions(component, archivePath, fileList, analysis);
                 }
             }
             catch (Exception ex)
@@ -1103,19 +1194,14 @@ namespace ModSync.Core.Services
                         return GenerateExecuteInstruction(component, archivePath);
                     }
 
-                    Logger.LogWarning($"[AutoInstructionGenerator] Detected corrupted archive: {archivePath}");
-                    Logger.LogWarning("[AutoInstructionGenerator] Deleting corrupted archive...");
-
-                    try
-                    {
-                        File.Delete(archivePath);
-                        Logger.LogVerbose($"[AutoInstructionGenerator] Deleted corrupted archive: {archivePath}");
-                        Logger.LogVerbose("[AutoInstructionGenerator] Will create placeholder Extract instruction instead");
-                    }
-                    catch (Exception deleteEx)
-                    {
-                        Logger.LogError($"[AutoInstructionGenerator] Failed to delete corrupted archive: {deleteEx.Message}");
-                    }
+                    // NEVER delete the user's archive here. "Unreadable by our archive reader" is not the
+                    // same as "corrupted": an unsupported format or compression method (RAR5 in
+                    // particular), a permissions problem, or a transient IO error all land in this branch.
+                    // The source directory is the user's own mod library -- often the only copy, and
+                    // frequently not re-downloadable -- so this path must be strictly read-only. Report it
+                    // and let the caller fall through to its placeholder handling.
+                    Logger.LogWarning($"[AutoInstructionGenerator] Could not read archive (unsupported format or damaged): {archivePath}");
+                    Logger.LogWarning("[AutoInstructionGenerator] Leaving it untouched; instructions for this component must be resolved another way.");
                 }
                 else if (isExeFile)
                 {
@@ -1162,7 +1248,7 @@ namespace ModSync.Core.Services
 
             return false;
         }
-        private static ArchiveAnalysis AnalyzeArchiveFromFileList(List<string> fileList)
+        private static ArchiveAnalysis AnalyzeArchiveFromFileList([NotNull] IReadOnlyList<string> fileList)
         {
             var analysis = new ArchiveAnalysis();
 
@@ -1170,6 +1256,11 @@ namespace ModSync.Core.Services
             {
                 string normalizedPath = path.Replace('\\', '/');
                 string[] pathParts = normalizedPath.Split('/');
+
+                if (normalizedPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    analysis.ExecutableCandidates.Add(normalizedPath);
+                }
 
                 if (pathParts.Any(p => p.Equals("tslpatchdata", StringComparison.OrdinalIgnoreCase)))
                 {
@@ -1188,10 +1279,6 @@ namespace ModSync.Core.Services
                         {
                             analysis.TslPatcherPath = GetTslPatcherPath(normalizedPath);
                         }
-                    }
-                    else if (fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(analysis.PatcherExecutable))
-                    {
-                        analysis.PatcherExecutable = normalizedPath;
                     }
                 }
                 else
@@ -1219,20 +1306,174 @@ namespace ModSync.Core.Services
                 }
             }
 
+            ResolvePatcherExecutable(analysis);
+
             return analysis;
+        }
+
+        /// <summary>
+        /// Materializes the archive's entry paths, falling back to the 7zip CLI when the managed
+        /// reader cannot enumerate them (RAR5 in particular). Returns an empty list rather than
+        /// throwing: an empty list suppresses Move instructions, which is the safe direction.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static IReadOnlyList<string> SafeListArchiveEntries(
+            [NotNull] IArchive archive,
+            [NotNull] string archivePath)
+        {
+            try
+            {
+                return archive.Entries
+                    .Where(e => !e.IsDirectory && e.Key != null)
+                    .Select(e => e.Key.Replace('\\', '/'))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[AutoInstructionGenerator] Could not enumerate entries of '{archivePath}': {ex.Message}");
+
+                try
+                {
+                    Task<List<string>> task = ArchiveHelper.TryListArchiveWithSevenZipCliAsync(archivePath);
+                    task.Wait();
+                    return task.Result?.Select(p => p.Replace('\\', '/')).ToList()
+                        ?? (IReadOnlyList<string>)new List<string>();
+                }
+                catch (Exception fallbackEx)
+                {
+                    Logger.LogWarning($"[AutoInstructionGenerator] 7zip CLI listing also failed: {fallbackEx.Message}");
+                    return new List<string>();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Files that TSLPatcher WRITES when a mod is installed, rather than files the mod ships.
+        /// An extracted folder that has been installed from before contains a "backup" tree holding
+        /// the game files it replaced and an "uninstall" tree, both full of real game files. Treating
+        /// those as mod content generates Move instructions that would copy a previous installation's
+        /// displaced originals into Override - the exact opposite of what the mod intends. Archives
+        /// never contain them, so this only ever filters install residue.
+        /// </summary>
+        private static bool IsInstallerRuntimeArtifact([NotNull] string relativePath)
+        {
+            string[] parts = relativePath.Split('/');
+
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                if (parts[i].Equals("backup", StringComparison.OrdinalIgnoreCase)
+                    || parts[i].Equals("uninstall", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            string fileName = parts[parts.Length - 1];
+            return fileName.Equals("installlog.txt", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("installlog.rtf", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Generates instructions from an ALREADY-EXTRACTED mod folder sitting in the mod directory.
+        /// <para>
+        /// This is the most reliable source available: the folder is what the archive actually expands
+        /// to, so filenames - above all the installer's real name - are read rather than inferred, and
+        /// no archive reader is involved (several RAR5 files in the library cannot be opened at all).
+        /// It is also the only way to see mods that exist solely as a folder with no archive beside
+        /// them, which the archive-file enumeration cannot observe.
+        /// </para>
+        /// <para>
+        /// Paths are made relative to the folder, so the layout matches a flat archive whose extraction
+        /// folder is the folder's own name - the shape the rest of the generator already handles.
+        /// </para>
+        /// </summary>
+        public static bool GenerateInstructionsFromDirectory(
+            [NotNull] ModComponent component,
+            [NotNull] string directoryPath,
+            [CanBeNull] string extractArchiveFileName = null)
+        {
+            if (component is null)
+            {
+                throw new ArgumentNullException(nameof(component));
+            }
+
+            if (string.IsNullOrWhiteSpace(directoryPath))
+            {
+                throw new ArgumentException("Directory path cannot be null or empty", nameof(directoryPath));
+            }
+
+            if (!Directory.Exists(directoryPath))
+            {
+                return false;
+            }
+
+            if (IsRemoveDuplicateTgaTpcMod(component))
+            {
+                return GenerateDelDuplicateInstruction(component);
+            }
+
+            string folderName = new DirectoryInfo(directoryPath).Name;
+
+            List<string> fileList;
+            try
+            {
+                int prefixLength = directoryPath.TrimEnd(Path.DirectorySeparatorChar).Length + 1;
+                fileList = Directory
+                    .EnumerateFiles(directoryPath, "*", SearchOption.AllDirectories)
+                    .Select(f => f.Substring(prefixLength).Replace('\\', '/'))
+                    .Where(f => !IsInstallerRuntimeArtifact(f))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogException(ex, $"Failed to enumerate extracted folder '{directoryPath}'");
+                return false;
+            }
+
+            if (fileList.Count == 0)
+            {
+                return false;
+            }
+
+            ArchiveAnalysis analysis = AnalyzeArchiveFromFileList(fileList);
+
+            Logger.LogVerbose(
+                $"[AutoInstructionGenerator] Component '{component.Name}': analyzed extracted folder "
+                + $"'{folderName}' ({fileList.Count} files, installer="
+                + $"{(string.IsNullOrEmpty(analysis.PatcherExecutable) ? "<none>" : analysis.PatcherExecutable)})");
+
+            return GenerateAllInstructions(
+                component,
+                directoryPath,
+                fileList,
+                analysis,
+                extractedPathOverride: folderName,
+                extractArchiveFileName: extractArchiveFileName);
         }
 
         private static bool GenerateAllInstructions(
             ModComponent component,
             string archivePath,
-            IArchive archive,
-            ArchiveAnalysis analysis
+            IReadOnlyList<string> fileList,
+            ArchiveAnalysis analysis,
+            string extractedPathOverride = null,
+            string extractArchiveFileName = null
         )
         {
-            string archiveFileName = Path.GetFileName(archivePath);
-            string extractedPath = archiveFileName.Replace(Path.GetExtension(archiveFileName), "");
+            // In directory mode the layout is read from the extracted folder, but the archive beside it
+            // (when there is one) must still be extracted so the install reproduces on a machine where
+            // the folder does not yet exist. Folder-only mods have no archive and so emit no Extract.
+            bool directoryMode = extractedPathOverride != null;
+            string archiveFileName = directoryMode
+                ? extractArchiveFileName
+                : Path.GetFileName(archivePath);
 
-            if (analysis.HasTslPatchData || analysis.HasSimpleOverrideFiles)
+            bool hasArchiveToExtract = !string.IsNullOrEmpty(archiveFileName);
+            string extractedPath = extractedPathOverride
+                ?? archiveFileName.Replace(Path.GetExtension(archiveFileName), "");
+
+            if (hasArchiveToExtract && (analysis.HasTslPatchData || analysis.HasSimpleOverrideFiles))
             {
                 var extractInstruction = new Instruction
                 {
@@ -1252,7 +1493,7 @@ namespace ModSync.Core.Services
                     Logger.LogVerbose($"[AutoInstructionGenerator] Extract instruction for '{archiveFileName}' already exists, skipping");
                 }
             }
-            else
+            else if (!analysis.HasTslPatchData && !analysis.HasSimpleOverrideFiles)
             {
                 return false;
             }
@@ -1277,15 +1518,15 @@ namespace ModSync.Core.Services
 
                 if (overrideFolders.Count > 1)
                 {
-                    AddMultiFolderChooseInstructions(component, archive, archivePath, extractedPath, overrideFolders);
+                    AddMultiFolderChooseInstructions(component, fileList, extractedPath, overrideFolders);
                 }
                 else if (overrideFolders.Count == 1)
                 {
-                    AddSimpleMoveInstruction(component, archive, archivePath, extractedPath, overrideFolders[0]);
+                    AddSimpleMoveInstruction(component, fileList, extractedPath, overrideFolders[0]);
                 }
                 else if (analysis.HasFlatFiles)
                 {
-                    AddSimpleMoveInstruction(component, archive, archivePath, extractedPath, folderName: null);
+                    AddSimpleMoveInstruction(component, fileList, extractedPath, folderName: null);
                 }
             }
 
@@ -1844,7 +2085,7 @@ namespace ModSync.Core.Services
         )
         {
             Dictionary<string, Dictionary<string, string>> namespaces =
-                IniHelper.ReadNamespacesIniFromArchive(archivePath);
+                ReadNamespacesIni(archivePath);
 
             if (namespaces is null ||
                  !namespaces.TryGetValue("Namespaces", out Dictionary<string, string> value))
@@ -1873,19 +2114,32 @@ namespace ModSync.Core.Services
                     IsSelected = false,
                 };
 
-                string patcherPath = string.IsNullOrEmpty(analysis.TslPatcherPath)
-                    ? extractedPath
-                    : analysis.TslPatcherPath;
+                string patcherPath = CombinePatcherPath(extractedPath, analysis.TslPatcherPath);
 
-                // Use the namespace name as the executable name instead of generic TSLPatcher.exe
-                // This ensures each namespace has its own unique executable path
-                string executableName = $"{ns}.exe";
+                // A namespaced TSLPatcher mod ships ONE executable at the archive root and selects the
+                // namespace by index at runtime (Arguments below) - the namespace is a tslpatchdata
+                // subfolder, not a sibling of the executable and not an executable name. Deriving the
+                // path from the namespace produced sources that exist in no archive, e.g.
+                // "Sith Soldier Texture Restoration-v2.4\Main\Main.exe" for an archive whose only
+                // executable is "Install.exe" at the root, failing the whole install at validation.
+                // Resolve the executable exactly as the single-namespace path does; uniqueness across
+                // namespaces comes from Arguments and the owning Option, not from a fabricated path.
+                if (string.IsNullOrEmpty(analysis.PatcherExecutable))
+                {
+                    Logger.LogError(
+                        $"[AutoInstructionGenerator] Component '{component.Name}': no installer executable found "
+                        + $"beside tslpatchdata for namespace '{potentialOption.Name}'. Not generating a Patcher "
+                        + "instruction - guessing the name would create a Source path that exists in no archive.");
+                    continue;
+                }
+
+                string executableName = Path.GetFileName(analysis.PatcherExecutable);
 
                 var patcherInstruction = new Instruction
                 {
 
                     Action = Instruction.ActionType.Patcher,
-                    Source = new List<string> { $@"<<modDirectory>>\{patcherPath}\{ns}\{executableName}" },
+                    Source = new List<string> { $@"<<modDirectory>>\{patcherPath}\{executableName}" },
                     Destination = "<<gameDirectory>>",
                     // Arguments should be the 0-based index of the namespace option in namespaces.ini
                     Arguments = index.ToString(),
@@ -1964,18 +2218,100 @@ namespace ModSync.Core.Services
             }
         }
 
+        /// <summary>
+        /// Builds the mod-directory-relative path of the folder holding the installer.
+        /// <para>
+        /// Extraction always creates a folder named after the archive and unpacks the archive's own
+        /// structure beneath it, so an archive that carries its own top-level folder ends up nested:
+        /// "Character Start Up Changes.zip" containing "Character Start Up Changes/TSLPatcher.exe"
+        /// lands on disk at "Character Start Up Changes/Character Start Up Changes/TSLPatcher.exe".
+        /// </para>
+        /// <para>
+        /// The inner path was previously used on its own, dropping the extraction folder and pointing
+        /// at a file one level too shallow. Validation did not catch it because the archive-entry
+        /// lookup accepts the entry either as stored or prefixed with the archive name, so the check
+        /// passed against the archive while the runtime path did not exist. The two segments are
+        /// therefore joined rather than substituted.
+        /// </para>
+        /// </summary>
+        [NotNull]
+        private static string CombinePatcherPath(
+            [NotNull] string extractedPath,
+            [CanBeNull] string tslPatcherPathInsideArchive)
+        {
+            if (string.IsNullOrEmpty(tslPatcherPathInsideArchive))
+            {
+                return extractedPath;
+            }
+
+            // Instruction paths are written with '\' separators (PathHelper normalizes them per
+            // platform later); the inner path comes from the archive and uses '/', so convert it
+            // rather than emitting a path with both separators in it.
+            string inner = tslPatcherPathInsideArchive.Replace('/', '\\');
+
+            if (string.IsNullOrEmpty(extractedPath))
+            {
+                return inner;
+            }
+
+            return extractedPath + "\\" + inner;
+        }
+
+        /// <summary>
+        /// Reads namespaces.ini from either an archive or an already-extracted mod folder. Directory
+        /// mode analyzes the folder rather than the archive, so the namespace list has to come from
+        /// the same place - reading it from the archive would reopen a RAR5 file the managed reader
+        /// cannot handle, which is one of the reasons the folder is preferred in the first place.
+        /// </summary>
+        [CanBeNull]
+        private static Dictionary<string, Dictionary<string, string>> ReadNamespacesIni(
+            [NotNull] string archiveOrDirectoryPath)
+        {
+            if (!Directory.Exists(archiveOrDirectoryPath))
+            {
+                return IniHelper.ReadNamespacesIniFromArchive(archiveOrDirectoryPath);
+            }
+
+            try
+            {
+                string iniPath = Directory
+                    .EnumerateFiles(archiveOrDirectoryPath, "namespaces.ini", SearchOption.AllDirectories)
+                    .FirstOrDefault(f => !IsInstallerRuntimeArtifact(f));
+
+                if (string.IsNullOrEmpty(iniPath))
+                {
+                    return null;
+                }
+
+                using (var reader = new StreamReader(iniPath))
+                {
+                    return IniHelper.ParseNamespacesIni(reader);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogException(ex, $"Failed to read namespaces.ini under '{archiveOrDirectoryPath}'");
+                return null;
+            }
+        }
+
         private static void AddSimplePatcherInstruction(
             ModComponent component,
             ArchiveAnalysis analysis,
             string extractedPath)
         {
-            string patcherPath = string.IsNullOrEmpty(analysis.TslPatcherPath)
-                ? extractedPath
-                : analysis.TslPatcherPath;
+            string patcherPath = CombinePatcherPath(extractedPath, analysis.TslPatcherPath);
 
-            string executableName = string.IsNullOrEmpty(analysis.PatcherExecutable)
-                ? "TSLPatcher.exe"
-                : Path.GetFileName(analysis.PatcherExecutable);
+            if (string.IsNullOrEmpty(analysis.PatcherExecutable))
+            {
+                Logger.LogError(
+                    $"[AutoInstructionGenerator] Component '{component.Name}': no installer executable found beside "
+                    + $"tslpatchdata in '{patcherPath}'. Not generating a Patcher instruction - guessing the name "
+                    + "would create a Source path that exists in no archive.");
+                return;
+            }
+
+            string executableName = Path.GetFileName(analysis.PatcherExecutable);
 
             var patcherInstruction = new Instruction
             {
@@ -1999,8 +2335,7 @@ namespace ModSync.Core.Services
 
         private static void AddMultiFolderChooseInstructions(
             ModComponent component,
-            IArchive archive,
-            string archivePath,
+            IReadOnlyList<string> fileList,
             string extractedPath,
             List<string> folders
         )
@@ -2009,7 +2344,7 @@ namespace ModSync.Core.Services
 
             foreach (string folder in folders)
             {
-                if (!FolderContainsGameFiles(archive, archivePath, folder))
+                if (!FolderContainsGameFiles(fileList, folder))
                 {
                     Logger.LogVerbose($"[AutoInstructionGenerator] Skipping folder '{folder}' - no game files found");
                     continue;
@@ -2113,15 +2448,14 @@ namespace ModSync.Core.Services
 
         private static void AddSimpleMoveInstruction(
             ModComponent component,
-            IArchive archive,
-            string archivePath,
+            IReadOnlyList<string> fileList,
             string extractedPath,
             string folderName
         )
         {
             string folderPathInArchive = string.IsNullOrEmpty(folderName) ? null : folderName;
 
-            if (!FolderContainsGameFiles(archive, archivePath, folderPathInArchive))
+            if (!FolderContainsGameFiles(fileList, folderPathInArchive))
             {
                 string location = string.IsNullOrEmpty(folderName) ? "root" : $"folder '{folderName}'";
                 Logger.LogVerbose($"[AutoInstructionGenerator] Skipping Move instruction for {location} - no game files found");
@@ -2159,12 +2493,20 @@ namespace ModSync.Core.Services
             }
         }
 
+        /// <param name="fileList">
+        /// The entry paths this analysis was built from. Handed back so callers that need both the
+        /// analysis and the listing get them from a single enumeration - and, when the managed reader
+        /// fails, from a single 7zip CLI invocation.
+        /// </param>
+        [NotNull]
         private static ArchiveAnalysis AnalyzeArchive(
             [NotNull] IArchive archive,
-            [NotNull] string archivePath
+            [NotNull] string archivePath,
+            [NotNull] out IReadOnlyList<string> fileList
         )
         {
             var analysis = new ArchiveAnalysis();
+            var entryPaths = new List<string>();
 
             try
             {
@@ -2176,7 +2518,13 @@ namespace ModSync.Core.Services
                     }
 
                     string path = entry.Key.Replace('\\', '/');
+                    entryPaths.Add(path);
                     string[] pathParts = path.Split('/');
+
+                    if (path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    {
+                        analysis.ExecutableCandidates.Add(path);
+                    }
 
                     if (pathParts.Any(p => p.Equals("tslpatchdata", StringComparison.OrdinalIgnoreCase)))
                     {
@@ -2195,10 +2543,6 @@ namespace ModSync.Core.Services
                             {
                                 analysis.TslPatcherPath = GetTslPatcherPath(path);
                             }
-                        }
-                        else if (fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(analysis.PatcherExecutable))
-                        {
-                            analysis.PatcherExecutable = path;
                         }
                     }
                     else
@@ -2228,6 +2572,8 @@ namespace ModSync.Core.Services
                         }
                     }
                 }
+
+                ResolvePatcherExecutable(analysis);
             }
             catch (Exception ex)
             {
@@ -2238,12 +2584,16 @@ namespace ModSync.Core.Services
                 {
                     Task<List<string>> fileListTask = ArchiveHelper.TryListArchiveWithSevenZipCliAsync(archivePath);
                     fileListTask.Wait();
-                    List<string> fileList = fileListTask.Result;
+                    List<string> cliFileList = fileListTask.Result?.Select(p => p.Replace('\\', '/')).ToList();
 
-                    if (fileList != null && fileList.Count > 0)
+                    if (cliFileList != null && cliFileList.Count > 0)
                     {
-                        Logger.LogVerbose($"[AutoInstructionGenerator] Successfully listed {fileList.Count} files using 7zip CLI");
-                        analysis = AnalyzeArchiveFromFileList(fileList);
+                        Logger.LogVerbose($"[AutoInstructionGenerator] Successfully listed {cliFileList.Count} files using 7zip CLI");
+                        analysis = AnalyzeArchiveFromFileList(cliFileList);
+
+                        // The partial listing gathered before the managed reader gave up describes only
+                        // part of the archive; the CLI listing is the complete one.
+                        entryPaths = cliFileList;
                     }
                     else
                     {
@@ -2272,7 +2622,84 @@ namespace ModSync.Core.Services
                 }
             }
 
+            fileList = entryPaths;
             return analysis;
+        }
+
+        /// <summary>
+        /// Executables that ship inside a mod but are build tooling, never the installer the user is
+        /// meant to run. nwnnsscomp.exe (the NWScript compiler) is bundled in many tslpatchdata folders
+        /// and was previously selected as the patcher, producing sources such as
+        /// "TSL/nwnnsscomp.exe" that exist in no archive.
+        /// </summary>
+        private static readonly HashSet<string> s_nonInstallerExecutables =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "nwnnsscomp.exe",
+                "nwnnsscomp64.exe",
+                "erf.exe",
+                "rim.exe",
+                "2dahelper.exe",
+                "tlkhelper.exe",
+                "unins000.exe",
+                "uninstall.exe",
+            };
+
+        /// <summary>
+        /// Returns the directory portion of an archive-relative path, or an empty string when the
+        /// entry sits at the archive root. Uses '/' only; entries are normalized before this point.
+        /// </summary>
+        private static string ArchiveEntryDirectory([NotNull] string normalizedPath)
+        {
+            int lastSlash = normalizedPath.LastIndexOf('/');
+            return lastSlash < 0 ? string.Empty : normalizedPath.Substring(0, lastSlash);
+        }
+
+        private static bool IsInsideTslPatchData([NotNull] string normalizedPath)
+        {
+            return normalizedPath.Split('/')
+                .Any(p => p.Equals("tslpatchdata", StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Selects the TSLPatcher installer from the executables seen during the scan.
+        /// <para>
+        /// The installer is the executable that sits BESIDE the tslpatchdata folder, not inside it.
+        /// Every one of the 67 already-extracted TSLPatcher mods in the reference library follows this
+        /// layout, and only a third of them are actually named "TSLPatcher.exe" - the rest use names
+        /// like "INSTALL.exe", "installer.exe" or the mod's own title ("Juhani Appearance Overhaul.exe").
+        /// The name therefore cannot be assumed and is always read from the archive. When no executable
+        /// can be identified this returns without setting one: a fabricated name produces a Source path
+        /// that exists in no archive and fails the whole install at validation, so an explicit
+        /// unresolved component is strictly better than a guess.
+        /// </para>
+        /// </summary>
+        private static void ResolvePatcherExecutable([NotNull] ArchiveAnalysis analysis)
+        {
+            if (!analysis.HasTslPatchData || analysis.ExecutableCandidates.Count == 0)
+            {
+                return;
+            }
+
+            List<string> eligible = analysis.ExecutableCandidates
+                .Where(p => !IsInsideTslPatchData(p))
+                .Where(p => !s_nonInstallerExecutables.Contains(Path.GetFileName(p)))
+                .ToList();
+
+            if (eligible.Count == 0)
+            {
+                return;
+            }
+
+            string patcherRoot = analysis.TslPatcherPath ?? string.Empty;
+
+            string atRoot = eligible.FirstOrDefault(
+                p => ArchiveEntryDirectory(p).Equals(patcherRoot, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(atRoot))
+            {
+                analysis.PatcherExecutable = atRoot;
+            }
         }
 
         private static string GetTslPatcherPath(string iniPath)
@@ -2312,21 +2739,15 @@ namespace ModSync.Core.Services
         }
 
         private static bool FolderContainsGameFiles(
-            [NotNull] IArchive archive,
-            [NotNull] string archivePath,
+            [NotNull] IReadOnlyList<string> fileList,
             [CanBeNull] string folderPath
         )
         {
             try
             {
-                foreach (IArchiveEntry entry in archive.Entries)
+                foreach (string filePath in fileList)
                 {
-                    if (entry.IsDirectory)
-                    {
-                        continue;
-                    }
-
-                    string entryPath = entry.Key.Replace('\\', '/');
+                    string entryPath = filePath.Replace('\\', '/');
                     string extension = Path.GetExtension(entryPath);
 
                     if (!IsGameFile(extension))
@@ -2358,62 +2779,10 @@ namespace ModSync.Core.Services
             }
             catch (Exception ex)
             {
-                Logger.LogWarning($"[AutoInstructionGenerator] SharpCompress failed to enumerate archive entries: {ex.Message}");
-                Logger.LogVerbose("[AutoInstructionGenerator] Attempting to use 7zip CLI to check folder contents...");
-
-                try
-                {
-                    Task<List<string>> fileListTask = ArchiveHelper.TryListArchiveWithSevenZipCliAsync(archivePath);
-                    fileListTask.Wait();
-                    List<string> fileList = fileListTask.Result;
-
-                    if (fileList != null && fileList.Count > 0)
-                    {
-                        Logger.LogVerbose($"[AutoInstructionGenerator] Successfully listed {fileList.Count} files using 7zip CLI for folder check");
-
-                        foreach (string entryPath in fileList)
-                        {
-                            string normalizedPath = entryPath.Replace('\\', '/');
-                            string extension = Path.GetExtension(normalizedPath);
-
-                            if (!IsGameFile(extension))
-                            {
-                                continue;
-                            }
-
-                            if (string.IsNullOrEmpty(folderPath))
-                            {
-                                if (!normalizedPath.Contains('/'))
-                                {
-                                    return true;
-                                }
-                            }
-                            else
-                            {
-                                string normalizedFolderPath = folderPath.Replace('\\', '/');
-                                if (!normalizedFolderPath.EndsWith("/", StringComparison.Ordinal))
-                                {
-                                    normalizedFolderPath += "/";
-                                }
-
-                                if (normalizedPath.StartsWith(normalizedFolderPath, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    return true;
-                                }
-                            }
-                        }
-                        return false;
-                    }
-
-                    Logger.LogWarning("[AutoInstructionGenerator] 7zip CLI failed to list archive. Assuming folder contains game files.");
-                    return true;
-                }
-                catch (Exception fallbackEx)
-                {
-                    Logger.LogWarning($"[AutoInstructionGenerator] 7zip CLI fallback failed: {fallbackEx.Message}");
-                    Logger.LogVerbose("[AutoInstructionGenerator] Assuming folder contains game files since archive cannot be analyzed.");
-                    return true;
-                }
+                // The file list is already materialized by the caller, so this only guards against
+                // malformed entry paths. Treating an unreadable list as "contains game files" would
+                // fabricate a Move instruction, so report and fall through to false.
+                Logger.LogWarning($"[AutoInstructionGenerator] Failed to inspect folder contents: {ex.Message}");
             }
 
             return false;
@@ -2429,6 +2798,13 @@ namespace ModSync.Core.Services
             public List<string> FoldersWithFiles { get; set; } = new List<string>();
             public string TslPatcherPath { get; set; } = string.Empty;
             public string PatcherExecutable { get; set; } = string.Empty;
+
+            /// <summary>
+            /// Every '.exe' seen while scanning, as stored in the archive. The installer cannot be
+            /// picked while scanning because it is identified by its position relative to the
+            /// tslpatchdata folder, which may be discovered after the executable itself.
+            /// </summary>
+            public List<string> ExecutableCandidates { get; } = new List<string>();
         }
     }
 

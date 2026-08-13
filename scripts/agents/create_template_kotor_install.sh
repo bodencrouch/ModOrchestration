@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# Creates an empty KOTOR-shaped directory skeleton. The files it writes are plain text, so
+# nothing that parses a game format will accept them and no detector scores this tree.
+#
+# For a tree ModSync actually recognises as a KOTOR install - real KEY/BIF/TLK/RIM/ERF/2DA
+# headers, correct override casing per game, and the Aspyr steamassets nesting - use
+# scripts/agents/create_mock_kotor_install.sh instead. This script is kept as-is because
+# install_best_effort.sh depends on it staying fast and dependency-free.
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then

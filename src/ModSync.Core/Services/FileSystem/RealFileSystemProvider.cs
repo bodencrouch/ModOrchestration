@@ -259,13 +259,32 @@ namespace ModSync.Core.Services.FileSystem
 
                                     extracted.Add(destinationItemPath);
                                 }
-                                catch (ObjectDisposedException)
+                                catch (ObjectDisposedException ex)
                                 {
-                                    return;
+                                    // A bare `return` here abandoned the whole REMAINING archive and still reported
+                                    // success: the caller received a partial `extractedFiles` list with no warning and
+                                    // no exception. Because the destination directory is created before the write, the
+                                    // observable result was a directory tree containing zero files -- the "empty
+                                    // extracted folders" in the mod library are exactly this, frozen at the first
+                                    // entry. A mod that silently extracts nothing installs nothing while every step
+                                    // reports OK, which is the worst possible failure mode for an installer.
+                                    await Logger.LogErrorAsync(
+                                        $"Extraction of '{sourcePath}' was aborted at entry '{entry.Key}': the archive stream was disposed mid-extraction. "
+                                        + $"{extracted.Count} file(s) had been written; the rest of the archive was NOT extracted."
+                                    ).ConfigureAwait(false);
+                                    throw new IOException(
+                                        $"Archive '{sourcePath}' was only partially extracted (aborted at '{entry.Key}').", ex);
                                 }
-                                catch (UnauthorizedAccessException)
+                                catch (UnauthorizedAccessException ex)
                                 {
-                                    await Logger.LogWarningAsync($"Skipping file '{entry.Key}' due to lack of permissions.").ConfigureAwait(false);
+                                    // Skipping a file and continuing is also a silent partial extraction: the caller
+                                    // cannot distinguish "extracted everything" from "extracted everything except the
+                                    // files it could not write". Fail loudly instead and let the caller decide.
+                                    await Logger.LogErrorAsync(
+                                        $"Extraction of '{sourcePath}' failed at entry '{entry.Key}': permission denied writing '{destinationItemPath}'."
+                                    ).ConfigureAwait(false);
+                                    throw new IOException(
+                                        $"Archive '{sourcePath}' could not be fully extracted: permission denied for '{entry.Key}'.", ex);
                                 }
                             }
                         }
