@@ -32,7 +32,62 @@ namespace ModSync.Core.Parsing
         // whitespace/EOL by the time SplitIntoProcessingUnits hands a unit here).
         private static readonly List<InstructionPattern> s_instructionPatterns = new List<InstructionPattern>
         {
-			// === HIGHLY SPECIFIC MOVE/COPY PATTERNS (must come first) ===
+			// === RENAME/COPY-AS FIRST (before any pattern that matches bare "copy") ===
+			// Generic `(?:move|copy)` patterns otherwise win first-match on "make a copy…rename"
+			// / "copy the file 'X'…duplicate" and emit Move with one-letter Sources ("o*", "f*").
+			new InstructionPattern(
+                @"make\s+a\s+copy\s+of\s+(?:the\s+)?file\s+and\s+rename\s+(?:it\s+)?(?:to\s+)?[""']?(?<destination>[\w\-_.]+)[""']?",
+                Instruction.ActionType.Copy,
+                RegexOptions.IgnoreCase
+            ),
+			new InstructionPattern(
+                @"make\s+a\s+copy\s+of\s+(?:the\s+)?(?:file\s+)?[""']?(?<source>[\w\-_.]+?)[""']?\s+(?:and\s+)?paste\s+it\s+into\s+the\s+same\s+(?:directory|folder|location)(?:.*?)rename\s+(?:this\s+duplicate|it)\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
+                Instruction.ActionType.Copy,
+                RegexOptions.IgnoreCase | RegexOptions.Singleline
+            ),
+			new InstructionPattern(
+                @"make\s+a\s+copy\s+of\s+(?:the\s+)?(?:file\s+)?[""']?(?<source>[\w\-_.]+?)[""']?\s+and\s+rename\s+(?:it\s+)?(?:to\s+)?[""']?(?<destination>[\w\-_.]+)[""']?",
+                Instruction.ActionType.Copy,
+                RegexOptions.IgnoreCase
+            ),
+			// "make a copy of X and paste it in the same directory" (rename often follows in next sentence)
+			new InstructionPattern(
+                @"make\s+a\s+copy\s+of\s+(?:the\s+)?(?:file\s+)?[""']?(?<source>[\w\-_.]+?)[""']?\s+and\s+paste",
+                Instruction.ActionType.Copy,
+                RegexOptions.IgnoreCase
+            ),
+			new InstructionPattern(
+                @"copy\s+(?:the\s+)?(?:file\s+)?[""'](?<source>[\w\-_.]+)[""']\s+and\s+make\s+a\s+duplicate.*?rename\s+(?:this\s+)?duplicate\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
+                Instruction.ActionType.Copy,
+                RegexOptions.IgnoreCase | RegexOptions.Singleline
+            ),
+			new InstructionPattern(
+                @"copy\s+(?:the\s+)?(?:file\s+)?[""'](?<source>[\w\-_.]+)[""']\s+and\s+make\s+a\s+duplicate",
+                Instruction.ActionType.Copy,
+                RegexOptions.IgnoreCase
+            ),
+			new InstructionPattern(
+                @"(?:copy|duplicate)\s+(?:the\s+)?(?:file\s+)?(?<source>[\w\-_.]+?).*?rename\s+(?:it|that|this\s+duplicate)\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
+                Instruction.ActionType.Copy,
+                RegexOptions.IgnoreCase | RegexOptions.Singleline
+            ),
+			new InstructionPattern(
+                @"rename\s+(?:this\s+|the\s+|that\s+)?(?:duplicate|copy|file)(?:\s+file)?\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
+                Instruction.ActionType.Rename,
+                RegexOptions.IgnoreCase
+            ),
+			new InstructionPattern(
+                @"rename\s+(?:the\s+)?files?\s+[""']?(?<source>[\w\-_.]+?)[""']?\s+(?:to|as)\s+[""']?(?<destination>[\w\-_.]+)[""']?",
+                Instruction.ActionType.Rename,
+                RegexOptions.IgnoreCase
+            ),
+			new InstructionPattern(
+                @"rename\s+(?<source>[\w\-_.]+?)\s+to\s+(?<destination>[\w\-_.]+)",
+                Instruction.ActionType.Rename,
+                RegexOptions.IgnoreCase
+            ),
+
+			// === HIGHLY SPECIFIC MOVE PATTERNS ===
 			// "Move everything from X, Y, and Z folders to override"
 			new InstructionPattern(
                 @"move\s+everything\s+from\s+the\s+(?<folders>(?:[\w\s\-_]+?,\s+)+(?:and\s+)?[\w\s\-_]+?)\s+folders?\s+to\s+(?:your\s+)?(?<destination>[\w\s\-_/\\]+)",
@@ -93,9 +148,9 @@ namespace ModSync.Core.Parsing
                 Instruction.ActionType.Move,
                 RegexOptions.IgnoreCase
             ),
-			// Generic move (catch-all)
+			// Generic move (catch-all). Omits "copy" — copy-as / duplicate rename is handled above.
 			new InstructionPattern(
-                @"(?:move|copy|place|put|drag)\s+(?:the\s+)?(?<source>[\w\s\-_/\\*.,()]+?)(?:\s+(?:to|into)\s+(?<destination>[\w\s\-_/\\]+?))?",
+                @"(?:move|place|put|drag)\s+(?:the\s+)?(?<source>[\w\s\-_/\\*.,()]+?)(?:\s+(?:to|into)\s+(?<destination>[\w\s\-_/\\]+?))?",
                 Instruction.ActionType.Move,
                 RegexOptions.IgnoreCase
             ),
@@ -254,37 +309,7 @@ namespace ModSync.Core.Parsing
                 RegexOptions.IgnoreCase
             ),
 
-			// === RENAME/COPY PATTERNS (comprehensive) ===
-			// "Make a copy of X, paste into same directory, rename to Y"
-			new InstructionPattern(
-                @"make\s+a\s+copy\s+of\s+(?:the\s+)?(?:file\s+)?[""']?(?<source>[\w\-_.]+?)[""']?\s+(?:and\s+)?paste\s+it\s+into\s+the\s+same\s+(?:directory|folder|location)(?:.*?)rename\s+(?:this\s+duplicate|it)\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
-                Instruction.ActionType.Copy,
-                RegexOptions.IgnoreCase | RegexOptions.Singleline
-            ),
-			// "Make a copy of X and rename it to Y" (without paste clause)
-			new InstructionPattern(
-                @"make\s+a\s+copy\s+of\s+(?:the\s+)?(?:file\s+)?[""']?(?<source>[\w\-_.]+?)[""']?\s+and\s+rename\s+(?:it\s+)?(?:to\s+)?[""']?(?<destination>[\w\-_.]+)[""']?",
-                Instruction.ActionType.Copy,
-                RegexOptions.IgnoreCase
-            ),
-			// "Copy X and paste, this should create Y, rename to Z"
-			new InstructionPattern(
-                @"(?:copy|duplicate)\s+(?:the\s+)?(?:file\s+)?(?<source>[\w\-_.]+?).*?rename\s+(?:it|that|this\s+duplicate)\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
-                Instruction.ActionType.Copy,
-                RegexOptions.IgnoreCase | RegexOptions.Singleline
-            ),
-			// "Rename the files X to Y"
-			new InstructionPattern(
-                @"rename\s+(?:the\s+)?files?\s+[""']?(?<source>[\w\-_.]+?)[""']?\s+(?:to|as)\s+[""']?(?<destination>[\w\-_.]+)[""']?",
-                Instruction.ActionType.Rename,
-                RegexOptions.IgnoreCase
-            ),
-			// "Rename X to Y"
-			new InstructionPattern(
-                @"rename\s+(?<source>[\w\-_.]+?)\s+to\s+(?<destination>[\w\-_.]+)",
-                Instruction.ActionType.Rename,
-                RegexOptions.IgnoreCase
-            ),
+			// (Rename/copy-as patterns live at the top of this list — do not re-add them here.)
 
 			// === DELETE PATTERNS (exhaustive) ===
 			// "Before moving ... delete / be sure to delete ..."
@@ -540,6 +565,8 @@ namespace ModSync.Core.Parsing
                 }
             }
 
+            CoalesceSplitCopyAsPairs(instructions);
+
             // Parse download instructions for options/recommendations
             if (!string.IsNullOrWhiteSpace(downloadInstructions))
             {
@@ -555,6 +582,62 @@ namespace ModSync.Core.Parsing
             unparsedGaps = gaps;
             conditionalDrafts = conditionalNotes;
             return instructions;
+        }
+
+        /// <summary>
+        /// Guide prose often splits copy-as across sentences:
+        /// "copy the file 'LDA_EHawk01' and make a duplicate of it. Rename this duplicate to 'M36…'."
+        /// Those become Copy(source) + Rename(dest-only). Fold them into one Rename(source→dest).
+        /// </summary>
+        private static void CoalesceSplitCopyAsPairs([NotNull] ObservableCollection<Instruction> instructions)
+        {
+            for (int i = 0; i < instructions.Count - 1; i++)
+            {
+                Instruction first = instructions[i];
+                Instruction second = instructions[i + 1];
+                if (first == null || second == null)
+                {
+                    continue;
+                }
+
+                bool firstIsCopyAsSource =
+                    (first.Action == Instruction.ActionType.Copy || first.Action == Instruction.ActionType.Rename)
+                    && first.Source != null
+                    && first.Source.Count > 0
+                    && !IsModDirectoryWildcardOnly(first.Source)
+                    && (string.IsNullOrWhiteSpace(first.Destination)
+                        || !Path.HasExtension(first.Destination.Trim()));
+
+                bool secondIsDestOnlyRename =
+                    (second.Action == Instruction.ActionType.Rename || second.Action == Instruction.ActionType.Copy)
+                    && !string.IsNullOrWhiteSpace(second.Destination)
+                    && Path.HasExtension(second.Destination.Trim())
+                    && (second.Source == null
+                        || second.Source.Count == 0
+                        || IsModDirectoryWildcardOnly(second.Source));
+
+                if (!firstIsCopyAsSource || !secondIsDestOnlyRename)
+                {
+                    continue;
+                }
+
+                first.Action = Instruction.ActionType.Rename;
+                first.Destination = second.Destination.Trim().Trim('"', '\'');
+                instructions.RemoveAt(i + 1);
+            }
+        }
+
+        private static bool IsModDirectoryWildcardOnly([NotNull] IReadOnlyList<string> sources)
+        {
+            if (sources.Count != 1)
+            {
+                return false;
+            }
+
+            string rest = sources[0]
+                .Replace("<<modDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Trim('\\', '/', ' ');
+            return rest == "*" || rest == "*.*" || string.IsNullOrEmpty(rest);
         }
 
         /// <summary>
@@ -918,25 +1001,80 @@ namespace ModSync.Core.Parsing
                 List<string> rangeSources = GenerateFileRange(start, end);
                 instruction.Source = rangeSources;
             }
+            else if (match.Groups["destination"].Success
+                && (pattern.ActionType == Instruction.ActionType.Copy
+                    || pattern.ActionType == Instruction.ActionType.Rename))
+            {
+                // "Make a copy of the file and rename it PMBJ01.tga" — destination is the new
+                // filename; the original stem is unknown from prose. Emit Rename with the new
+                // name as Destination and a wildcard Source under the extracted mod folder so
+                // the instruction survives validation and the merge path.
+                string newName = match.Groups["destination"].Value.Trim().Trim('"', '\'');
+                instruction.Action = Instruction.ActionType.Rename;
+                instruction.Source = new List<string> { DraftInstructionService.ModDirectoryPlaceholder + @"\*" };
+                instruction.Destination = newName;
+            }
 
             // === Extract Destination ===
             // Choose/Extract/Delete reject a Destination outright (see ComponentValidation). Destination
             // inference scans the WHOLE processing unit, so a sentence carrying two clauses --
             // "Delete po_pzaalbar3.tga before moving the files to your override" -- would attach the move
             // clause's "to your override" to the Delete and emit an instruction that cannot validate.
-            if (!ActionAcceptsDestination(pattern.ActionType))
+            if (instruction.Action == Instruction.ActionType.Rename
+                && !string.IsNullOrWhiteSpace(instruction.Destination)
+                && instruction.Destination.IndexOf("<<", StringComparison.Ordinal) < 0)
+            {
+                // Bare rename target already set above — do not overwrite with Override inference.
+            }
+            else if (!ActionAcceptsDestination(pattern.ActionType)
+                && instruction.Action != Instruction.ActionType.Rename)
             {
                 instruction.Destination = null;
             }
-            else if (match.Groups["destination"].Success)
+            else if (match.Groups["destination"].Success
+                && (instruction.Source == null || instruction.Source.Count == 0
+                    || instruction.Action != Instruction.ActionType.Rename
+                    || string.IsNullOrWhiteSpace(instruction.Destination)))
             {
                 string destText = match.Groups["destination"].Value.Trim();
-                instruction.Destination = NormalizeDestination(destText, unit);
+                // Rename/copy-as: a bare filename is the new name, not a folder destination.
+                if ((instruction.Action == Instruction.ActionType.Rename
+                        || instruction.Action == Instruction.ActionType.Copy)
+                    && Path.HasExtension(destText)
+                    && destText.IndexOf('\\') < 0
+                    && destText.IndexOf('/') < 0)
+                {
+                    instruction.Destination = destText.Trim('"', '\'');
+                }
+                else
+                {
+                    instruction.Destination = NormalizeDestination(destText, unit);
+                }
             }
-            else
+            else if (string.IsNullOrWhiteSpace(instruction.Destination))
             {
-                // Auto-detect destination from context
-                instruction.Destination = InferDestination(unit, pattern.ActionType);
+                // Copy-as halves ("copy the file 'X' and make a duplicate") must not inherit
+                // "to override" from a later clause in the same guide note — Override is the
+                // Move's job. Bare rename targets are set above from the destination group.
+                bool copyAsHalf = (instruction.Action == Instruction.ActionType.Copy
+                        || instruction.Action == Instruction.ActionType.Rename)
+                    && (unit.IndexOf("duplicate", StringComparison.OrdinalIgnoreCase) >= 0
+                        || unit.IndexOf("rename", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (!copyAsHalf)
+                {
+                    instruction.Destination = InferDestination(unit, pattern.ActionType);
+                }
+            }
+
+            // Filename Destination means duplicate-and-rename, not folder copy.
+            if (instruction.Action == Instruction.ActionType.Copy
+                && !string.IsNullOrWhiteSpace(instruction.Destination)
+                && instruction.Destination.IndexOf("<<", StringComparison.Ordinal) < 0
+                && Path.HasExtension(instruction.Destination.Trim())
+                && instruction.Destination.IndexOf('\\') < 0
+                && instruction.Destination.IndexOf('/') < 0)
+            {
+                instruction.Action = Instruction.ActionType.Rename;
             }
 
             // === Extract Option/Arguments ===
@@ -982,6 +1120,25 @@ namespace ModSync.Core.Parsing
                 }
             }
 
+            // A bare "move everything from the X folder" becomes the synthesized sweep
+            // "<<modDirectory>>\X\*". The guide named a folder, not the readmes and screenshots
+            // inside it, so packaging debris must not ride along into the game directory. A source
+            // the author spelled out (a filename, or their own "*.tga") is left alone.
+            //
+            // Restricted to sweeps INTO the game directory. A move into the mod workspace -- staging
+            // files into a tslpatchdata folder before running the patcher, say -- must keep every
+            // file it was given, changes.ini and info.rtf included.
+            if ((instruction.Action == Instruction.ActionType.Move
+                    || instruction.Action == Instruction.ActionType.Copy)
+                && instruction.Source != null
+                && TargetsGameDirectory(instruction.Destination)
+                && instruction.Source.Any(s =>
+                    !string.IsNullOrEmpty(s)
+                    && (s.EndsWith(@"\*", StringComparison.Ordinal) || s.EndsWith("/*", StringComparison.Ordinal))))
+            {
+                instruction.ExcludeNonGameContent = true;
+            }
+
             // === Validate Instruction ===
             if (!ValidateInstruction(instruction))
             {
@@ -990,6 +1147,20 @@ namespace ModSync.Core.Parsing
             }
 
             return instruction;
+        }
+
+        /// <summary>
+        /// True when a destination points into the installed game rather than the mod workspace.
+        /// </summary>
+        private static bool TargetsGameDirectory([CanBeNull] string destination)
+        {
+            if (string.IsNullOrWhiteSpace(destination))
+            {
+                return false;
+            }
+
+            return destination.IndexOf("<<gameDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0
+                || destination.IndexOf("<<kotorDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         /// <summary>
@@ -1017,14 +1188,21 @@ namespace ModSync.Core.Parsing
                 }
             }
 
-            // Destination-required actions
-            if (instruction.Action == Instruction.ActionType.Move ||
-                instruction.Action == Instruction.ActionType.Copy)
+            // Destination-required actions. Copy-as halves ("copy the file 'X' and make a duplicate")
+            // intentionally omit Destination until a following rename clause is coalesced.
+            if (instruction.Action == Instruction.ActionType.Move)
             {
                 if (string.IsNullOrWhiteSpace(instruction.Destination))
                 {
                     return false;
                 }
+            }
+
+            if (instruction.Action == Instruction.ActionType.Copy
+                && string.IsNullOrWhiteSpace(instruction.Destination)
+                && (instruction.Source == null || instruction.Source.Count == 0))
+            {
+                return false;
             }
 
             return true;
@@ -1126,10 +1304,16 @@ namespace ModSync.Core.Parsing
                     {
                         sources.Add($"<<modDirectory>>\\{cleaned}");
                     }
-                    // Otherwise treat as folder
-                    else if (actionType == Instruction.ActionType.Move || actionType == Instruction.ActionType.Copy)
+                    // Otherwise treat as folder for Move; for Rename/Copy-as a bare stem is a
+                    // filename (often quoted without extension: 'LDA_EHawk01').
+                    else if (actionType == Instruction.ActionType.Move)
                     {
                         sources.Add($"<<modDirectory>>\\{cleaned}\\*");
+                    }
+                    else if (actionType == Instruction.ActionType.Rename
+                        || actionType == Instruction.ActionType.Copy)
+                    {
+                        sources.Add($"<<modDirectory>>\\{cleaned}*");
                     }
                     else
                     {
@@ -1343,6 +1527,11 @@ namespace ModSync.Core.Parsing
             string lower = fullUnit.ToLowerInvariant();
 
             // Check for destination keywords
+            if (lower.Contains("not the override") || lower.Contains("not override"))
+            {
+                return @"<<kotorDirectory>>";
+            }
+
             if (lower.Contains("to override") || lower.Contains("to your override") || lower.Contains("in override"))
             {
                 return @"<<kotorDirectory>>\Override";

@@ -1149,7 +1149,8 @@ Exception Type: {ex.GetType().FullName}";
             CancellationToken cancellationToken = default,
             [CanBeNull] string profileOverride = null,
             bool? managedDeploymentOverride = null,
-            bool preserveInputOrder = false)
+            bool preserveInputOrder = false,
+            bool failClosed = false)
         {
             if (allComponents is null)
             {
@@ -1161,7 +1162,8 @@ Exception Type: {ex.GetType().FullName}";
                     allComponents,
                     progressCallback,
                     cancellationToken,
-                    preserveInputOrder),
+                    preserveInputOrder,
+                    failClosed),
                 profileOverride,
                 managedDeploymentOverride).ConfigureAwait(false);
         }
@@ -1170,7 +1172,8 @@ Exception Type: {ex.GetType().FullName}";
             [NotNull][ItemNotNull] List<ModComponent> allComponents,
             [CanBeNull] Action<int, int, string> progressCallback,
             CancellationToken cancellationToken,
-            bool preserveInputOrder)
+            bool preserveInputOrder,
+            bool failClosed)
         {
             if (allComponents is null)
             {
@@ -1272,6 +1275,17 @@ Exception Type: {ex.GetType().FullName}";
                             }
                             catch (Exception ex)
                             {
+                                if (failClosed)
+                                {
+                                    await RestoreFailedComponentAsync(
+                                        coordinator,
+                                        destination,
+                                        component,
+                                        cancellationToken,
+                                        $"checkpoint creation failed: {ex.Message}").ConfigureAwait(false);
+                                    return ModComponent.InstallExitCode.InvalidOperation;
+                                }
+
                                 await Logger.LogWarningAsync($"Failed to create checkpoint for '{component.Name}': {ex.Message}").ConfigureAwait(false);
                             }
                         }
@@ -1280,7 +1294,29 @@ Exception Type: {ex.GetType().FullName}";
                         {
                             // PromoteSnapshotAsync does a full recursive copy + zip of the whole
                             // game directory — skip entirely when checkpointing is disabled.
-                            await coordinator.CheckpointManager.PromoteSnapshotAsync(destination, cancellationToken).ConfigureAwait(false);
+                            // A snapshot I/O failure (tmpfs quota, disk full) must not abort a
+                            // mod that already installed successfully; git checkpoints remain.
+                            try
+                            {
+                                await coordinator.CheckpointManager.PromoteSnapshotAsync(destination, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                if (failClosed)
+                                {
+                                    await RestoreFailedComponentAsync(
+                                        coordinator,
+                                        destination,
+                                        component,
+                                        cancellationToken,
+                                        $"snapshot promotion failed: {ex.Message}").ConfigureAwait(false);
+                                    return ModComponent.InstallExitCode.InvalidOperation;
+                                }
+
+                                await Logger.LogWarningAsync(
+                                    $"Failed to promote backup snapshot after '{component.Name}': {ex.Message}"
+                                ).ConfigureAwait(false);
+                            }
                         }
                     }
                     else if (exitCode == ModComponent.InstallExitCode.MissingSourceFiles && MainConfig.ContinueInstallOnMissingSources)
@@ -1319,6 +1355,17 @@ Exception Type: {ex.GetType().FullName}";
                     else
                     {
                         await Logger.LogErrorAsync($"Install of '{component.Name}' failed with exit code {exitCode}").ConfigureAwait(false);
+                        if (failClosed)
+                        {
+                            await RestoreFailedComponentAsync(
+                                coordinator,
+                                destination,
+                                component,
+                                cancellationToken,
+                                $"component returned {exitCode}").ConfigureAwait(false);
+                            return exitCode;
+                        }
+
                         InstallCoordinator.MarkBlockedDescendants(orderedComponents, component.Guid);
                         foreach (ModComponent blocked in orderedComponents.Where(c => c.InstallState == ModComponent.ComponentInstallState.Blocked))
                         {
@@ -1357,7 +1404,8 @@ Exception Type: {ex.GetType().FullName}";
             CancellationToken cancellationToken = default,
             [CanBeNull] string profileOverride = null,
             bool? managedDeploymentOverride = null,
-            bool preserveInputOrder = false)
+            bool preserveInputOrder = false,
+            bool failClosed = false)
         {
             if (allComponents is null)
             {
@@ -1370,7 +1418,42 @@ Exception Type: {ex.GetType().FullName}";
                 cancellationToken,
                 profileOverride,
                 managedDeploymentOverride,
-                preserveInputOrder);
+                preserveInputOrder,
+                failClosed);
+        }
+
+        private static async Task RestoreFailedComponentAsync(
+            [NotNull] InstallCoordinator coordinator,
+            [NotNull] DirectoryInfo destination,
+            [NotNull] ModComponent component,
+            CancellationToken cancellationToken,
+            [NotNull] string reason)
+        {
+            await Logger.LogErrorAsync(
+                $"Fail-closed install stopped at '{component.Name}' because {reason}. Restoring the pre-component snapshot.")
+                .ConfigureAwait(false);
+            try
+            {
+                await coordinator.CheckpointManager.RestoreSnapshotAsync(destination, cancellationToken)
+                    .ConfigureAwait(false);
+                component.InstallState = ModComponent.ComponentInstallState.Pending;
+                coordinator.CheckpointManager.State.ComponentCheckpoints.Remove(component.Guid);
+                coordinator.CheckpointManager.UpdateComponentState(component);
+                await coordinator.CheckpointManager.SaveAsync().ConfigureAwait(false);
+                await Logger.LogAsync(
+                    $"Pre-component snapshot restored for '{component.Name}'. No later component was installed.")
+                    .ConfigureAwait(false);
+            }
+            catch (Exception restoreException)
+            {
+                await Logger.LogExceptionAsync(
+                    restoreException,
+                    $"Fail-closed restore failed for '{component.Name}'. The install state is unsafe and must not continue.")
+                    .ConfigureAwait(false);
+                throw new InvalidOperationException(
+                    $"Could not restore the pre-component snapshot for '{component.Name}'.",
+                    restoreException);
+            }
         }
 
     }

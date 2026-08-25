@@ -16,7 +16,7 @@ using ModSync.Core.Services.Fomod;
 namespace ModSync.Core.Services.Validation
 {
     /// <summary>
-    /// Single validation orchestration used by CLI and GUI. Install uses <see cref="InstallationService.InstallAllSelectedComponentsAsync"/> separately.
+    /// Validation implementation used by the shared installation pipeline and validation-only CLI/GUI tools.
     /// </summary>
     public static class InstallationValidationPipeline
     {

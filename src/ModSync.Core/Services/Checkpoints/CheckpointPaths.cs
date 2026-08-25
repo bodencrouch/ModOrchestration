@@ -47,6 +47,46 @@ namespace ModSync.Core.Services.Checkpoints
         public static string GetObjectsDirectory(string gameDirectory) =>
             Path.Combine(GetCheckpointsRoot(gameDirectory), ObjectsDirectoryName);
 
+        public static string GetSnapshotStagingRoot(string gameDirectory) =>
+            Path.Combine(GetRoot(gameDirectory), "snapshot_staging");
+
+        /// <summary>
+        /// Top-level (or nested) vanilla media/data folders that mods do not rewrite.
+        /// Snapshot and git-checkpoint copies must skip these — a full File.Copy of
+        /// movies/streamwaves/data is what filled the volume on K1 run18.
+        /// </summary>
+        public static readonly HashSet<string> ImmutableVanillaDirectoryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "movies",
+            "streamwaves",
+            "streammusic",
+            "streamsounds",
+            "data",
+        };
+
+        public static bool IsImmutableVanillaDirectoryName(string directoryName) =>
+            !string.IsNullOrEmpty(directoryName)
+            && ImmutableVanillaDirectoryNames.Contains(directoryName);
+
+        public static bool IsUnderImmutableVanillaDirectory(string relativePath)
+        {
+            if (string.IsNullOrEmpty(relativePath))
+            {
+                return false;
+            }
+
+            string[] parts = relativePath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                if (ImmutableVanillaDirectoryNames.Contains(parts[i]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public static string EnsureRoot(DirectoryInfo gameDirectory)
         {
             string root = GetRoot(gameDirectory.FullName);
@@ -175,6 +215,7 @@ namespace ModSync.Core.Services.Checkpoints
             }
 
             ComponentSessionEntry entry = GetComponentEntry(component.Guid);
+            entry.ComponentName = component.Name;
             entry.State = component.InstallState;
             entry.LastStartedUtc = component.LastStartedUtc;
             entry.LastCompletedUtc = component.LastCompletedUtc;
@@ -246,8 +287,7 @@ namespace ModSync.Core.Services.Checkpoints
                 throw new FileNotFoundException("Backup snapshot not found", BackupPath);
             }
 
-            string tempExtract = Path.Combine(Path.GetTempPath(), TempRestoreFolderPrefix + Guid.NewGuid());
-            _ = Directory.CreateDirectory(tempExtract);
+            string tempExtract = CreateStagingDirectory(destination.FullName, TempRestoreFolderPrefix);
 
             try
             {
@@ -279,6 +319,8 @@ namespace ModSync.Core.Services.Checkpoints
 
         private void SyncComponentsWithState([NotNull] IList<ModComponent> components)
         {
+            RemapSessionIdentities(components);
+
             foreach (ModComponent component in components)
             {
                 if (!_state.Components.TryGetValue(component.Guid, out ComponentSessionEntry entry))
@@ -286,14 +328,95 @@ namespace ModSync.Core.Services.Checkpoints
                     entry = new ComponentSessionEntry
                     {
                         ComponentId = component.Guid,
+                        ComponentName = component.Name,
                     };
                     _state.Components[component.Guid] = entry;
                 }
 
+                entry.ComponentName = component.Name;
                 component.InstallState = entry.State;
                 component.LastStartedUtc = entry.LastStartedUtc;
                 component.LastCompletedUtc = entry.LastCompletedUtc;
             }
+        }
+
+        /// <summary>
+        /// Direct-markdown rematerializes <see cref="ModComponent.Guid"/> on every parse
+        /// (<c>Guid.NewGuid()</c>). Without remapping, a resume treats every component as
+        /// pending and reinstalls completed mods on a dirty tree.
+        /// </summary>
+        private void RemapSessionIdentities([NotNull] IList<ModComponent> components)
+        {
+            int guidHits = components.Count(component => _state.Components.ContainsKey(component.Guid));
+            if (guidHits == components.Count && components.Count > 0)
+            {
+                return;
+            }
+
+            if (guidHits > 0)
+            {
+                Logger.LogVerbose(
+                    $"[Checkpoint] Partial session GUID match ({guidHits}/{components.Count}); leaving identities unchanged.");
+                return;
+            }
+
+            int sessionCount = _state.ComponentOrder?.Count ?? 0;
+            int completed = _state.Components.Count(kvp =>
+                kvp.Value.State == ModComponent.ComponentInstallState.Completed);
+            if (sessionCount == 0 || completed == 0)
+            {
+                return;
+            }
+
+            if (sessionCount != components.Count)
+            {
+                throw new InvalidOperationException(
+                    $"Install session has {sessionCount} components but markdown rematerialized {components.Count}. "
+                    + "GUID rematch by guide order is unsafe; refusing to continue so completed mods are not reinstalled.");
+            }
+
+            Logger.Log(
+                $"Markdown session GUIDs rematerialized; remapping {components.Count} entries by guide order so completed mods stay skipped.");
+            RemapSessionGuidsByOrder(components);
+        }
+
+        private void RemapSessionGuidsByOrder([NotNull] IList<ModComponent> components)
+        {
+            var remappedComponents = new Dictionary<Guid, ComponentSessionEntry>();
+            var remappedCheckpoints = new Dictionary<Guid, string>();
+            var remappedOrder = new List<Guid>(components.Count);
+
+            for (int i = 0; i < components.Count; i++)
+            {
+                Guid oldId = _state.ComponentOrder[i];
+                Guid newId = components[i].Guid;
+                if (_state.Components.TryGetValue(oldId, out ComponentSessionEntry entry))
+                {
+                    entry.ComponentId = newId;
+                    entry.ComponentName = components[i].Name;
+                    remappedComponents[newId] = entry;
+                }
+                else
+                {
+                    remappedComponents[newId] = new ComponentSessionEntry
+                    {
+                        ComponentId = newId,
+                        ComponentName = components[i].Name,
+                    };
+                }
+
+                if (_state.ComponentCheckpoints != null
+                    && _state.ComponentCheckpoints.TryGetValue(oldId, out string commitId))
+                {
+                    remappedCheckpoints[newId] = commitId;
+                }
+
+                remappedOrder.Add(newId);
+            }
+
+            _state.Components = remappedComponents;
+            _state.ComponentOrder = remappedOrder;
+            _state.ComponentCheckpoints = remappedCheckpoints;
         }
 
         private void SyncInitialComponentState([NotNull] IList<ModComponent> components)
@@ -303,6 +426,7 @@ namespace ModSync.Core.Services.Checkpoints
                 var entry = new ComponentSessionEntry
                 {
                     ComponentId = component.Guid,
+                    ComponentName = component.Name,
                     State = component.InstallState,
                     LastStartedUtc = component.LastStartedUtc,
                     LastCompletedUtc = component.LastCompletedUtc,
@@ -341,8 +465,7 @@ namespace ModSync.Core.Services.Checkpoints
 
         private async Task CreateSnapshotAsync(DirectoryInfo source, CancellationToken cancellationToken)
         {
-            string tempWorking = Path.Combine(Path.GetTempPath(), TempWorkingFolderPrefix + Guid.NewGuid());
-            _ = Directory.CreateDirectory(tempWorking);
+            string tempWorking = CreateStagingDirectory(source.FullName, TempWorkingFolderPrefix);
 
             try
             {
@@ -364,6 +487,15 @@ namespace ModSync.Core.Services.Checkpoints
             }
         }
 
+        private static string CreateStagingDirectory(string gameDirectory, string prefix)
+        {
+            string stagingRoot = CheckpointPaths.GetSnapshotStagingRoot(gameDirectory);
+            _ = Directory.CreateDirectory(stagingRoot);
+            string staged = Path.Combine(stagingRoot, prefix + Guid.NewGuid());
+            _ = Directory.CreateDirectory(staged);
+            return staged;
+        }
+
         private static void CopyDirectory(DirectoryInfo source, DirectoryInfo destination, CancellationToken cancellationToken, string skipFolder)
         {
             if (!destination.Exists)
@@ -381,7 +513,8 @@ namespace ModSync.Core.Services.Checkpoints
             foreach (DirectoryInfo dir in source.EnumerateDirectories())
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (string.Equals(dir.Name, skipFolder, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(dir.Name, skipFolder, StringComparison.OrdinalIgnoreCase)
+                    || CheckpointPaths.IsImmutableVanillaDirectoryName(dir.Name))
                 {
                     continue;
                 }

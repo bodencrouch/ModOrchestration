@@ -2227,7 +2227,7 @@ componentName: null,
                     }
                 }
 
-                await ApplyAutoGenerateLocalIfRequestedAsync(components, opts.AutoGenerateLocal, opts.SourcePath).ConfigureAwait(false);
+                await ApplyAutoGenerateLocalIfRequestedAsync(components, opts.AutoGenerateLocal, opts.SourcePath, opts.InputPath).ConfigureAwait(false);
 
                 ApplySelectionFilters(components, opts.Select);
 
@@ -2668,7 +2668,7 @@ componentName: null,
                     }
                 }
 
-                await ApplyAutoGenerateLocalIfRequestedAsync(components, opts.AutoGenerateLocal, opts.SourcePath).ConfigureAwait(false);
+                await ApplyAutoGenerateLocalIfRequestedAsync(components, opts.AutoGenerateLocal, opts.SourcePath, opts.IncomingPath ?? opts.ExistingPath).ConfigureAwait(false);
 
                 ApplySelectionFilters(components, opts.Select);
 
@@ -2807,7 +2807,8 @@ componentName: null,
         private static async Task ApplyAutoGenerateLocalIfRequestedAsync(
             List<ModComponent> components,
             bool autoGenerateLocal,
-            string sourcePath)
+            string sourcePath,
+            string inputPath = null)
         {
             if (!autoGenerateLocal)
             {
@@ -2816,7 +2817,48 @@ componentName: null,
 
             EnsureConfigInitialized();
             s_config.sourcePath = new DirectoryInfo(sourcePath);
+            EnsureTargetGameKnown(inputPath);
             await ComponentProcessingService.TryGenerateFromLocalArchivesAsync(components).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// A conversion has no installed game to inspect and Markdown carries no `game` field, so
+        /// <see cref="MainConfig.TargetGame"/> stays empty and every wrong-game guard in the archive
+        /// resolver is silently inert. Measured: a K1 build resolved "Trandoshans Rescaled" to the
+        /// KOTOR 2 mod "Rescaled Trandoshans.zip" because nothing knew which game was being built.
+        /// </summary>
+        private static void EnsureTargetGameKnown(string inputPath)
+        {
+            if (!string.IsNullOrWhiteSpace(MainConfig.TargetGame))
+            {
+                return;
+            }
+
+            string documentText = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(inputPath) && File.Exists(inputPath))
+                {
+                    // Only the title is consulted, so a few lines are enough.
+                    documentText = string.Join("\n", File.ReadLines(inputPath).Take(40));
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                Logger.LogVerbose($"[Convert] Could not read '{inputPath}' for game inference: {ex.Message}");
+            }
+
+            string inferred = BuildTargetGameInference.Infer(documentText, inputPath);
+            if (string.IsNullOrEmpty(inferred))
+            {
+                Logger.LogWarning(
+                    "Could not determine whether this build targets KOTOR 1 or TSL; wrong-game archive "
+                    + "protection is disabled for this run.");
+                return;
+            }
+
+            MainConfig.TargetGame = inferred;
+            Logger.Log($"Build targets {inferred} (inferred from the instruction document).");
         }
 
         private static async Task LogValidationPipelineOutputAsync(
@@ -3291,11 +3333,9 @@ componentName: null,
                         return 1;
                     }
 
-                    // Strict default: checkpoints + validation + stop-on-error.
-                    // Automation may opt into --no-checkpoint / --skip-validation / --best-effort
-                    // (and related continue flags) — log a warning but do not hard-reject, otherwise
-                    // unattended installs hang forever on zip/git baselines (see F1) or cannot run
-                    // at all against incomplete archive sets.
+                    // A direct guide install is a reference/parity operation. Weakening checkpoint,
+                    // validation, or stop-on-error guarantees would create an output that looks complete
+                    // while violating guide order, so reject those combinations before any game writes.
                     if (opts.Download || opts.Managed || opts.UseFileSelection
                         || (opts.Select != null && opts.Select.Any()))
                     {
@@ -3308,10 +3348,12 @@ componentName: null,
                     if (opts.NoCheckpoint || opts.SkipValidation || opts.BestEffort
                         || opts.ContinueOnMissingSources || opts.ContinueOnModFailure)
                     {
-                        await Logger.LogWarningAsync(
-                            "Direct Markdown automation overrides active (--no-checkpoint / --skip-validation / --best-effort / continue-*). "
-                            + "Guide order is preserved, but fail-closed checkpoint/validation guarantees are weakened."
+                        await Logger.LogErrorAsync(
+                            "Direct Markdown mode is fail-closed and does not support --no-checkpoint, "
+                            + "--skip-validation, --best-effort, --continue-on-missing-sources, or "
+                            + "--continue-on-mod-failure."
                         ).ConfigureAwait(false);
+                        return 1;
                     }
                 }
 
@@ -3355,6 +3397,19 @@ componentName: null,
                 EnsureConfigInitialized();
                 s_config.sourcePath = new DirectoryInfo(sourceDir);
                 s_config.destinationPath = new DirectoryInfo(resolvedGameDir);
+                MainConfig.EnsureExtractScratchAwayFromSource();
+                if (MainConfig.ExtractScratchPath != null)
+                {
+                    await Logger.LogAsync(
+                        $"Extract scratch: {MainConfig.ExtractScratchPath.FullName} (archives stay on {sourceDir}; extracted trees do not write back to the archive store)."
+                    ).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Logger.LogWarningAsync(
+                        $"Extract scratch is unset; Extract will unpack beside archives in '{sourceDir}'. Ultimate HR packs must not write TPC trees back to a USB archive store."
+                    ).ConfigureAwait(false);
+                }
 
                 if (opts.BestEffort)
                 {
@@ -3438,83 +3493,6 @@ componentName: null,
                     ApplySelectionFilters(components, opts.Select);
                 }
 
-                if (opts.DirectMarkdown)
-                {
-                    // Components whose guide entry carries no "Installation Instructions" prose have nothing
-                    // for the NLP parser to read - their install semantics live in the mod-page link plus the
-                    // archive's own layout. That is exactly what the local-archive generator resolves: it
-                    // derives a search term from the component's mod link, matches it against the archives in
-                    // --source-dir, and reads the archive to decide TSLPatcher vs loose-file. `convert` and
-                    // `merge` already expose this as --auto-generate-local; install skipped it entirely, which
-                    // is why guide components with no prose reached preflight with zero actions.
-                    EnsureConfigInitialized();
-                    s_config.sourcePath = new DirectoryInfo(sourceDir);
-                    int generated = await ComponentProcessingService
-                        .TryGenerateFromLocalArchivesAsync(components)
-                        .ConfigureAwait(false);
-                    await Logger.LogAsync(
-                        $"Direct Markdown: generated instructions from local archives for {generated} component(s) with no prose."
-                    ).ConfigureAwait(false);
-
-                    DirectMarkdownInstallPreflightResult directResult = DirectMarkdownInstallPreflight.Apply(components);
-                    await Logger.LogAsync(
-                        $"Direct Markdown NLP: draftedFromProse={directResult.DraftedFromProse}, 4GB Patcher skipped={directResult.SkippedFourGb}, widescreen skipped={directResult.SkippedWidescreen}."
-                    ).ConfigureAwait(false);
-
-                    if (!directResult.IsReady)
-                    {
-                        bool allowPartial = opts.BestEffort || opts.ContinueOnModFailure;
-                        if (!allowPartial)
-                        {
-                            await Logger.LogErrorAsync(
-                                $"Direct Markdown preflight stopped before game writes: {directResult.UnresolvedComponents.Count} selected component(s) have no reviewed executable actions in the Markdown."
-                            ).ConfigureAwait(false);
-                            foreach (string componentName in directResult.UnresolvedComponents.Take(25))
-                            {
-                                await Logger.LogErrorAsync($"  - {componentName}").ConfigureAwait(false);
-                            }
-
-                            if (directResult.UnresolvedComponents.Count > 25)
-                            {
-                                await Logger.LogErrorAsync(
-                                    $"  - ... and {directResult.UnresolvedComponents.Count - 25} more"
-                                ).ConfigureAwait(false);
-                            }
-                            return 1;
-                        }
-
-                        // Best-effort / continue-on-failure: install what NLP drafted; skip the rest.
-                        var unresolvedNames = new HashSet<string>(
-                            directResult.UnresolvedComponents,
-                            StringComparer.OrdinalIgnoreCase);
-                        int deselected = 0;
-                        foreach (ModComponent component in components)
-                        {
-                            if (component.IsSelected
-                                && unresolvedNames.Contains(component.Name ?? string.Empty))
-                            {
-                                component.IsSelected = false;
-                                deselected++;
-                            }
-                        }
-
-                        await Logger.LogWarningAsync(
-                            $"Direct Markdown NLP coverage incomplete: deselected {deselected} component(s) with no executable actions; continuing with drafted mods (--best-effort / --continue-on-mod-failure)."
-                        ).ConfigureAwait(false);
-                        foreach (string componentName in directResult.UnresolvedComponents.Take(15))
-                        {
-                            await Logger.LogWarningAsync($"  - skipped (undrafted): {componentName}").ConfigureAwait(false);
-                        }
-
-                        if (directResult.UnresolvedComponents.Count > 15)
-                        {
-                            await Logger.LogWarningAsync(
-                                $"  - ... and {directResult.UnresolvedComponents.Count - 15} more"
-                            ).ConfigureAwait(false);
-                        }
-                    }
-                }
-
                 if (opts.BestEffort && string.IsNullOrWhiteSpace(MainConfig.NexusModsApiKey))
                 {
                     int nexusSkipped = DeselectComponentsWithNexusUrlsWithoutApiKey(components);
@@ -3589,35 +3567,6 @@ componentName: null,
                     }
                 }
 
-                if (!opts.SkipValidation)
-                {
-                    await Logger.LogAsync("Running full installation validation (wizard-equivalent pipeline)...").ConfigureAwait(false);
-
-                    var pipelineOptions = ValidationPipelineOptions.WizardFull;
-                    pipelineOptions.MainConfig = s_config;
-                    pipelineOptions.UseFileSelection = true;
-                    pipelineOptions.ConfirmationCallback = BuildInstallConfirmationCallback(opts);
-
-                    ValidationPipelineResult pipelineResult = await InstallationValidationPipeline.RunAsync(
-                        components,
-                        pipelineOptions).ConfigureAwait(false);
-
-                    await LogValidationPipelineOutputAsync(
-                        pipelineResult,
-                        selectedCount,
-                        errorsOnly: false,
-                        dryRunOnly: false).ConfigureAwait(false);
-
-                    if (!pipelineResult.IsSuccess)
-                    {
-                        await Logger.LogErrorAsync("Validation failed. Fix issues above before installing.").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    await Logger.LogAsync("Validation passed.").ConfigureAwait(false);
-                    await Logger.LogAsync().ConfigureAwait(false);
-                }
-
                 await Logger.LogAsync("Starting installation...").ConfigureAwait(false);
                 await Logger.LogAsync(new string('=', 50)).ConfigureAwait(false);
 
@@ -3642,17 +3591,53 @@ componentName: null,
                     ).ConfigureAwait(false);
                 }
 
-                ModComponent.InstallExitCode exitCode = await InstallationService.InstallAllSelectedComponentsAsync(
-                    components,
-                    async (currentIndex, total, componentName) =>
+                var validationOptions = ValidationPipelineOptions.WizardFull;
+                validationOptions.MainConfig = s_config;
+                validationOptions.UseFileSelection = true;
+                validationOptions.ConfirmationCallback = BuildInstallConfirmationCallback(opts);
+                InstallationInputKind inputKind = InstallationPipelineService.ClassifyInputKind(components);
+
+                var pipelineRequest = new InstallationPipelineRequest(components)
+                {
+                    Frontend = InstallationFrontend.Cli,
+                    Mode = inputKind == InstallationInputKind.MarkdownGuide
+                        ? InstallationPipelineMode.Reference
+                        : InstallationPipelineMode.Standard,
+                    InputKind = inputKind,
+                    Phase = InstallationPhase.AllSelected,
+                    RunValidation = !opts.SkipValidation,
+                    PreserveInputOrder = inputKind == InstallationInputKind.MarkdownGuide,
+                    ValidationOptions = validationOptions,
+                    InstallationProgress = (currentIndex, total, componentName) =>
                     {
-                        await Logger.LogAsync($"[{currentIndex + 1}/{total}] Installing: {componentName}").ConfigureAwait(false);
+                        _ = Logger.LogAsync($"[{currentIndex + 1}/{total}] Installing: {componentName}");
                     },
-                    cancellationToken: default,
-                    profileOverride: profileOverride,
-                    managedDeploymentOverride: managedOverride,
-                    preserveInputOrder: opts.DirectMarkdown
-                ).ConfigureAwait(false);
+                    ProfileOverride = profileOverride,
+                    ManagedDeploymentOverride = managedOverride,
+                };
+
+                InstallationPipelineResult installResult = await InstallationPipelineService
+                    .RunAsync(pipelineRequest)
+                    .ConfigureAwait(false);
+
+                if (installResult.ValidationResult != null)
+                {
+                    await LogValidationPipelineOutputAsync(
+                        installResult.ValidationResult,
+                        selectedCount,
+                        errorsOnly: false,
+                        dryRunOnly: false).ConfigureAwait(false);
+                    if (!installResult.ValidationResult.IsSuccess)
+                    {
+                        await Logger.LogErrorAsync("Validation failed. Fix issues above before installing.").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    await Logger.LogAsync($"Validation passed. Plan fingerprint: {installResult.Plan.Fingerprint}")
+                        .ConfigureAwait(false);
+                }
+
+                ModComponent.InstallExitCode exitCode = installResult.ExitCode;
 
                 if (InstallationService.LastManagedInstallResult != null)
                 {

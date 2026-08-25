@@ -434,7 +434,7 @@ namespace ModSync.Core.FileSystemUtils
 
         public static DirectoryInfo GetCaseSensitivePath(DirectoryInfo folder)
         {
-            (string thisFilePath, _) = GetCaseSensitivePath(folder?.FullName, isFile: true);
+            (string thisFilePath, _) = GetCaseSensitivePath(folder?.FullName, isFile: false);
             return new DirectoryInfo(thisFilePath);
         }
 
@@ -667,7 +667,8 @@ namespace ModSync.Core.FileSystemUtils
                             Logger.LogVerbose($"[PathHelper] Case-sensitive: {formattedPath}");
                         }
 
-                        if (fileSystemProvider.FileExists(formattedPath))
+                        if (fileSystemProvider.FileExists(formattedPath)
+                            || fileSystemProvider.DirectoryExists(formattedPath))
                         {
                             Logger.LogVerbose($"[PathHelper] EXISTS! Adding: {formattedPath}");
                             result.Add(formattedPath);

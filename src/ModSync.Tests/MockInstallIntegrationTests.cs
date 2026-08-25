@@ -29,6 +29,7 @@ namespace ModSync.Tests
     /// </para>
     /// </summary>
     [TestFixture]
+    [NonParallelizable]
     public sealed class MockInstallIntegrationTests
     {
         private string _tempRoot;
@@ -65,8 +66,11 @@ namespace ModSync.Tests
             }
         }
 
+        // Overrides the assembly-wide 120 s cap: the bundled HoloPatcher is a PyInstaller
+        // bundle and spends most of a minute unpacking itself before it patches anything.
         [TestCase(MockKotorGame.Kotor1)]
         [TestCase(MockKotorGame.Kotor2)]
+        [Timeout(600_000)]
         public void Install_AgainstMockGame_ChangesTheGameDirectory_LongRunning(MockKotorGame game)
         {
             if (!TryLinkHolopatcher())
@@ -135,51 +139,24 @@ namespace ModSync.Tests
                     ReadTwoDaRowCount(tablePath),
                     Is.EqualTo(tableRowsBefore + 1),
                     "[2DAList] must append exactly one row.");
+
+                // The two games spell the override directory differently and on Linux that is a
+                // real distinction. The install must reuse the game's directory, not invent a
+                // case-variant twin beside it.
+                string[] overrideDirectories = Directory
+                    .GetDirectories(mock.ContentRoot)
+                    .Where(d => string.Equals(Path.GetFileName(d), "override", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+
+                Assert.That(
+                    overrideDirectories.Length,
+                    Is.EqualTo(1),
+                    "Exactly one override directory must exist afterwards: " + string.Join(", ", overrideDirectories));
+                Assert.That(
+                    Path.GetFileName(overrideDirectories.Single()),
+                    Is.EqualTo(Path.GetFileName(mock.OverrideDirectory)),
+                    "The install must reuse the game's own casing.");
             });
-        }
-
-        /// <summary>
-        /// The override directory casing differs between the two games, and on Linux that is a real
-        /// distinction. This checks the install wrote into the directory the game actually has and
-        /// did not create a second one beside it.
-        /// </summary>
-        [TestCase(MockKotorGame.Kotor1)]
-        [TestCase(MockKotorGame.Kotor2)]
-        public void Install_AgainstMockGame_DoesNotCreateASecondOverrideDirectory_LongRunning(MockKotorGame game)
-        {
-            if (!TryLinkHolopatcher())
-            {
-                Assert.Ignore("vendor/bin/HoloPatcher_linux is not available in this checkout.");
-            }
-
-            MockKotorInstallResult mock = MockKotorInstall.Create(Path.Combine(_tempRoot, "game"), game);
-            MockModArchives.Create(Path.Combine(_tempRoot, "mods"));
-            string buildFile = MockBuildFile.Write(Path.Combine(_tempRoot, "mock_build.toml"), game);
-
-            ModSync.Core.Program.Main(new[]
-            {
-                "install",
-                "-i", buildFile,
-                "-g", mock.InstallRoot,
-                "-s", Path.Combine(_tempRoot, "mods"),
-                "--skip-validation",
-                "--no-checkpoint",
-                "-y",
-            });
-
-            string[] overrideDirectories = Directory
-                .GetDirectories(mock.ContentRoot)
-                .Where(d => string.Equals(Path.GetFileName(d), "override", StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-
-            Assert.That(
-                overrideDirectories.Length,
-                Is.EqualTo(1),
-                "Exactly one override directory must exist afterwards: " + string.Join(", ", overrideDirectories));
-            Assert.That(
-                Path.GetFileName(overrideDirectories[0]),
-                Is.EqualTo(Path.GetFileName(mock.OverrideDirectory)),
-                "The install must reuse the game's own casing.");
         }
 
         private static int CountFiles(string directory)

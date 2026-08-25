@@ -340,5 +340,165 @@ namespace ModSync.Tests
             return $"{instruction.Action} [{sources}] -> {instruction.Destination ?? "(none)"} "
                 + $"args={instruction.Arguments ?? "(none)"} overwrite={instruction.Overwrite}";
         }
+
+        [TestCase(@"<<modDirectory>>\to override")]
+        [TestCase(@"<<modDirectory>>\installer")]
+        [TestCase(@"<<modDirectory>>\f\*")]
+        [TestCase("f*")]
+        [TestCase(@"<<modDirectory>>\patcher")]
+        [TestCase(@"<<modDirectory>>\the\*")]
+        [TestCase(@"<<modDirectory>>\override\*")]
+        [TestCase(@"<<modDirectory>>\Option 5\*")]
+        [TestCase(@"<<modDirectory>>\files from ""Jedi Robes Override\*")]
+        public void SourceIsUngroundedProseFragment_DetectsRun9Failures(string source)
+        {
+            Assert.That(AutoInstructionGenerator.SourceIsUngroundedProseFragment(source), Is.True);
+        }
+
+        [Test]
+        public void SourceIsUngroundedProseFragment_AcceptsRealPathsAndChooseGuids()
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    AutoInstructionGenerator.SourceIsUngroundedProseFragment(@"<<modDirectory>>\K1_Community_Patch_v1.10.0.zip"),
+                    Is.False);
+                Assert.That(
+                    AutoInstructionGenerator.SourceIsUngroundedProseFragment(@"<<kotorDirectory>>\Override"),
+                    Is.False);
+                Assert.That(
+                    AutoInstructionGenerator.SourceIsUngroundedProseFragment(Guid.NewGuid().ToString()),
+                    Is.False);
+            });
+        }
+
+        [Test]
+        public void UngroundedNlpDraft_IsReplacedFromArchive()
+        {
+            _ = CreateArchive(
+                "Yavin Station Hangar.zip",
+                "INSTALL.exe",
+                "tslpatchdata/changes.ini",
+                "tslpatchdata/info.rtf");
+
+            ModComponent component = ComponentFor("Yavin Station Hangar", "Yavin Station Hangar");
+            component.Instructions.Add(new Instruction
+            {
+                Action = Instruction.ActionType.Patcher,
+                Source = new System.Collections.Generic.List<string> { @"<<modDirectory>>\installer" },
+            });
+
+            bool generated = AutoInstructionGenerator.TryGenerateInstructionsFromArchive(component);
+
+            Assert.That(generated, Is.True);
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Extract), Is.True);
+            Assert.That(
+                component.Instructions.SelectMany(i => i.Source ?? Enumerable.Empty<string>()),
+                Has.None.EqualTo(@"<<modDirectory>>\installer"));
+        }
+
+        [Test]
+        public void GroundedInstructions_AreNotReplaced()
+        {
+            _ = CreateArchive(
+                "Already Drafted.zip",
+                "INSTALL.exe",
+                "tslpatchdata/changes.ini");
+
+            ModComponent component = ComponentFor("Already Drafted", "Already Drafted");
+            var existing = new Instruction
+            {
+                Action = Instruction.ActionType.Extract,
+                Source = new System.Collections.Generic.List<string> { @"<<modDirectory>>\Already Drafted.zip" },
+            };
+            component.Instructions.Add(existing);
+
+            bool generated = AutoInstructionGenerator.TryGenerateInstructionsFromArchive(component);
+
+            Assert.That(generated, Is.False);
+            Assert.That(component.Instructions, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions[0], Is.SameAs(existing));
+        }
+
+        [Test]
+        public void UngroundedNlpDraft_KeepsGroundedExclusions()
+        {
+            _ = CreateArchive(
+                "JC's Minor Fixes for K1 v1.1.zip",
+                "Straight Fixes/man26.tga",
+                "Bug Fixes/skip.tga");
+
+            ModComponent component = ComponentFor("JC's Minor Fixes", "JC's Minor Fixes for K1 v1.1");
+            var exclusion = new Instruction
+            {
+                Action = Instruction.ActionType.Delete,
+                Source = new System.Collections.Generic.List<string> { @"<<kotorDirectory>>\Override\N_SithComF.mdl" },
+            };
+            component.Instructions.Add(exclusion);
+            component.Instructions.Add(new Instruction
+            {
+                Action = Instruction.ActionType.Move,
+                Source = new System.Collections.Generic.List<string> { @"<<modDirectory>>\the\*" },
+            });
+
+            bool generated = AutoInstructionGenerator.TryGenerateInstructionsFromArchive(component);
+
+            Assert.That(generated, Is.True);
+            Assert.That(component.Instructions, Does.Contain(exclusion));
+            Assert.That(
+                component.Instructions.SelectMany(i => i.Source ?? Enumerable.Empty<string>()),
+                Has.None.EqualTo(@"<<modDirectory>>\the\*"));
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Extract), Is.True);
+        }
+
+        [Test]
+        public void NestedOverrideFolder_MoveTargetsTheDirectoryThatHoldsTheFiles()
+        {
+            _ = CreateArchive(
+                "Ultimate Korriban High Resolution.zip",
+                "Korriban HR/Override/LKO_wall.tpc",
+                "Korriban HR/Override/LKO_floor.tpc");
+
+            ModComponent component = ComponentFor(
+                "Ultimate Korriban High Resolution",
+                "Ultimate Korriban High Resolution");
+
+            Assert.That(AutoInstructionGenerator.TryGenerateInstructionsFromArchive(component), Is.True);
+
+            string[] moveSources = component.Instructions
+                .Where(i => i.Action == Instruction.ActionType.Move)
+                .SelectMany(i => i.Source)
+                .ToArray();
+
+            Assert.That(moveSources, Has.Some.EqualTo(
+                @"<<modDirectory>>\Ultimate Korriban High Resolution\Korriban HR\Override\*"));
+            Assert.That(moveSources, Has.None.EqualTo(
+                @"<<modDirectory>>\Ultimate Korriban High Resolution\Korriban HR\*"));
+        }
+
+        [Test]
+        public void MissingLibraryRootFile_IsTreatedAsUngrounded()
+        {
+            Assert.That(
+                AutoInstructionGenerator.SourceIsMissingFromLibrary(@"<<modDirectory>>\P_CandH01.tga"),
+                Is.True);
+            Assert.That(
+                AutoInstructionGenerator.SourceIsMissingFromLibrary(@"<<kotorDirectory>>\Override\N_SithComF.mdl"),
+                Is.False);
+        }
+
+        [Test]
+        public void RemoveDuplicateTgaTpc_GetsAnOverrideDestination()
+        {
+            _ = CreateArchive("Remove Duplicate TGA TPC.zip", "readme.txt");
+
+            ModComponent component = ComponentFor("Remove Duplicate TGA/TPC", "Remove Duplicate TGA TPC");
+
+            Assert.That(AutoInstructionGenerator.TryGenerateInstructionsFromArchive(component), Is.True);
+
+            Instruction del = component.Instructions.Single(i => i.Action == Instruction.ActionType.DelDuplicate);
+            Assert.That(del.Destination, Is.EqualTo(@"<<kotorDirectory>>\Override"));
+            Assert.That(del.Arguments, Is.EqualTo(".tpc"));
+        }
     }
 }

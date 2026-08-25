@@ -1,5 +1,44 @@
 # KOTOR 1 Full Mod Build — Manual (Hand-Installed) Comparison Build
 
+## STATUS UPDATE — 2026-08-16 (read this first)
+
+**Status: ✅ COMPLETE.**
+
+Work continued well past the 2026-07-30 session narrated below, moving to a JSONL-ledger-based
+tracking system (`k1_ledger.jsonl`) and a new canonical working copy at
+**`/home/brunner56/modsync-hot/K1_manual`** (the `swkotor_manual` path referenced below is
+superseded).
+
+- **Ledger:** `/home/brunner56/modsync-hot/k1_ledger.jsonl` — 201 guide steps (up from the 136
+  "top-level mods" counted below; the ledger counts every guide heading including the Windows-only
+  widescreen section at the end).
+- **Final step:** step 201 "Swoop Racing" (note-only, correctly skipped) at `2026-08-15T23:12:04`.
+  Steps 186–201 are all intentional skips: the Windows-only widescreen section (guide requires
+  UniWS, not applicable on this Linux/Steam tree) plus a handful of engine-note-only entries — not
+  failures.
+- **Final Override file count: 5808** (up from the 3838 recorded at the end of the Jul-30 session
+  below — the continuation picked up the deferred/skipped items and kept going through the rest of
+  the guide).
+- **Support data:** `k1_rollback/stepNNN` (17G, full per-step snapshots for rollback/diff),
+  `k1extract` (3.8G, per-step extracted archive staging — only late steps remain, earlier ones
+  already cleaned up), `extract_scratch` (now empty/stale, safe to remove).
+- **Oracle for diffing:** `/run/media/brunner56/MyBook/modbuild_oracles/K1_manual_oracle` (18G, full
+  reference install).
+
+**This is the more complete, more current record of the K1 manual build.** The Jul-30 narrative
+below (136 mods, ending at Override 3838) is real and useful for the specific bugs/TOML gaps it
+found — many of which were cross-validated against the automated K1 stream — but it is a snapshot
+partway through, not the final state. Treat the ledger (`k1_ledger.jsonl`) as the source of truth
+for exactly what was installed, in what order, with what options, going forward.
+
+**Nothing left to resume for K1-manual.** If a future session wants to extend or re-verify this
+build, diff `k1_ledger.jsonl` step-by-step against `K1_manual_oracle` rather than re-deriving from
+this markdown.
+
+---
+
+## Historical log (2026-07-30 session, superseded target path/step-count — kept for the bug findings)
+
 **Target directory:** `/run/media/brunner56/MyBook/SteamLibrary/steamapps/common/swkotor_manual`
 **Source of truth:** `docs/knowledgebase/kotor1-full-build-canonical-guide.md` (136 mods, exact order and steps)
 **Purpose:** Independent, hand-executed install (direct file operations + direct `holopatcher` invocations, no ModSync automation) to compare against the automated `swkotor` install.
@@ -255,11 +294,13 @@ Where a mod already has an extracted/downloaded archive from the automated run's
 | 135 | Recruit T3-M4 Early | Loose-File | ✅ Done | **Not staged.** Fetched via curl (DeadlyStream page 1868, matches TOML's expected filename exactly); 3 named files moved |
 | 136 | Security Spikes for K1 | TSLPatcher | ✅ Done | "usable" namespace (index 0), matches TOML's Arguments="0"; 6 patches, 0 errors |
 
-## MANUAL BUILD COMPLETE: 136/136 mods processed (134 installed, 2 deliberately deferred/skipped)
+## MANUAL BUILD (this session's portion) COMPLETE: 136/136 mods processed (134 installed, 2 deliberately deferred/skipped)
 
-**Final Override file count: 3838**
+**Override file count at end of this session: 3838** — the build continued past this point in a
+later session; see the STATUS UPDATE at the top of this file for the true final state (201 guide
+steps, 5808 Override files).
 
-Deferred/skipped (both with documented, reasoned justification, not silently dropped):
+Deferred/skipped at this point in the build (both with documented, reasoned justification, not silently dropped):
 - **#11 Ultimate Tatooine High Resolution** — repeated download failures early in the session (`Download.save_as: canceled` ×5), independent texture pack with no dependency chain, planned retry never circled back to
 - **#63 Unique Sith Governor** — guide's own explicit warning: known crashes on macOS/Linux
 - **#82 Stylized Portraits by Tinman888** — guide recommends Lite version to avoid load errors, but only the risky 406MB Full version is currently obtainable from the DeadlyStream page

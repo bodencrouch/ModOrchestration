@@ -23,6 +23,20 @@ namespace ModSync.Core
         [CanBeNull]
         private Services.FileSystem.IFileSystemProvider _fileSystemProvider;
         internal void SetFileSystemProvider([NotNull] Services.FileSystem.IFileSystemProvider provider) => _fileSystemProvider = provider ?? throw new ArgumentNullException(nameof(provider));
+
+        /// <summary>
+        /// Set by <see cref="Services.AutoInstructionGenerator"/> on the blanket <c>folder\*</c>
+        /// sweeps it synthesizes from archive listings. Those wildcards match every file the mod
+        /// author packaged -- readmes, screenshots, macOS resource forks, installer executables --
+        /// and copy all of it into the game's Override folder. When this is set, wildcard matches
+        /// that are packaging debris are dropped before the Move runs.
+        /// <para>
+        /// Deliberately internal and not serialized: it describes how the path was produced, not
+        /// what the author asked for. A hand-authored instruction naming a specific file is never
+        /// filtered.
+        /// </para>
+        /// </summary>
+        internal bool ExcludeNonGameContent { get; set; }
         public enum ActionExitCode
         {
             UnauthorizedAccessException = -1,
@@ -306,10 +320,13 @@ namespace ModSync.Core
             if (!sourceIsNotFilePath)
             {
                 Logger.LogVerbose($"[Instruction.SetRealPaths] Calling ReplaceCustomVariables on source paths...");
-                var processedSource = Source.Select(UtilityHelper.ReplaceCustomVariables).ToList();
+                var processedSource = Source.Select(UtilityHelper.ReplaceCustomVariables)
+                    .Select(RemapExtractedTreeToScratch)
+                    .ToList();
                 Logger.LogVerbose($"[Instruction.SetRealPaths] After ReplaceCustomVariables on source: [{string.Join(", ", processedSource)}]");
                 Logger.LogVerbose($"[Instruction.SetRealPaths] Calling EnumerateFilesWithWildcards with processed paths...");
                 newSourcePaths = PathHelper.EnumerateFilesWithWildcards(processedSource, _fileSystemProvider);
+                newSourcePaths = DropNonGameContentFromWildcardMatches(processedSource, newSourcePaths);
                 if (skipExistenceCheck)
                 {
                     foreach (string processedPath in processedSource)
@@ -408,19 +425,26 @@ namespace ModSync.Core
             {
                 thisDestination = new DirectoryInfo(destinationPath);
             }
-            if (
-                !skipExistenceCheck
-                && !skipDestinationValidation
-                && thisDestination != null
-                && !_fileSystemProvider.DirectoryExists(thisDestination.FullName)
-                && Action != ActionType.DelDuplicate
-            )
+
+            // Copy/Move/Extract used to skip existence checks so they could create a missing
+            // destination. On a case-sensitive volume that created steamassets/Override beside
+            // the real steamassets/override (or threw DirectoryNotFoundException writing into the
+            // missing Override). Always remap to an existing case-insensitive sibling first.
+            if (thisDestination != null
+                && MainConfig.CaseInsensitivePathing
+                && _fileSystemProvider != null
+                && !_fileSystemProvider.DirectoryExists(thisDestination.FullName))
             {
-                if (MainConfig.CaseInsensitivePathing)
+                DirectoryInfo caseMatched = PathHelper.GetCaseSensitivePath(thisDestination);
+                if (caseMatched != null
+                    && _fileSystemProvider.DirectoryExists(caseMatched.FullName))
                 {
-                    thisDestination = PathHelper.GetCaseSensitivePath(thisDestination);
+                    thisDestination = caseMatched;
                 }
-                if (thisDestination != null && !_fileSystemProvider.DirectoryExists(thisDestination.FullName))
+                else if (
+                    !skipExistenceCheck
+                    && !skipDestinationValidation
+                    && Action != ActionType.DelDuplicate)
                 {
                     throw new DirectoryNotFoundException("Could not find the 'Destination' path on disk!");
                 }
@@ -466,6 +490,198 @@ namespace ModSync.Core
 
             RealSourcePaths = new List<string>(newFullPaths);
         }
+        /// <summary>
+        /// Removes packaging debris from the expansion of a GENERATED <c>folder\*</c> sweep.
+        /// <para>
+        /// Only wildcard matches are considered: a literal source path is something someone asked
+        /// for by name. If every match is filtered out the original list is kept, because turning
+        /// "this component installed a readme" into "this component failed" would be a worse bug
+        /// than the one being fixed.
+        /// </para>
+        /// </summary>
+        [CanBeNull]
+        private List<string> DropNonGameContentFromWildcardMatches(
+            [NotNull][ItemCanBeNull] IReadOnlyList<string> processedSource,
+            [CanBeNull] List<string> resolvedPaths)
+        {
+            if (!ExcludeNonGameContent || resolvedPaths is null || resolvedPaths.Count == 0)
+            {
+                return resolvedPaths;
+            }
+
+            bool anyWildcard = processedSource.Any(p =>
+                !string.IsNullOrEmpty(p)
+                && (p.IndexOf('*') >= 0 || p.IndexOf('?') >= 0));
+            if (!anyWildcard)
+            {
+                return resolvedPaths;
+            }
+
+            var kept = resolvedPaths
+                .Where(p => !Services.NonGameContentFilter.IsNonGameContent(p))
+                .ToList();
+
+            if (kept.Count == 0)
+            {
+                return resolvedPaths;
+            }
+
+            if (kept.Count != resolvedPaths.Count)
+            {
+                Logger.LogVerbose(
+                    $"[Instruction.SetRealPaths] Excluded {resolvedPaths.Count - kept.Count} non-game file(s) "
+                    + "from a generated wildcard sweep.");
+            }
+
+            return kept;
+        }
+
+        [NotNull]
+        private string RemapExtractedTreeToScratch([NotNull] string path)
+        {
+            if (Action == ActionType.Extract
+                || MainConfig.ExtractScratchPath is null
+                || MainConfig.SourcePath is null
+                || string.IsNullOrWhiteSpace(path))
+            {
+                return path;
+            }
+
+            ModComponent parent = GetParentComponent();
+            ModComponent installComponent = ResolveComponentThatOwnsExtract(parent);
+            if (installComponent?.Instructions is null
+                || !installComponent.Instructions.Any(i => i.Action == ActionType.Extract))
+            {
+                return path;
+            }
+
+            string usbRoot;
+            string full;
+            try
+            {
+                usbRoot = Path.GetFullPath(MainConfig.SourcePath.FullName);
+                full = Path.GetFullPath(path);
+            }
+            catch (IOException)
+            {
+                return path;
+            }
+
+            if (!full.StartsWith(usbRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return path;
+            }
+
+            string relative = full.Substring(usbRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return Path.Combine(MainConfig.ExtractScratchPath.FullName, relative);
+        }
+
+        /// <summary>
+        /// Namespace <see cref="Option"/>s are themselves <see cref="ModComponent"/>s. Patcher
+        /// instructions on an option set their parent to that option, but the Extract that created
+        /// the on-disk tree lives on the outer component. Remapping <c>&lt;&lt;modDirectory&gt;&gt;</c>
+        /// paths into the extract scratch must follow that outer Extract — otherwise Choose/Patcher
+        /// looks for Installer.exe under the archive store after a successful extract to scratch
+        /// (measured: K1 Ported Alien VO Replacements / PAVOR).
+        /// </summary>
+        [CanBeNull]
+        private static ModComponent ResolveComponentThatOwnsExtract([CanBeNull] ModComponent parent)
+        {
+            if (parent is null || !(parent is Option))
+            {
+                return parent;
+            }
+
+            IReadOnlyList<ModComponent> all = MainConfig.AllComponents;
+            if (all is null || all.Count == 0)
+            {
+                return parent;
+            }
+
+            foreach (ModComponent candidate in all)
+            {
+                if (candidate?.Options is null || candidate.Options.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (Option option in candidate.Options)
+                {
+                    if (option is null)
+                    {
+                        continue;
+                    }
+
+                    if (ReferenceEquals(option, parent) || option.Guid == parent.Guid)
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return parent;
+        }
+
+        [CanBeNull]
+        private static string RedirectExtractDestinationToScratch([NotNull] string sourcePath, [CanBeNull] string destinationPath)
+        {
+            if (MainConfig.ExtractScratchPath is null)
+            {
+                return destinationPath;
+            }
+
+            string archiveDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+            string dest = string.IsNullOrEmpty(destinationPath) ? archiveDirectory : destinationPath;
+            string destFull;
+            string archiveDirFull;
+            try
+            {
+                destFull = Path.GetFullPath(dest).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                archiveDirFull = Path.GetFullPath(archiveDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch (IOException)
+            {
+                return destinationPath;
+            }
+
+            bool destIsArchiveDir = string.Equals(destFull, archiveDirFull, StringComparison.OrdinalIgnoreCase);
+            bool destIsOnArchiveStore = false;
+            string sourceRootFull = null;
+            if (MainConfig.SourcePath != null)
+            {
+                sourceRootFull = Path.GetFullPath(MainConfig.SourcePath.FullName)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                destIsOnArchiveStore = destFull.Equals(sourceRootFull, StringComparison.OrdinalIgnoreCase)
+                    || destFull.StartsWith(sourceRootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || destFull.StartsWith(sourceRootFull + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (!destIsArchiveDir && !destIsOnArchiveStore)
+            {
+                return destinationPath;
+            }
+
+            string relative;
+            if (destIsArchiveDir || sourceRootFull is null || destFull.Equals(sourceRootFull, StringComparison.OrdinalIgnoreCase))
+            {
+                relative = Path.GetFileNameWithoutExtension(sourcePath);
+            }
+            else
+            {
+                relative = destFull.Substring(sourceRootFull.Length)
+                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+
+            if (string.IsNullOrEmpty(relative))
+            {
+                return destinationPath;
+            }
+
+            string scratchDest = Path.Combine(MainConfig.ExtractScratchPath.FullName, relative);
+            _ = Directory.CreateDirectory(scratchDest);
+            return scratchDest;
+        }
+
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0051:Method is too long", Justification = "<Pending>")]
         public async Task<ActionExitCode> ExtractFileAsync(
             DirectoryInfo argDestinationPath = null,
@@ -494,6 +710,15 @@ namespace ModSync.Core
                 foreach (string sourcePath in RealSourcePaths)
                 {
                     string destinationPath = argDestinationPath?.FullName ?? RealDestinationPath?.FullName ?? Path.GetDirectoryName(sourcePath);
+                    string originalDestination = destinationPath;
+                    destinationPath = RedirectExtractDestinationToScratch(sourcePath, destinationPath);
+                    if (!string.IsNullOrEmpty(destinationPath)
+                        && !string.Equals(originalDestination, destinationPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await Logger.LogAsync(
+                            $"Extract destination redirected off archive store: '{originalDestination}' → '{destinationPath}'"
+                        ).ConfigureAwait(false);
+                    }
                     if (string.IsNullOrEmpty(destinationPath))
                     {
                         await Logger.LogErrorAsync($"Could not determine destination path for archive: {sourcePath}").ConfigureAwait(false);
@@ -718,17 +943,31 @@ namespace ModSync.Core
                     throw new ArgumentException("No target directory specified for cleanlist operation.", nameof(targetDirectory));
                 }
 
-                // Check if cleanlist file exists
-                if (!_fileSystemProvider.FileExists(cleanlistPath))
+                // Check if cleanlist file exists. The guide hosts these under
+                // mod-builds/scripts/, not the archive store; VFS dry-run cannot see them
+                // at <<modDirectory>>\cleanlist_k1.txt.
+                string cleanlistContent = null;
+                if (_fileSystemProvider.FileExists(cleanlistPath))
                 {
-                    await Logger.LogErrorAsync($"Cleanlist file not found: {cleanlistPath}").ConfigureAwait(false);
-                    return ActionExitCode.FileNotFoundPost;
+                    cleanlistContent = await _fileSystemProvider.ReadFileAsync(cleanlistPath).ConfigureAwait(false);
+                }
+                else
+                {
+                    string fallback = FindGuideScriptFile(Path.GetFileName(cleanlistPath));
+                    if (string.IsNullOrEmpty(fallback) || !File.Exists(fallback))
+                    {
+                        await Logger.LogErrorAsync($"Cleanlist file not found: {cleanlistPath}").ConfigureAwait(false);
+                        return ActionExitCode.FileNotFoundPost;
+                    }
+
+                    cleanlistPath = fallback;
+                    cleanlistContent = await File.ReadAllTextAsync(fallback).ConfigureAwait(false);
+                    await Logger.LogVerboseAsync(
+                        $"[CleanList] Using guide script '{fallback}' (not present in the extract tree).")
+                        .ConfigureAwait(false);
                 }
 
                 await Logger.LogAsync($"Reading cleanlist from: {Path.GetFileName(cleanlistPath)}").ConfigureAwait(false);
-
-                // Read cleanlist file
-                string cleanlistContent = await _fileSystemProvider.ReadFileAsync(cleanlistPath).ConfigureAwait(false);
                 string[] lines = cleanlistContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
                 int processedMods = 0;
@@ -761,8 +1000,20 @@ namespace ModSync.Core
                         }
                     }
 
-                    // Check if this mod is selected
-                    bool isSelected = isModSelectedFunc?.Invoke(modName) ?? true;
+                    bool mandatory = modName.IndexOf("mandatory", StringComparison.OrdinalIgnoreCase) >= 0;
+                    string overrideRoot = MainConfig.DestinationPath == null
+                        ? null
+                        : Path.Combine(MainConfig.DestinationPath.FullName, "Override");
+                    bool payloadMode = overrideRoot != null
+                        && !targetDirectory.FullName.StartsWith(
+                            overrideRoot,
+                            StringComparison.OrdinalIgnoreCase);
+
+                    // Name-matching cleanlist rows against component titles under-deletes
+                    // (War Droid Mk 1 HD vs "HD War Droids by Dark Hope"). When the destination
+                    // is the extracted payload, delete a listed file only if Override already
+                    // owns that name — the .bat's yes/no prompt, by evidence.
+                    bool isSelected = payloadMode || (isModSelectedFunc?.Invoke(modName) ?? true);
 
                     if (!isSelected)
                     {
@@ -777,6 +1028,18 @@ namespace ModSync.Core
                     // Delete each file
                     foreach (string fileName in filesToDelete)
                     {
+                        if (payloadMode && !mandatory && overrideRoot != null)
+                        {
+                            string alreadyInstalled = Path.Combine(overrideRoot, fileName);
+                            if (!_fileSystemProvider.FileExists(alreadyInstalled))
+                            {
+                                await Logger.LogVerboseAsync(
+                                    $"  Keeping payload '{fileName}' (Override does not already provide it)")
+                                    .ConfigureAwait(false);
+                                continue;
+                            }
+                        }
+
                         string fullPath = Path.Combine(targetDirectory.FullName, fileName);
 
                         if (_fileSystemProvider.FileExists(fullPath))
@@ -824,6 +1087,36 @@ namespace ModSync.Core
 
             return exitCode;
         }
+
+        [CanBeNull]
+        private static string FindGuideScriptFile([CanBeNull] string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return null;
+            }
+
+            string cwd = Directory.GetCurrentDirectory();
+            for (int depth = 0; depth < 6 && !string.IsNullOrEmpty(cwd); depth++)
+            {
+                string underModBuilds = Path.Combine(cwd, "mod-builds", "scripts", fileName);
+                if (File.Exists(underModBuilds))
+                {
+                    return underModBuilds;
+                }
+
+                string underScripts = Path.Combine(cwd, "scripts", fileName);
+                if (File.Exists(underScripts))
+                {
+                    return underScripts;
+                }
+
+                cwd = Directory.GetParent(cwd)?.FullName;
+            }
+
+            return null;
+        }
+
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0051:Method is too long", Justification = "<Pending>")]
         public ActionExitCode DeleteFile(
                 [ItemNotNull][NotNull] IReadOnlyList<string> sourcePaths = null
@@ -1341,6 +1634,17 @@ namespace ModSync.Core
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*LookupGameFolder\s*=\s*1\s*$", replacement: "LookupGameFolder=0");
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*ConfirmMessage\s*=\s*.*$", replacement: "ConfirmMessage=N/A");
 
+                    EnsureInfoRtfBesideChangesIni(tslPatcherDirectory);
+
+                    // Holo 1.5.1's Unix NSS builtin crashes ('str' object has no attribute 'info').
+                    // The K1/K2 manuals recovered with wine nwnnsscomp.exe; do that here so fail-closed
+                    // installs can complete the same CompileList mods instead of rolling back.
+                    if (Services.UnixNssCompileRecovery.HostNeedsWineCompiler())
+                    {
+                        Services.UnixNssCompileRecovery.EnableSaveProcessedScripts(tslPatcherDirectory);
+                        _ = Services.UnixNssCompileRecovery.TryRewriteTokenFreeCompileList(tslPatcherDirectory, Arguments);
+                    }
+
                     string engine = MainConfig.PatcherEngine ?? PatcherEngines.Holopatcher;
                     bool useKpatcher = string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase);
                     bool useOdyPatcher = string.Equals(engine, PatcherEngines.OdyPatcher, StringComparison.OrdinalIgnoreCase);
@@ -1425,6 +1729,25 @@ namespace ModSync.Core
                     }
 
                     await Logger.LogAsync($"Patcher exited with exit code {exitCode}").ConfigureAwait(false);
+                    bool nssRecovered = false;
+                    string patcherText = (output ?? string.Empty) + Environment.NewLine + (error ?? string.Empty);
+                    if (exitCode != 0
+                        && Services.UnixNssCompileRecovery.HostNeedsWineCompiler()
+                        && Services.UnixNssCompileRecovery.IsBuiltinNssCrash(patcherText))
+                    {
+                        nssRecovered = Services.UnixNssCompileRecovery.TryInstallCompiledScripts(
+                            tslPatcherDirectory,
+                            MainConfig.DestinationPath?.FullName,
+                            Arguments);
+                        if (nssRecovered)
+                        {
+                            await Logger.LogAsync(
+                                    "Recovered Holo Unix NSS builtin crash with wine nwnnsscomp.exe; compiled scripts are in Override.")
+                                .ConfigureAwait(false);
+                            exitCode = 0;
+                        }
+                    }
+
                     if (exitCode != 0)
                     {
                         return ActionExitCode.PatcherError;
@@ -1433,6 +1756,13 @@ namespace ModSync.Core
                     try
                     {
                         List<string> installErrors = await VerifyInstall().ConfigureAwait(false);
+                        if (nssRecovered)
+                        {
+                            installErrors = installErrors
+                                .Where(line => !Services.UnixNssCompileRecovery.IsBuiltinNssCrash(line))
+                                .ToList();
+                        }
+
                         if (installErrors.Count <= 0)
                         {
                             continue;
@@ -1499,6 +1829,18 @@ namespace ModSync.Core
                 {
                     try
                     {
+                        ActionExitCode? rerouted = await TryRunWindowsInstallerWithoutExecAsync(sourcePath)
+                            .ConfigureAwait(false);
+                        if (rerouted.HasValue)
+                        {
+                            if (rerouted.Value == ActionExitCode.Success)
+                            {
+                                continue;
+                            }
+
+                            return rerouted.Value;
+                        }
+
                         (int childExitCode, string output, string error) =
                             await _fileSystemProvider.ExecuteProcessAsync(
                                 sourcePath,
@@ -1532,6 +1874,113 @@ namespace ModSync.Core
                 return ActionExitCode.UnknownError;
             }
         }
+        /// <summary>
+        /// Handles an <c>Execute</c> whose target is a Windows Inno Setup installer on a platform
+        /// that cannot run it. Returns null when the executable should be launched normally.
+        /// <para>
+        /// TSLRCM, the foundation mod of the K2 build, is exactly this: an Inno Setup <c>.exe</c>
+        /// that died with <c>Win32Exception ... Permission denied</c> on a native-Linux game tree.
+        /// It is a prebuilt asset drop, so unpacking it and copying the game folders out is the
+        /// whole install.
+        /// </para>
+        /// </summary>
+        private async Task<ActionExitCode?> TryRunWindowsInstallerWithoutExecAsync([CanBeNull] string sourcePath)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath)
+                || !sourcePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                || Services.InnoSetupInstallerService.HostRunsWindowsExecutables())
+            {
+                return null;
+            }
+
+            bool isInno = Services.InnoSetupInstallerService.IsInnoSetupInstaller(sourcePath);
+            Services.ExeExecutionPlan plan = Services.InnoSetupInstallerService.PlanExeExecution(
+                isWindows: false,
+                isInnoSetup: isInno,
+                innoExtractAvailable: Services.InnoSetupInstallerService.IsInnoExtractAvailable());
+
+            if (plan == Services.ExeExecutionPlan.ExecuteDirectly)
+            {
+                return null;
+            }
+
+            if (plan == Services.ExeExecutionPlan.MissingInnoExtract)
+            {
+                await Logger.LogErrorAsync(
+                    Services.InnoSetupInstallerService.MissingToolMessage(sourcePath)).ConfigureAwait(false);
+                return ActionExitCode.ChildProcessError;
+            }
+
+            // Always the game root: the unpacked tree carries its own Override/modules/lips layout,
+            // so anything else would nest the whole game folder inside a subdirectory.
+            DirectoryInfo gameDirectory = MainConfig.DestinationPath;
+            if (gameDirectory is null)
+            {
+                await Logger.LogErrorAsync(
+                    $"Cannot unpack '{Path.GetFileName(sourcePath)}': no game directory is configured.")
+                    .ConfigureAwait(false);
+                return ActionExitCode.ChildProcessError;
+            }
+
+            bool installed = await Services.InnoSetupInstallerService
+                .ExtractAndInstallAsync(sourcePath, gameDirectory).ConfigureAwait(false);
+
+            return installed ? ActionExitCode.Success : ActionExitCode.ChildProcessError;
+        }
+
+        /// <summary>
+        /// TSLPatcher-family installers expect an information document beside every <c>changes.ini</c>
+        /// (<c>info.rtf</c> by default, see <c>PatcherNamespace.DefaultInfoFilename</c>) and abort when it
+        /// is absent. Some mods ship without one -- or ship only the namespace subfolders' copies -- which
+        /// fails the install for a purely cosmetic file that is never read for patch data. Write a minimal
+        /// placeholder for any <c>changes.ini</c> that lacks one.
+        /// <para>
+        /// The placeholder is a minimal well-formed RTF document rather than a zero-byte file: an empty
+        /// file is not valid RTF and a strict reader can fail on it, which would trade one abort for
+        /// another. Existing files are never touched -- a mod's real notes always win.
+        /// </para>
+        /// </summary>
+        private static void EnsureInfoRtfBesideChangesIni([CanBeNull] DirectoryInfo tslPatcherDirectory)
+        {
+            if (tslPatcherDirectory is null || !tslPatcherDirectory.Exists)
+            {
+                return;
+            }
+
+            // Matches PatcherNamespace.DefaultInfoFilename in the patcher tree; duplicated as a
+            // literal so Core does not take a dependency on the legacy HoloPatcher projects.
+            const string InfoDocumentFilename = "info.rtf";
+            const string MinimalRtf = @"{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\par}";
+
+            try
+            {
+                foreach (FileInfo changesIni in tslPatcherDirectory.GetFiles("changes.ini", SearchOption.AllDirectories))
+                {
+                    string directory = changesIni.DirectoryName;
+                    if (string.IsNullOrEmpty(directory))
+                    {
+                        continue;
+                    }
+
+                    // A namespace may declare a different information filename, and some mods ship .rte
+                    // instead of .rtf. Only synthesize when the folder has no information document at all.
+                    if (Directory.EnumerateFiles(directory, "info.*", SearchOption.TopDirectoryOnly).Any())
+                    {
+                        continue;
+                    }
+
+                    string infoPath = Path.Combine(directory, InfoDocumentFilename);
+                    File.WriteAllText(infoPath, MinimalRtf);
+                    Logger.LogVerbose($"[Patcher] Wrote placeholder '{InfoDocumentFilename}' beside '{changesIni.FullName}' (mod shipped none).");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Never fail an install over a cosmetic file; the patcher will report it if it truly matters.
+                Logger.LogWarning($"[Patcher] Could not ensure an info document beside changes.ini: {ex.Message}");
+            }
+        }
+
         [NotNull]
         /// <summary>
         /// Quote a path for <see cref="System.Diagnostics.ProcessStartInfo.Arguments"/> so spaces

@@ -871,6 +871,7 @@ This is epilogue content after the widescreen section.
             Assert.Multiple(() =>
             {
                 Assert.That(result.Components, Is.Not.Empty);
+                Assert.That(result.Components, Has.All.Property(nameof(ModComponent.SourceFormat)).EqualTo("markdown"));
                 Assert.That(result.DetectedFormat, Is.EqualTo("markdown"));
                 Assert.That(result.PreambleContent, Does.Contain("preamble text before the mod list"));
                 Assert.That(result.EpilogueContent, Does.Contain("Misc. Basegame Issues"));
@@ -925,6 +926,7 @@ ___";
             {
                 Assert.That(result.Components, Has.Count.EqualTo(1));
                 Assert.That(result.Components[0].Name, Is.EqualTo("TOML Round Trip Mod"));
+                Assert.That(result.Components[0].SourceFormat, Is.EqualTo("toml"));
                 Assert.That(result.DetectedFormat, Is.EqualTo("toml"));
                 Assert.That(result.PreambleContent, Is.Null);
                 Assert.That(result.EpilogueContent, Is.Null);
@@ -1175,6 +1177,7 @@ ___
         {
             string[] candidates =
             {
+                Environment.GetEnvironmentVariable("MODSYNC_REPO_ROOT"),
                 Path.GetFullPath(Path.Combine(TestContext.CurrentContext.TestDirectory, "..", "..", "..", "..")),
                 Path.GetFullPath(Path.Combine(TestContext.CurrentContext.TestDirectory, "..", "..", "..", "..", "..")),
                 Path.GetFullPath(Environment.CurrentDirectory),
@@ -1182,7 +1185,7 @@ ___
 
             foreach (string candidate in candidates.Distinct(StringComparer.Ordinal))
             {
-                if (File.Exists(Path.Combine(candidate, "ModSync.sln")))
+                if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(Path.Combine(candidate, "ModSync.sln")))
                 {
                     return candidate;
                 }

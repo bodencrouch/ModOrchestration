@@ -30,6 +30,7 @@ using ModSync.Core;
 using ModSync.Core.FileSystemUtils;
 using ModSync.Core.Services;
 using ModSync.Core.Services.Installation;
+using ModSync.Core.Services.Validation;
 using ModSync.Core.Utility;
 using ModSync.Dialogs;
 using ModSync.Models;
@@ -3777,10 +3778,24 @@ namespace ModSync
                         activity?.SetTag("mod.name", name);
                         activity?.SetTag("mod.guid", CurrentComponent.Guid);
 
-                        exitCode = await InstallationService.InstallSingleComponentAsync(
-                            CurrentComponent,
-                            MainConfig.AllComponents
-                        );
+                        var validationOptions = ValidationPipelineOptions.WizardFull;
+                        validationOptions.MainConfig = MainConfigInstance;
+                        validationOptions.ConfirmationCallback = async message =>
+                            await ConfirmationDialog.ShowConfirmationDialogAsync(this, message) == true;
+                        InstallationInputKind inputKind = InstallationPipelineService.ClassifyInputKind(
+                            new[] { CurrentComponent });
+                        var request = new InstallationPipelineRequest(new[] { CurrentComponent })
+                        {
+                            Frontend = InstallationFrontend.GuiTool,
+                            InputKind = inputKind,
+                            Mode = inputKind == InstallationInputKind.MarkdownGuide
+                                ? InstallationPipelineMode.Reference
+                                : InstallationPipelineMode.Standard,
+                            RunValidation = true,
+                            ValidationOptions = validationOptions,
+                        };
+                        InstallationPipelineResult result = await InstallationPipelineService.RunAsync(request);
+                        exitCode = result.ExitCode;
                         _installRunning = false;
 
                         TimeSpan duration = DateTime.UtcNow - startTime;
@@ -3892,23 +3907,9 @@ namespace ModSync
                         return;
                     }
 
-                    (bool success, string informationMessage) = await InstallationService.ValidateInstallationEnvironmentAsync(
-                        MainConfigInstance,
-                        async message => await ConfirmationDialog.ShowConfirmationDialogAsync(this, message) == true
-                    );
-
-                    if (!success)
-                    {
-                        await Dispatcher.UIThread.InvokeAsync((async () =>
-                        {
-                            await InformationDialog.ShowInformationDialogAsync(this, informationMessage);
-                        }));
-                        return;
-                    }
-
                     await Dispatcher.UIThread.InvokeAsync(async () =>
                     {
-                        await StartInstallationProcess();
+                        await StartInstallationProcess(cancellationToken);
                     });
                 }
                 catch (Exception ex)
@@ -4091,11 +4092,31 @@ namespace ModSync
 
                         try
                         {
-                            exitCode = await InstallationService.InstallAllSelectedComponentsAsync(
-                                MainConfig.AllComponents,
-                                ProgressCallback,
-                                installCancellationToken
-                            );
+                            var validationOptions = ValidationPipelineOptions.WizardFull;
+                            validationOptions.MainConfig = MainConfigInstance;
+                            validationOptions.ConfirmationCallback = async message =>
+                                await ConfirmationDialog.ShowConfirmationDialogAsync(this, message) == true;
+                            InstallationInputKind inputKind = InstallationPipelineService.ClassifyInputKind(
+                                MainConfig.AllComponents);
+                            var pipelineRequest = new InstallationPipelineRequest(MainConfig.AllComponents)
+                            {
+                                Frontend = InstallationFrontend.GuiLegacy,
+                                InputKind = inputKind,
+                                Mode = inputKind == InstallationInputKind.MarkdownGuide
+                                    ? InstallationPipelineMode.Reference
+                                    : InstallationPipelineMode.Standard,
+                                Phase = InstallationPhase.AllSelected,
+                                RunValidation = true,
+                                PreserveInputOrder = inputKind == InstallationInputKind.MarkdownGuide,
+                                ValidationOptions = validationOptions,
+                                InstallationProgress = ProgressCallback,
+                                CancellationToken = installCancellationToken,
+                            };
+                            InstallationPipelineResult pipelineResult = await InstallationPipelineService
+                                .RunAsync(pipelineRequest);
+                            exitCode = pipelineResult.ExitCode;
+                            await Logger.LogAsync(
+                                $"[StartInstallationProcess] Shared plan fingerprint: {pipelineResult.Plan.Fingerprint}");
                         }
                         catch (OperationCanceledException)
                         {

@@ -46,8 +46,11 @@ namespace ModSync.Core.Services
             {
                 if (component.Instructions.Count > 0)
                 {
-                    result.SkipReason = "Component already has instructions";
-                    return result;
+                    if (!DiscardUngroundedProseInstructions(component))
+                    {
+                        result.SkipReason = "Component already has instructions";
+                        return result;
+                    }
                 }
                 if (component.ResourceRegistry.Count == 0)
                 {
@@ -60,10 +63,7 @@ namespace ModSync.Core.Services
                     return result;
                 }
 
-                var allArchives = ArchiveHelper.DefaultArchiveSearchPatterns
-                    .SelectMany(ext => MainConfig.SourcePath.GetFiles(ext, SearchOption.TopDirectoryOnly))
-                    .Where(f => f.Exists)
-                    .ToList();
+                List<FileInfo> allArchives = ListLibraryEntries();
 
                 if (allArchives.Count == 0)
                 {
@@ -81,9 +81,12 @@ namespace ModSync.Core.Services
                 }
 
                 LogResolved(component.Name, resolution);
+                result.ResolvedArchivePath = resolution.Archive.FullName;
+                result.ResolutionTier = resolution.Tier.ToString();
+                result.ResolutionReason = resolution.Reason;
 
                 int instructionCountBefore = component.Instructions.Count;
-                bool generated = GenerateFromArchiveOrExtractedFolder(component, resolution.Archive);
+                bool generated = GenerateFromResolution(component, resolution);
 
                 if (generated)
                 {
@@ -127,14 +130,116 @@ namespace ModSync.Core.Services
                 .Where(k => !string.IsNullOrWhiteSpace(k))
                 .ToList();
 
-            ArchiveResolver.GameMarker targetGame =
-                string.Equals(MainConfig.TargetGame, "K1", StringComparison.OrdinalIgnoreCase)
-                    ? ArchiveResolver.GameMarker.Kotor1
-                    : string.Equals(MainConfig.TargetGame, "TSL", StringComparison.OrdinalIgnoreCase)
-                        ? ArchiveResolver.GameMarker.Kotor2
-                        : ArchiveResolver.GameMarker.None;
+            var extraSignals = new List<string>();
+            if (!string.IsNullOrWhiteSpace(component.DownloadInstructions))
+            {
+                extraSignals.Add(component.DownloadInstructions);
+            }
 
-            return ArchiveResolver.Resolve(component.Name, componentUrls, allArchives, targetGame);
+            if (!string.IsNullOrWhiteSpace(component.Directions))
+            {
+                extraSignals.Add(component.Directions);
+            }
+
+            if (!string.IsNullOrWhiteSpace(component.Description))
+            {
+                extraSignals.Add(component.Description);
+            }
+
+            return ArchiveResolver.Resolve(
+                component.Name,
+                componentUrls,
+                allArchives,
+                DetectTargetGame(),
+                extraSignals,
+                component.Author);
+        }
+
+        [NotNull]
+        private static ArchiveResolution ResolveArchiveFor(
+            [NotNull] ModComponent component,
+            [NotNull] ArchiveLibrarySnapshot library)
+        {
+            var componentUrls = component.ResourceRegistry.Keys
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .ToList();
+            var extraSignals = new List<string>();
+            if (!string.IsNullOrWhiteSpace(component.DownloadInstructions))
+            {
+                extraSignals.Add(component.DownloadInstructions);
+            }
+            if (!string.IsNullOrWhiteSpace(component.Directions))
+            {
+                extraSignals.Add(component.Directions);
+            }
+            if (!string.IsNullOrWhiteSpace(component.Description))
+            {
+                extraSignals.Add(component.Description);
+            }
+
+            return ArchiveResolver.ResolvePrepared(
+                component.Name,
+                componentUrls,
+                library,
+                DetectTargetGame(),
+                extraSignals,
+                component.Author);
+        }
+
+        [NotNull]
+        private static List<FileInfo> ListLibraryEntries()
+        {
+            if (MainConfig.SourcePath is null || !MainConfig.SourcePath.Exists)
+            {
+                return new List<FileInfo>();
+            }
+
+            IEnumerable<FileInfo> files = ArchiveHelper.DefaultArchiveSearchPatterns
+                .SelectMany(ext => MainConfig.SourcePath.GetFiles(ext, SearchOption.TopDirectoryOnly))
+                .Concat(MainConfig.SourcePath.GetFiles("*.tga", SearchOption.TopDirectoryOnly))
+                .Concat(MainConfig.SourcePath.GetFiles("*.tpc", SearchOption.TopDirectoryOnly))
+                .Where(f => f.Exists);
+
+            IEnumerable<FileInfo> folders = MainConfig.SourcePath.GetDirectories()
+                .Where(d => !d.Name.StartsWith(".", StringComparison.Ordinal))
+                .Select(d => new FileInfo(d.FullName));
+
+            return files.Concat(folders).ToList();
+        }
+
+        /// <summary>
+        /// Which game this install targets, used to discard archives belonging to the other one.
+        /// <para>
+        /// `MainConfig.TargetGame` is only populated when a serialized instruction file carries a
+        /// `game` field, so under `--direct-markdown` it is empty and the wrong-game guard silently
+        /// does nothing — measured in run 9, where `[K1] Repair Affects Stun Droid.zip` and
+        /// `[TSL] Repair Affects Stun Droid.zip` were reported as an unresolvable tie that the marker
+        /// should have broken. The destination install itself is the reliable signal, so fall back to
+        /// inspecting it.
+        /// </para>
+        /// </summary>
+        private static ArchiveResolver.GameMarker DetectTargetGame()
+        {
+            if (string.Equals(MainConfig.TargetGame, "K1", StringComparison.OrdinalIgnoreCase))
+            {
+                return ArchiveResolver.GameMarker.Kotor1;
+            }
+
+            if (string.Equals(MainConfig.TargetGame, "TSL", StringComparison.OrdinalIgnoreCase))
+            {
+                return ArchiveResolver.GameMarker.Kotor2;
+            }
+
+            switch (PathUtilities.DetectGame(MainConfig.DestinationPath?.FullName))
+            {
+                case PathUtilities.DetectedGame.Kotor1:
+                    return ArchiveResolver.GameMarker.Kotor1;
+                case PathUtilities.DetectedGame.Kotor2Legacy:
+                case PathUtilities.DetectedGame.Kotor2Aspyr:
+                    return ArchiveResolver.GameMarker.Kotor2;
+                default:
+                    return ArchiveResolver.GameMarker.None;
+            }
         }
 
         [NotNull]
@@ -160,42 +265,77 @@ namespace ModSync.Core.Services
 
         public static bool TryGenerateInstructionsFromArchive([NotNull] ModComponent component)
         {
+            return TryGenerateInstructionsFromArchive(component, ListLibraryEntries());
+        }
+
+        /// <summary>
+        /// Generates instructions using a caller-supplied immutable snapshot of the archive library.
+        /// Batch callers must use this overload so a cold/removable archive store is enumerated once
+        /// per build rather than once per component.
+        /// </summary>
+        internal static bool TryGenerateInstructionsFromArchive(
+            [NotNull] ModComponent component,
+            [NotNull] IReadOnlyList<FileInfo> allArchives)
+        {
             if (component is null)
             {
                 throw new ArgumentNullException(nameof(component));
             }
 
+            if (allArchives is null)
+            {
+                throw new ArgumentNullException(nameof(allArchives));
+            }
+            return TryGenerateInstructionsFromArchive(
+                component,
+                ArchiveResolver.CreateLibrarySnapshot(allArchives));
+        }
+
+        internal static bool TryGenerateInstructionsFromArchive(
+            [NotNull] ModComponent component,
+            [NotNull] ArchiveLibrarySnapshot library)
+        {
+            if (component is null)
+            {
+                throw new ArgumentNullException(nameof(component));
+            }
+            if (library is null)
+            {
+                throw new ArgumentNullException(nameof(library));
+            }
+
             try
             {
-                if (component.Instructions.Count > 0)
+                if (component.Instructions.Count > 0 || (component.Options?.Count ?? 0) > 0)
+                {
+                    _ = DiscardUngroundedProseInstructions(component);
+                }
+                // The dedupe step is implemented natively by ModSync and intentionally has no archive
+                // payload requirement. Resolve it before the resource/library gate so a missing or
+                // platform-specific .bat/.sh download cannot turn this crash-prevention barrier into a no-op.
+                if (IsRemoveDuplicateTgaTpcMod(component))
+                {
+                    for (int index = component.Instructions.Count - 1; index >= 0; index--)
+                    {
+                        if (component.Instructions[index].Action != Instruction.ActionType.DelDuplicate)
+                        {
+                            component.Instructions.RemoveAt(index);
+                        }
+                    }
+                    component.Options.Clear();
+                    return GenerateDelDuplicateInstruction(component);
+                }
+                if (HasPayloadInstruction(component))
+                {
+                    return false;
+                }
+                if (component.ResourceRegistry.Count == 0 || MainConfig.SourcePath is null
+                    || !MainConfig.SourcePath.Exists || library.Count == 0)
                 {
                     return false;
                 }
 
-                if (component.ResourceRegistry.Count == 0)
-                {
-                    return false;
-                }
-
-                if (MainConfig.SourcePath is null || !MainConfig.SourcePath.Exists)
-                {
-                    return false;
-                }
-
-                var allArchives = ArchiveHelper.DefaultArchiveSearchPatterns
-                    .SelectMany(ext => MainConfig.SourcePath.GetFiles(ext, SearchOption.TopDirectoryOnly))
-                    .Where(f => f.Exists)
-                    .ToList();
-
-                if (allArchives.Count == 0)
-                {
-                    Logger.LogVerbose(
-                        $"[TryGenerateInstructions] Component '{component.Name}': No archives found in directory");
-                    return false;
-                }
-
-                ArchiveResolution resolution = ResolveArchiveFor(component, allArchives);
-
+                ArchiveResolution resolution = ResolveArchiveFor(component, library);
                 if (!resolution.IsResolved)
                 {
                     LogUnresolved(component.Name, resolution);
@@ -203,13 +343,12 @@ namespace ModSync.Core.Services
                 }
 
                 LogResolved(component.Name, resolution);
-
-                bool generated = GenerateFromArchiveOrExtractedFolder(component, resolution.Archive);
+                bool generated = GenerateFromResolution(component, resolution);
                 if (generated)
                 {
                     component.IsDownloaded = true;
+                    OrderMergedGuideAndArchiveInstructions(component);
                 }
-
                 return generated;
             }
             catch (Exception ex)
@@ -217,6 +356,321 @@ namespace ModSync.Core.Services
                 Logger.LogException(ex, $"Failed to auto-generate instructions for component '{component.Name}'");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Captures the current top-level archive/folder library once for batch generation.
+        /// </summary>
+        [NotNull]
+        internal static ArchiveLibrarySnapshot SnapshotLibraryEntries() =>
+            ArchiveResolver.CreateLibrarySnapshot(ListLibraryEntries());
+
+        /// <summary>
+        /// NLP drafts from English sometimes capture destination phrases or article fragments as
+        /// Source paths: <c>&lt;&lt;modDirectory&gt;&gt;\to override</c>, <c>\installer</c>,
+        /// <c>\f\*</c>. Those block archive generation (which refuses to overwrite existing
+        /// instructions) and then fail validation because the files do not exist. A human reading
+        /// the same sentence looks at the archive; this method drops the ungrounded draft so that
+        /// path can run.
+        /// </summary>
+        /// <returns>
+        /// <see langword="true"/> if generation should proceed (no Extract/Move/Patcher payload
+        /// remains); <see langword="false"/> if a real install payload is already present.
+        /// </returns>
+        internal static bool DiscardUngroundedProseInstructions([NotNull] ModComponent component)
+        {
+            if (component.Instructions.Count == 0 && (component.Options == null || component.Options.Count == 0))
+            {
+                return true;
+            }
+
+            int removed = RemoveUngroundedInstructions(component.Instructions);
+            if (component.Options != null)
+            {
+                foreach (Option option in component.Options)
+                {
+                    removed += RemoveUngroundedInstructions(option.Instructions);
+                }
+            }
+
+            if (removed > 0)
+            {
+                Logger.LogWarning(
+                    $"[TryGenerateInstructions] Component '{component.Name}': discarding "
+                    + $"{removed} NLP-drafted instruction(s) whose Source paths "
+                    + "are prose fragments (e.g. 'to override', 'installer', 'f*', 'patcher', 'Option 5'), not files. "
+                    + "Grounded paths are kept. Regenerating from the matched archive if no payload remains.");
+            }
+
+            // Grounded exclusions (deletes, renames, cleanlist) stay. Generation runs when nothing
+            // executable is left to install from the archive.
+            return !HasPayloadInstruction(component);
+        }
+
+        private static int RemoveUngroundedInstructions([CanBeNull] IList<Instruction> instructions)
+        {
+            if (instructions == null || instructions.Count == 0)
+            {
+                return 0;
+            }
+
+            int removed = 0;
+            for (int i = instructions.Count - 1; i >= 0; i--)
+            {
+                Instruction instruction = instructions[i];
+                if (instruction.Action == Instruction.ActionType.DelDuplicate
+                    || instruction.Action == Instruction.ActionType.CleanList
+                    || instruction.Action == Instruction.ActionType.Delete
+                    || instruction.Action == Instruction.ActionType.Rename
+                    || instruction.Action == Instruction.ActionType.Copy)
+                {
+                    // Guide-grounded secondary actions: filenames often exist only after Extract
+                    // (LSI_win01.tpc) or live outside the archive store (cleanlist_k1.txt).
+                    // Never drop them as "missing from library".
+                    //
+                    // Copy-as / rename-with-unknown-source may carry only a Destination filename
+                    // (Detran: "rename it PMBJ01.tga") or a wildcard Source — those are still
+                    // grounded in the guide and must survive for merge with Extract/Move.
+                    bool hasBareRenameTarget = !string.IsNullOrWhiteSpace(instruction.Destination)
+                        && IsBareFilenameCopyAs(instruction);
+
+                    bool sourcesAllUngrounded = instruction.Source == null
+                        || instruction.Source.Count == 0
+                        || instruction.Source.Any(SourceIsUngroundedProseFragment);
+
+                    if (sourcesAllUngrounded && !hasBareRenameTarget)
+                    {
+                        instructions.RemoveAt(i);
+                        removed++;
+                    }
+
+                    continue;
+                }
+
+                if (instruction.Source == null
+                    || instruction.Source.Count == 0
+                    || instruction.Source.Any(s =>
+                        SourceIsUngroundedProseFragment(s) || SourceIsMissingFromLibrary(s)))
+                {
+                    instructions.RemoveAt(i);
+                    removed++;
+                }
+            }
+
+            return removed;
+        }
+
+        private static bool HasPayloadInstruction([NotNull] ModComponent component)
+        {
+            if (component.Instructions.Any(IsPayloadInstruction))
+            {
+                return true;
+            }
+
+            return component.Options != null && component.Options.Any(option =>
+                option.Instructions != null && option.Instructions.Any(IsPayloadInstruction));
+        }
+
+        private static bool IsPayloadInstruction([NotNull] Instruction instruction)
+        {
+            // Copy-as / duplicate-rename (bare filename Destination) is a guide secondary action,
+            // not an install payload — archive generation must still emit Extract/Move beside it.
+            if (instruction.Action == Instruction.ActionType.Copy && IsBareFilenameCopyAs(instruction))
+            {
+                return false;
+            }
+
+            return instruction.Action == Instruction.ActionType.Extract
+                || instruction.Action == Instruction.ActionType.Move
+                || instruction.Action == Instruction.ActionType.Copy
+                || instruction.Action == Instruction.ActionType.Patcher
+                || instruction.Action == Instruction.ActionType.Execute
+                || instruction.Action == Instruction.ActionType.Run;
+        }
+
+        private static bool IsBareFilenameCopyAs([NotNull] Instruction instruction)
+        {
+            if (string.IsNullOrWhiteSpace(instruction.Destination))
+            {
+                return false;
+            }
+
+            string dest = instruction.Destination.Trim();
+            // After DraftInstructionService sanitizes, copy-as targets look like
+            // <<modDirectory>>\PMBJ01.tga — still a filename rename, not a folder copy.
+            string leaf = dest
+                .Replace("<<modDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace("<<kotorDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace("<<gameDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Trim('\\', '/', ' ');
+            return Path.HasExtension(leaf)
+                && leaf.IndexOf('\\') < 0
+                && leaf.IndexOf('/') < 0
+                && leaf.IndexOf("..", StringComparison.Ordinal) < 0;
+        }
+
+        /// <summary>
+        /// True when <paramref name="source"/> is an English fragment the NLP parser captured as a
+        /// path, rather than a placeholder-rooted file that could exist on disk.
+        /// Choose-option GUIDs are never fragments.
+        /// </summary>
+        internal static bool SourceIsUngroundedProseFragment([CanBeNull] string source)
+        {
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                return true;
+            }
+
+            string trimmed = source.Trim();
+            if (Guid.TryParse(trimmed, out _))
+            {
+                return false;
+            }
+
+            bool isGameRooted = trimmed.IndexOf("<<kotorDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0
+                || trimmed.IndexOf("<<gameDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            string rest = trimmed
+                .Replace("<<modDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace("<<kotorDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace("<<gameDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .TrimStart('\\', '/');
+
+            if (string.IsNullOrWhiteSpace(rest))
+            {
+                return true;
+            }
+
+            // `<<kotorDirectory>>\Override` is the game folder, not the NLP leftover
+            // "copy to override". Destination-rooted paths stay grounded.
+            if (isGameRooted)
+            {
+                return false;
+            }
+
+            string lower = rest.ToLowerInvariant();
+            if (string.Equals(lower, "to override", StringComparison.Ordinal)
+                || string.Equals(lower, "to your override", StringComparison.Ordinal)
+                || string.Equals(lower, "installer", StringComparison.Ordinal)
+                || string.Equals(lower, "patcher", StringComparison.Ordinal)
+                || string.Equals(lower, "the", StringComparison.Ordinal)
+                || string.Equals(lower, "override", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (lower.Contains("files from", StringComparison.Ordinal)
+                || rest.IndexOf('"') >= 0)
+            {
+                return true;
+            }
+
+            // "the\*", "override\*", "patcher\*", "installer\*" — destination/article leftovers.
+            if (Regex.IsMatch(
+                    rest,
+                    @"^(the|override|patcher|installer)(?:[\\/]\*)?$",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(1)))
+            {
+                return true;
+            }
+
+            // "Option 5\*" resolved against the library root in run 10; it is a folder inside
+            // an extracted archive, not a path that exists before Extract.
+            if (Regex.IsMatch(
+                    rest,
+                    @"^option\s*\d+(?:[\\/].*)?$",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(1)))
+            {
+                return true;
+            }
+
+            // Single-letter glob captured from "move all f* files" / "files in f\".
+            if (Regex.IsMatch(rest, @"^[A-Za-z]\*?(?:[\\/]\*)?$", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+            {
+                return true;
+            }
+
+            // Sentence fragments the delete/cleanlist NLP latched onto ("files that need to be
+            // removed regardless of what mods you're using…") — real paths are short tokens or
+            // have an extension / path separator.
+            if (rest.IndexOf(' ') >= 0
+                && rest.IndexOf('\\') < 0
+                && rest.IndexOf('/') < 0
+                && !Path.HasExtension(rest.TrimEnd('*')))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// True when a <c>&lt;&lt;modDirectory&gt;&gt;</c> source's first segment is not a file or
+        /// folder in the archive library. NLP often captures a filename or inner folder
+        /// (<c>P_CandH01.tga</c>, <c>pillar facing fix\*</c>) that only exists after Extract.
+        /// Destination-rooted paths are never judged this way.
+        /// </summary>
+        internal static bool SourceIsMissingFromLibrary([CanBeNull] string source)
+        {
+            if (string.IsNullOrWhiteSpace(source) || MainConfig.SourcePath == null || !MainConfig.SourcePath.Exists)
+            {
+                return false;
+            }
+
+            string trimmed = source.Trim();
+            if (Guid.TryParse(trimmed, out _))
+            {
+                return false;
+            }
+
+            if (trimmed.IndexOf("<<kotorDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0
+                || trimmed.IndexOf("<<gameDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            if (trimmed.IndexOf("<<modDirectory>>", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            string rest = trimmed
+                .Replace("<<modDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .TrimStart('\\', '/');
+
+            if (string.IsNullOrWhiteSpace(rest))
+            {
+                return true;
+            }
+
+            string first = rest.Split(new[] { '\\', '/' }, 2)[0].TrimEnd('*').Trim();
+            if (string.IsNullOrEmpty(first) || first.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            {
+                return false;
+            }
+
+            string candidate = Path.Combine(MainConfig.SourcePath.FullName, first);
+            if (File.Exists(candidate) || Directory.Exists(candidate))
+            {
+                return false;
+            }
+
+            try
+            {
+                if (MainConfig.SourcePath.GetFiles(first).Length > 0
+                    || MainConfig.SourcePath.GetFiles(first + ".*").Length > 0)
+                {
+                    return false;
+                }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -305,22 +759,67 @@ namespace ModSync.Core.Services
             try
             {
                 (IArchive archive, FileStream stream) = ArchiveHelper.OpenArchive(archivePath);
-                if (archive is null || stream is null)
+                if (archive != null && stream != null)
                 {
-                    return new List<string>();
-                }
-
-                using (stream)
-                using (archive)
-                {
-                    return SafeListArchiveEntries(archive, archivePath).ToList();
+                    using (stream)
+                    using (archive)
+                    {
+                        List<string> managed = SafeListArchiveEntries(archive, archivePath).ToList();
+                        if (managed.Count > 0)
+                        {
+                            return managed;
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Logger.LogVerbose($"[AutoInstructionGenerator] Could not list '{archivePath}': {ex.Message}");
+            }
+
+            return TryListArchiveViaCli(archivePath);
+        }
+
+        /// <summary>
+        /// Lists archive entries through 7z, then unrar when 7z cannot open the file
+        /// (RAR5 on this machine). Empty means unknown, never "the archive is empty".
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> TryListArchiveViaCli([NotNull] string archivePath)
+        {
+            try
+            {
+                Task<List<string>> task = ArchiveHelper.TryListArchiveWithSevenZipCliAsync(archivePath);
+                task.Wait();
+                return task.Result?
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Select(p => p.Replace('\\', '/'))
+                    .ToList()
+                    ?? new List<string>();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[AutoInstructionGenerator] CLI listing failed for '{archivePath}': {ex.Message}");
                 return new List<string>();
             }
+        }
+
+        private static bool TryGenerateFromCliListing(
+            [NotNull] ModComponent component,
+            [NotNull] string archivePath)
+        {
+            List<string> cliList = TryListArchiveViaCli(archivePath);
+            if (cliList.Count == 0)
+            {
+                return false;
+            }
+
+            Logger.LogVerbose(
+                $"[AutoInstructionGenerator] Generating from {cliList.Count}-entry CLI listing of "
+                + $"'{Path.GetFileName(archivePath)}'");
+            ArchiveAnalysis analysis = AnalyzeArchiveFromFileList(cliList);
+            return GenerateAllInstructions(component, archivePath, cliList, analysis);
         }
 
         /// <summary>
@@ -333,10 +832,169 @@ namespace ModSync.Core.Services
         /// expand into would produce paths that never materialize.
         /// </para>
         /// </summary>
+        private static bool GenerateFromResolution(
+            [NotNull] ModComponent component,
+            [NotNull] ArchiveResolution resolution)
+        {
+            if (resolution.Archive is null)
+            {
+                return false;
+            }
+
+            bool generated = GenerateFromArchiveOrExtractedFolder(component, resolution.Archive);
+            foreach (FileInfo extra in resolution.AdditionalArchives)
+            {
+                generated = GenerateFromArchiveOrExtractedFolder(component, extra) || generated;
+            }
+
+            return generated;
+        }
+
+        /// <summary>
+        /// Dialogue Fixes: "move your chosen dialog.tlk to the main game directory — NOT the override."
+        /// The guide recommends PC Response Moderation. Manual step 001 copied that file to the
+        /// game root (size 5390721) and left Override empty.
+        /// </summary>
+        private static bool TryBindGameRootDialogTlk(
+            [NotNull] ModComponent component,
+            [NotNull] IReadOnlyList<string> fileList,
+            [NotNull] string extractedPath)
+        {
+            if (!DirectionsWantGameRootNotOverride(component))
+            {
+                return false;
+            }
+
+            List<string> dialogs = fileList
+                .Where(path => !string.IsNullOrWhiteSpace(path)
+                    && string.Equals(Path.GetFileName(path), "dialog.tlk", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (dialogs.Count == 0)
+            {
+                return false;
+            }
+
+            string chosen = ChooseRecommendedDialogTlk(component, dialogs);
+            var move = new Instruction
+            {
+                Action = Instruction.ActionType.Move,
+                Source = new List<string>
+                {
+                    $@"<<modDirectory>>\{extractedPath}\{chosen.Replace('/', '\\')}",
+                },
+                Destination = @"<<kotorDirectory>>",
+                Overwrite = true,
+            };
+            move.SetParentComponent(component);
+            if (!InstructionAlreadyExists(component, move))
+            {
+                component.Instructions.Add(move);
+            }
+
+            Logger.LogVerbose(
+                $"[AutoInstructionGenerator] Bound game-root dialog.tlk '{chosen}' for '{component.Name}'");
+            return true;
+        }
+
+        private static bool DirectionsWantGameRootNotOverride([NotNull] ModComponent component)
+        {
+            string prose = ((component.Directions ?? string.Empty) + " " + (component.DownloadInstructions ?? string.Empty))
+                .ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return false;
+            }
+
+            return prose.Contains("not the override", StringComparison.Ordinal)
+                || prose.Contains("not override", StringComparison.Ordinal)
+                || (prose.Contains("main game directory", StringComparison.Ordinal)
+                    && prose.Contains("not", StringComparison.Ordinal)
+                    && prose.Contains("override", StringComparison.Ordinal));
+        }
+
+        [NotNull]
+        private static string ChooseRecommendedDialogTlk(
+            [NotNull] ModComponent component,
+            [NotNull] IReadOnlyList<string> dialogs)
+        {
+            if (dialogs.Count == 1)
+            {
+                return dialogs[0];
+            }
+
+            string prose = (component.Directions ?? string.Empty) + " " + (component.DownloadInstructions ?? string.Empty);
+            Match recommend = Regex.Match(
+                prose,
+                @"\bi recommend\s+([^,.;]+)",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(2));
+            if (recommend.Success)
+            {
+                string[] tokens = Regex.Split(
+                        recommend.Groups[1].Value.ToLowerInvariant(),
+                        @"[^a-z0-9]+",
+                        RegexOptions.None,
+                        TimeSpan.FromSeconds(1))
+                    .Where(t => t.Length >= 3)
+                    .ToArray();
+                if (tokens.Length > 0)
+                {
+                    var best = dialogs
+                        .Select(path => new
+                        {
+                            path,
+                            hits = tokens.Count(token =>
+                                path.Replace('\\', '/').IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0),
+                        })
+                        .OrderByDescending(x => x.hits)
+                        .First();
+                    if (best.hits > 0)
+                    {
+                        return best.path;
+                    }
+                }
+            }
+
+            string moderation = dialogs.FirstOrDefault(path =>
+                path.IndexOf("moderation", StringComparison.OrdinalIgnoreCase) >= 0);
+            return moderation ?? dialogs[0];
+        }
+
+        private static bool GenerateLooseFileMove([NotNull] ModComponent component, [NotNull] string fileName)
+        {
+            var copy = new Instruction
+            {
+                Action = Instruction.ActionType.Copy,
+                Source = new List<string> { $@"<<modDirectory>>\{fileName}" },
+                Destination = @"<<kotorDirectory>>\Override",
+                Overwrite = true,
+            };
+            copy.SetParentComponent(component);
+            if (!InstructionAlreadyExists(component, copy))
+            {
+                component.Instructions.Add(copy);
+                Logger.LogVerbose($"[AutoInstructionGenerator] Added loose-file Copy for '{fileName}'");
+            }
+
+            return true;
+        }
+
         private static bool GenerateFromArchiveOrExtractedFolder(
             [NotNull] ModComponent component,
             [NotNull] FileInfo matchingArchive)
         {
+            if (Directory.Exists(matchingArchive.FullName) && !File.Exists(matchingArchive.FullName))
+            {
+                // Folder-only payload: no archive to extract. Passing the folder name here
+                // used to emit Extract against a directory, which validation then rejected.
+                return GenerateInstructionsFromDirectory(component, matchingArchive.FullName);
+            }
+
+            if (File.Exists(matchingArchive.FullName) && ArchiveResolver.IsLooseGameFileName(matchingArchive.Name))
+            {
+                return GenerateLooseFileMove(component, matchingArchive.Name);
+            }
+
             string baseName = Path.GetFileNameWithoutExtension(matchingArchive.Name);
             string siblingFolder = Path.Combine(matchingArchive.DirectoryName ?? string.Empty, baseName);
 
@@ -402,23 +1060,35 @@ namespace ModSync.Core.Services
 
         private static bool GenerateDelDuplicateInstruction([NotNull] ModComponent component)
         {
+            Instruction existing = component.Instructions.FirstOrDefault(
+                i => i.Action == Instruction.ActionType.DelDuplicate);
+            if (existing != null)
+            {
+                if (string.IsNullOrWhiteSpace(existing.Destination))
+                {
+                    existing.Destination = @"<<kotorDirectory>>\Override";
+                }
+
+                if (string.IsNullOrWhiteSpace(existing.Arguments))
+                {
+                    existing.Arguments = ".tpc";
+                }
+
+                Logger.LogVerbose("[AutoInstructionGenerator] DelDuplicate instruction already exists for Remove Duplicate TGA/TPC mod");
+                return true;
+            }
+
             var delDuplicateInstruction = new Instruction
             {
                 Action = Instruction.ActionType.DelDuplicate,
                 Source = new List<string>(),
+                Destination = @"<<kotorDirectory>>\Override",
                 Arguments = ".tpc",
                 Overwrite = true,
             };
             delDuplicateInstruction.SetParentComponent(component);
-
-            if (!InstructionAlreadyExists(component, delDuplicateInstruction))
-            {
-                component.Instructions.Add(delDuplicateInstruction);
-                Logger.LogVerbose("[AutoInstructionGenerator] Added DelDuplicate instruction for Remove Duplicate TGA/TPC mod");
-                return true;
-            }
-
-            Logger.LogVerbose("[AutoInstructionGenerator] DelDuplicate instruction already exists for Remove Duplicate TGA/TPC mod");
+            component.Instructions.Add(delDuplicateInstruction);
+            Logger.LogVerbose("[AutoInstructionGenerator] Added DelDuplicate instruction for Remove Duplicate TGA/TPC mod");
             return true;
         }
 
@@ -1172,7 +1842,8 @@ namespace ModSync.Core.Services
                         Logger.LogVerbose($"[AutoInstructionGenerator] EXE file '{Path.GetFileName(archivePath)}' is not an extractable archive, creating Execute instruction");
                         return GenerateExecuteInstruction(component, archivePath);
                     }
-                    return false;
+
+                    return TryGenerateFromCliListing(component, archivePath);
                 }
 
                 using (stream)
@@ -1201,12 +1872,20 @@ namespace ModSync.Core.Services
                     // frequently not re-downloadable -- so this path must be strictly read-only. Report it
                     // and let the caller fall through to its placeholder handling.
                     Logger.LogWarning($"[AutoInstructionGenerator] Could not read archive (unsupported format or damaged): {archivePath}");
-                    Logger.LogWarning("[AutoInstructionGenerator] Leaving it untouched; instructions for this component must be resolved another way.");
+                    Logger.LogWarning("[AutoInstructionGenerator] Trying 7z/unrar CLI listing before giving up.");
+                    if (TryGenerateFromCliListing(component, archivePath))
+                    {
+                        return true;
+                    }
                 }
                 else if (isExeFile)
                 {
                     Logger.LogVerbose($"[AutoInstructionGenerator] Failed to extract EXE file '{Path.GetFileName(archivePath)}', creating Execute instruction instead");
                     return GenerateExecuteInstruction(component, archivePath);
+                }
+                else if (TryGenerateFromCliListing(component, archivePath))
+                {
+                    return true;
                 }
 
                 return false;
@@ -1470,8 +2149,12 @@ namespace ModSync.Core.Services
                 : Path.GetFileName(archivePath);
 
             bool hasArchiveToExtract = !string.IsNullOrEmpty(archiveFileName);
+            // Only strip a trailing real archive extension. Replace(GetExtension) would
+            // also delete an inner ".zip" in Nexus names like NO_Fighters.zip-90-v1-0.zip.
             string extractedPath = extractedPathOverride
-                ?? archiveFileName.Replace(Path.GetExtension(archiveFileName), "");
+                ?? (archiveFileName is null
+                    ? string.Empty
+                    : Path.GetFileNameWithoutExtension(archiveFileName));
 
             if (hasArchiveToExtract && (analysis.HasTslPatchData || analysis.HasSimpleOverrideFiles))
             {
@@ -1512,21 +2195,41 @@ namespace ModSync.Core.Services
 
             if (analysis.HasSimpleOverrideFiles)
             {
-                var overrideFolders = analysis.FoldersWithFiles
-                    .Where(f => !IsTslPatcherFolder(f, analysis))
-                    .ToList();
-
-                if (overrideFolders.Count > 1)
+                if (TryBindGameRootDialogTlk(component, fileList, extractedPath))
                 {
-                    AddMultiFolderChooseInstructions(component, fileList, extractedPath, overrideFolders);
+                    // Guide: chosen dialog.tlk goes in the game root, not Override.
+                    // Do not also sweep the variant folders into Override.
                 }
-                else if (overrideFolders.Count == 1)
+                else if (analysis.HasTslPatchData)
                 {
-                    AddSimpleMoveInstruction(component, fileList, extractedPath, overrideFolders[0]);
+                    // A conventional archive root often contains both tslpatchdata and OPTIONAL/
+                    // below the same outer folder. Filtering by top-level folder classified the
+                    // entire outer folder as patcher data, then labelled the component Hybrid while
+                    // emitting no Move. Walk the actual game-file parents and exclude only the exact
+                    // tslpatchdata subtree.
+                    AddSimpleMoveInstruction(
+                        component,
+                        fileList,
+                        extractedPath,
+                        folderName: null,
+                        excludedSubtree: string.IsNullOrEmpty(analysis.TslPatcherPath)
+                            ? "tslpatchdata"
+                            : analysis.TslPatcherPath.TrimEnd('/', '\\') + "/tslpatchdata");
                 }
-                else if (analysis.HasFlatFiles)
+                else
                 {
-                    AddSimpleMoveInstruction(component, fileList, extractedPath, folderName: null);
+                    var overrideFolders = analysis.FoldersWithFiles.ToList();
+                    if (overrideFolders.Count >= 1)
+                    {
+                        foreach (string folder in overrideFolders)
+                        {
+                            AddSimpleMoveInstruction(component, fileList, extractedPath, folder);
+                        }
+                    }
+                    else if (analysis.HasFlatFiles)
+                    {
+                        AddSimpleMoveInstruction(component, fileList, extractedPath, folderName: null);
+                    }
                 }
             }
 
@@ -1548,6 +2251,9 @@ namespace ModSync.Core.Services
             {
                 Logger.LogVerbose($"[AutoInstructionGenerator] Consolidated and removed {consolidatedCount} duplicate option(s)");
             }
+
+            BindBareCopyAsInstructions(component, extractedPath, fileList);
+            BindCleanListToPayloadFolder(component);
 
             return component.Instructions.Count > 0;
         }
@@ -1951,6 +2657,15 @@ namespace ModSync.Core.Services
             foreach (string filePath in analysis.ExistingNonArchiveFiles)
             {
                 string fileName = Path.GetFileName(filePath);
+
+                // Generated, so debris in the mod workspace must not be swept into Override.
+                if (NonGameContentFilter.IsNonGameContent(fileName))
+                {
+                    await Logger.LogVerboseAsync(
+                        $"[AutoInstructionGenerator] Skipping non-game file '{fileName}'").ConfigureAwait(false);
+                    continue;
+                }
+
                 string relativePath = GetRelativePathToModDirectory(modDirectory, filePath);
 
                 var moveInstruction = new Instruction
@@ -2216,6 +2931,1002 @@ namespace ModSync.Core.Services
             {
                 Logger.LogVerbose($"[AutoInstructionGenerator] Consolidated {consolidatedCount} duplicate namespace option(s)");
             }
+
+            SelectNamespaceOptionsFromGuide(component);
+        }
+
+        /// <summary>
+        /// Sets <see cref="Option.IsSelected"/> from guide Directions / download notes so a
+        /// non-interactive install actually runs the namespaced Patcher instructions.
+        /// <para>
+        /// Always selects the primary/main/base/default namespace unless the guide excludes it.
+        /// Optional namespaces are selected when the prose asks for them and any named condition
+        /// is met: a condition mod is in the build, or a possessive "if you use Mod's Option"
+        /// clause matches a selected option on that other mod. Compatibility patches are never
+        /// mutually exclusive with the primary/main install.
+        /// </para>
+        /// </summary>
+        internal static void SelectNamespaceOptionsFromGuide(
+            [NotNull] ModComponent component,
+            [CanBeNull] IReadOnlyList<ModComponent> buildComponents = null)
+        {
+            if (component.Options == null || component.Options.Count == 0)
+            {
+                return;
+            }
+
+            string prose = string.Join(
+                "\n",
+                new[]
+                {
+                    component.Directions,
+                    component.DirectionsSpoilerFree,
+                    component.DownloadInstructions,
+                    component.DownloadInstructionsSpoilerFree,
+                }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+            IReadOnlyList<ModComponent> build = buildComponents
+                ?? MainConfig.AllComponents
+                ?? (IReadOnlyList<ModComponent>)Array.Empty<ModComponent>();
+
+            foreach (Option option in component.Options)
+            {
+                if (option == null)
+                {
+                    continue;
+                }
+
+                if (IsPrimaryNamespaceOption(option))
+                {
+                    option.IsSelected = !GuideExcludesNamespace(prose, option);
+                }
+            }
+
+            if (!component.Options.Any(o => o != null && o.IsSelected))
+            {
+                Option fallback = component.Options.FirstOrDefault(o => o != null && IsPrimaryNamespaceOption(o))
+                    ?? component.Options.FirstOrDefault(o => o != null);
+                if (fallback != null)
+                {
+                    fallback.IsSelected = true;
+                }
+            }
+
+            foreach (Option option in component.Options)
+            {
+                if (option == null || option.IsSelected)
+                {
+                    continue;
+                }
+
+                if (!GuideRequestsNamespace(prose, option))
+                {
+                    continue;
+                }
+
+                if (IsOptionalNamespaceOption(option)
+                    && !OptionalNamespaceConditionMet(option, prose, build))
+                {
+                    continue;
+                }
+
+                option.IsSelected = true;
+            }
+
+            ArbitrateMutuallyExclusiveNamespaces(component, prose);
+
+            Logger.LogVerbose(
+                $"[AutoInstructionGenerator] Namespace selection for '{component.Name}': "
+                + string.Join(
+                    ", ",
+                    component.Options.Where(o => o != null).Select(o => $"{o.Name}={(o.IsSelected ? "on" : "off")}")));
+        }
+
+        private static bool IsPrimaryNamespaceOption([NotNull] Option option)
+        {
+            string name = (option.Name ?? string.Empty).ToLowerInvariant();
+            string desc = (option.Description ?? string.Empty).ToLowerInvariant();
+            if (name.Contains("optional", StringComparison.Ordinal)
+                || desc.Contains("(optional)", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return name.Contains("main", StringComparison.Ordinal)
+                || name.Contains("base", StringComparison.Ordinal)
+                || name.Contains("default", StringComparison.Ordinal)
+                || name.Contains("basic", StringComparison.Ordinal)
+                || name.Contains("standard", StringComparison.Ordinal)
+                || desc.Contains("default installation", StringComparison.Ordinal)
+                || desc.Contains("main installation", StringComparison.Ordinal)
+                || desc.Contains("the default", StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Alternative namespaces are mutually exclusive: a mod offering "100% Brown",
+        /// "Brown-Red-Blue" and "Brown-Red-Blue Alternative" expects exactly ONE to be installed.
+        /// Token-overlap matching selects all of them ("brown" hits inside every sibling), which
+        /// would run every conflicting variant in sequence. When the guide names one specific
+        /// variant, keep the best match and drop its siblings.
+        /// <para>
+        /// Additive namespaces (compatibility patches, "also install X") are left untouched — those
+        /// are legitimately installed alongside the primary one.
+        /// </para>
+        /// </summary>
+        private static void ArbitrateMutuallyExclusiveNamespaces(
+            [NotNull] ModComponent component,
+            [CanBeNull] string prose)
+        {
+            if (string.IsNullOrWhiteSpace(prose) || component.Options == null)
+            {
+                return;
+            }
+
+            // "…and install it as well", "also install X" — the guide is stacking namespaces on top
+            // of the primary, so they are additive and must not be arbitrated down to one.
+            if (Regex.IsMatch(
+                    prose,
+                    @"\b(as\s+well|also\s+install|in\s+addition|additionally|and\s+install\s+it)\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(1)))
+            {
+                return;
+            }
+
+            // Compatibility / optional namespaces stack on the primary ("install main, then
+            // re-run the 100% Brown compatibility patch"). They must not compete with Basic.
+            List<Option> alternatives = component.Options
+                .Where(o => o != null && o.IsSelected && !IsOptionalNamespaceOption(o))
+                .ToList();
+            if (alternatives.Count < 2)
+            {
+                return;
+            }
+
+            // An explicit ordinal ("I personally recommend option 2") is 1-based in guide prose.
+            int ordinal = ExplicitOptionOrdinal(prose);
+            if (ordinal >= 0 && ordinal < component.Options.Count)
+            {
+                Option picked = component.Options[ordinal];
+                if (picked != null && alternatives.Contains(picked))
+                {
+                    foreach (Option other in alternatives.Where(o => !ReferenceEquals(o, picked)))
+                    {
+                        other.IsSelected = false;
+                    }
+
+                    Logger.LogVerbose(
+                        $"[AutoInstructionGenerator] '{component.Name}': guide names option {ordinal + 1}; "
+                        + $"keeping '{picked.Name}' and dropping {alternatives.Count - 1} sibling namespace(s).");
+                    return;
+                }
+            }
+
+            // "I personally recommend the \"Senni Vek's Ambush\" install" names a namespace,
+            // not an ordinal. Length-scoring otherwise picks "Senni Vek Restoration" because
+            // that longer phrase also appears in the description.
+            Option recommended = FindPersonallyRecommendedOption(prose, alternatives);
+            if (recommended != null)
+            {
+                foreach (Option other in alternatives.Where(o => !ReferenceEquals(o, recommended)))
+                {
+                    other.IsSelected = false;
+                }
+
+                Logger.LogVerbose(
+                    $"[AutoInstructionGenerator] '{component.Name}': guide personally recommends "
+                    + $"'{recommended.Name}'; dropping {alternatives.Count - 1} sibling namespace(s).");
+                return;
+            }
+
+            var scored = alternatives
+                .Select(o => new { Option = o, Score = NamespaceNameSpecificity(prose, o) })
+                .OrderByDescending(x => x.Score)
+                .ToList();
+
+            // Only arbitrate when the guide actually discriminates between the siblings.
+            if (scored[0].Score <= 0d || Math.Abs(scored[0].Score - scored[1].Score) < 0.0001d)
+            {
+                return;
+            }
+
+            foreach (var loser in scored.Skip(1))
+            {
+                loser.Option.IsSelected = false;
+            }
+
+            Logger.LogVerbose(
+                $"[AutoInstructionGenerator] '{component.Name}': mutually-exclusive namespaces - kept "
+                + $"'{scored[0].Option.Name}' (score {scored[0].Score:0.00}), dropped "
+                + string.Join(", ", scored.Skip(1).Select(x => $"'{x.Option.Name}'")));
+        }
+
+        /// <summary>
+        /// "I personally recommend the \"Senni Vek's Ambush\" install" / "I personally recommend X".
+        /// Picks the alternative whose name is inside the recommended phrase.
+        /// </summary>
+        [CanBeNull]
+        internal static Option FindPersonallyRecommendedOption(
+            [CanBeNull] string prose,
+            [NotNull] IList<Option> alternatives)
+        {
+            if (string.IsNullOrWhiteSpace(prose) || alternatives == null || alternatives.Count == 0)
+            {
+                return null;
+            }
+
+            // Require "install" after the name so "…Ambush install, … choose Restoration instead"
+            // cannot swallow both names and then pick the longer one.
+            Match named = Regex.Match(
+                prose,
+                @"\b(?:I\s+)?personally\s+recommend(?:\s+the)?\s+[""“]?(?<name>[^""”\n,.]{3,60}?)[""”]?\s+install\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1));
+            if (!named.Success)
+            {
+                named = Regex.Match(
+                    prose,
+                    @"\bthe\s+default\s+install\s*,\s*[""“]?(?<name>[^""”\n,.]{3,60}?)[""”]?(?=\s|,|\.|$)",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(1));
+            }
+
+            if (!named.Success)
+            {
+                return null;
+            }
+
+            string phrase = named.Groups["name"].Value.Trim().Trim('"', '“', '”');
+            Option best = null;
+            int bestLen = 0;
+            foreach (Option option in alternatives)
+            {
+                if (option == null || string.IsNullOrWhiteSpace(option.Name))
+                {
+                    continue;
+                }
+
+                if (OptionNameContainsPhrase(option, phrase) || PhraseContainsOptionName(phrase, option))
+                {
+                    int len = option.Name.Length;
+                    if (len > bestLen)
+                    {
+                        best = option;
+                        bestLen = len;
+                    }
+                }
+            }
+
+            return best;
+        }
+
+        private static bool PhraseContainsOptionName([NotNull] string phrase, [NotNull] Option option)
+        {
+            string canonPhrase = Regex.Replace(
+                (phrase ?? string.Empty).ToLowerInvariant().Replace("&", " and "),
+                @"[^a-z0-9]+",
+                " ",
+                RegexOptions.None,
+                TimeSpan.FromSeconds(1)).Trim();
+            string canonName = Regex.Replace(
+                (option.Name ?? string.Empty).ToLowerInvariant().Replace("&", " and "),
+                @"[^a-z0-9]+",
+                " ",
+                RegexOptions.None,
+                TimeSpan.FromSeconds(1)).Trim();
+            return canonName.Length >= 6 && canonPhrase.IndexOf(canonName, StringComparison.Ordinal) >= 0;
+        }
+
+        /// <summary>
+        /// "I personally recommend option 2" / "use option 3" -> zero-based namespace index.
+        /// Guide prose numbers options from 1. Returns -1 when no ordinal is named.
+        /// </summary>
+        internal static int ExplicitOptionOrdinal([CanBeNull] string prose)
+        {
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return -1;
+            }
+
+            Match m = Regex.Match(
+                prose,
+                @"\boption\s+(\d{1,2})\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1));
+            if (!m.Success || !int.TryParse(m.Groups[1].Value, out int n) || n <= 0)
+            {
+                return -1;
+            }
+
+            return n - 1;
+        }
+
+        /// <summary>
+        /// How specifically the prose names this namespace. A full-name phrase match beats a
+        /// partial one, and distinctive tokens the prose never mentions (e.g. "gloves" in
+        /// "Brown-Red-Blue (No Gloves)") count against it, so the plainly-named variant wins.
+        /// </summary>
+        private static double NamespaceNameSpecificity([NotNull] string prose, [NotNull] Option option)
+        {
+            string lower = prose.ToLowerInvariant();
+            string name = (option.Name ?? string.Empty).ToLowerInvariant().Trim();
+            if (name.Length == 0)
+            {
+                return 0d;
+            }
+
+            // Normalise so "Body & Lightsaber" matches "Body and Lightsaber".
+            string Canon(string s) => Regex.Replace(
+                s.Replace("&", " and "), @"[^a-z0-9]+", " ", RegexOptions.None, TimeSpan.FromSeconds(1)).Trim();
+
+            string canonProse = Canon(lower);
+            string canonName = Canon(name);
+            if (canonName.Length > 0 && canonProse.Contains(canonName, StringComparison.Ordinal))
+            {
+                // Longer exact phrases are more specific than shorter ones they contain.
+                return 1000d + canonName.Length;
+            }
+
+            List<string> tokens = SignificantOptionTokens(option);
+            if (tokens.Count == 0)
+            {
+                return 0d;
+            }
+
+            int matched = tokens.Count(t => canonProse.Contains(t, StringComparison.Ordinal));
+            int unmatched = tokens.Count - matched;
+            return matched - (0.5d * unmatched);
+        }
+
+        private static bool IsOptionalNamespaceOption([NotNull] Option option)
+        {
+            string blob = ((option.Name ?? string.Empty) + " " + (option.Description ?? string.Empty))
+                .ToLowerInvariant();
+            return blob.Contains("optional", StringComparison.Ordinal)
+                || blob.Contains("compatibility", StringComparison.Ordinal)
+                || blob.Contains("compat", StringComparison.Ordinal)
+                || blob.Contains("integration", StringComparison.Ordinal);
+        }
+
+        private static bool GuideExcludesNamespace([CanBeNull] string prose, [NotNull] Option option)
+        {
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return false;
+            }
+
+            string lower = prose.ToLowerInvariant();
+            foreach (string token in SignificantOptionTokens(option))
+            {
+                if (Regex.IsMatch(
+                        lower,
+                        $@"\b(?:skip|ignore|do\s+not\s+install|don't\s+install|recommend\s+against)\b[^\n.]{{0,80}}\b{Regex.Escape(token)}\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                        TimeSpan.FromSeconds(1)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool GuideRequestsNamespace([CanBeNull] string prose, [NotNull] Option option)
+        {
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return false;
+            }
+
+            string lower = prose.ToLowerInvariant();
+            List<string> tokens = SignificantOptionTokens(option);
+            if (tokens.Count == 0 && !IsOptionalNamespaceOption(option))
+            {
+                return false;
+            }
+
+            // "install the main", "base install", "re-run ... optional", "also install X"
+            if (IsPrimaryNamespaceOption(option)
+                && (lower.Contains("main", StringComparison.Ordinal)
+                    || lower.Contains("base install", StringComparison.Ordinal)
+                    || lower.Contains("install the mod", StringComparison.Ordinal)
+                    || lower.Contains("run the installer", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+
+            // "re-run ... for each of the optional installs" — every optional namespace is in play
+            // when its condition mod is present (checked by the caller). Bare "re-run" alone must
+            // NOT select every optional (PAVOR only names the K1CP compat option).
+            if (IsOptionalNamespaceOption(option)
+                && (lower.Contains("each of the optional", StringComparison.Ordinal)
+                    || lower.Contains("once for each of the optional", StringComparison.Ordinal)
+                    || lower.Contains("for each of the optional installs", StringComparison.Ordinal)
+                    || lower.Contains("all remaining content", StringComparison.Ordinal)
+                    || lower.Contains("also install", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+
+            int hits = tokens.Count(t => lower.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0);
+            if (hits == 0)
+            {
+                return false;
+            }
+
+            // A single distinctive token (≥6 chars) is enough: "blasters", "loadscreens", "k1cp".
+            if (hits >= 1 && tokens.Any(t => t.Length >= 6 && lower.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0))
+            {
+                return true;
+            }
+
+            // Short tokens like "k1cp" (length 4) when explicitly named in the guide.
+            if (hits >= 1 && tokens.Any(t => t.Length >= 4 && lower.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0
+                && (lower.Contains("select the " + t, StringComparison.OrdinalIgnoreCase)
+                    || lower.Contains(t + " compatibility", StringComparison.OrdinalIgnoreCase)
+                    || lower.Contains(t + " compat", StringComparison.OrdinalIgnoreCase))))
+            {
+                return true;
+            }
+
+            return hits >= Math.Min(2, tokens.Count);
+        }
+
+        private static bool OptionalNamespaceConditionMet(
+            [NotNull] Option option,
+            [CanBeNull] string prose,
+            [NotNull] IReadOnlyList<ModComponent> build)
+        {
+            // A compatibility patch named after another mod ("… for Cloaked Jedi Robes")
+            // must not count as satisfied just because that mod is in the build when the
+            // guide restricts it to one of that mod's options ("if you use X's Y option").
+            // "Senni Vek's Ambush Compatibility" is for that specific other-mod option,
+            // not merely "Senni Vek Mod is in the build".
+            if (TryRequireMatchingForeignOption(option, build, out bool foreignOptionSelected))
+            {
+                return foreignOptionSelected;
+            }
+
+            bool proseNamesSpecificForeignOption = Regex.IsMatch(
+                prose ?? string.Empty,
+                @"['\u2019]s\s+.+\s+option\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1));
+            if (!proseNamesSpecificForeignOption)
+            {
+                foreach (string token in SignificantOptionTokens(option))
+                {
+                    if (BuildHasComponentMatching(build, token))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // "if using X" / "if you utilize X" — require X among build components.
+            string blob = ((option.Name ?? string.Empty) + "\n" + (option.Description ?? string.Empty) + "\n" + (prose ?? string.Empty));
+            MatchCollection conditions = Regex.Matches(
+                blob,
+                @"\bif\s+(?:using|you\s+utilize|you\s+use|installing)\s+(?:the\s+)?(?<mod>[A-Za-z0-9][A-Za-z0-9\s''\-%&.]{2,80}?)(?:\s*,|\s*\.|$|\s+and\b|\s+then\b|\s+re-)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(2));
+
+            foreach (Match match in conditions)
+            {
+                string modPhrase = match.Groups["mod"].Value.Trim();
+                if (TryResolvePossessiveOptionCondition(modPhrase, build, out bool namedOptionSelected))
+                {
+                    if (namedOptionSelected)
+                    {
+                        return true;
+                    }
+
+                    continue;
+                }
+
+                // "Loadscreens in Color/HQ Blasters" → try each slash-separated part
+                foreach (string part in modPhrase.Split(new[] { '/', ';' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (part.Trim().Length >= 3 && BuildHasComponentMatching(build, part.Trim()))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // Unresolved "if you use …" must stay off (the % in "100% Brown" used to
+            // abort the capture, then this fallback installed the compatibility patch).
+            if (conditions.Count == 0
+                && Regex.IsMatch(
+                    prose ?? string.Empty,
+                    @"\bif\s+(?:using|you\s+use|you\s+utilize|installing)\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(1)))
+            {
+                return false;
+            }
+
+            // Guide asked for the optional with no resolvable condition — allow when the
+            // option is not clearly tied to another product name.
+            return conditions.Count == 0;
+        }
+
+        /// <summary>
+        /// "Cloaked Jedi Robes's 100% Brown option" is a condition on that other mod's selected
+        /// namespace, not merely on whether Cloaked Jedi Robes is in the build.
+        /// </summary>
+        private static bool TryResolvePossessiveOptionCondition(
+            [NotNull] string phrase,
+            [NotNull] IReadOnlyList<ModComponent> build,
+            out bool namedOptionSelected)
+        {
+            namedOptionSelected = false;
+            Match possessive = Regex.Match(
+                phrase,
+                @"^(?<mod>.+?)['\u2019]s\s+(?<opt>.+?)(?:\s+option)?\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1));
+            if (!possessive.Success)
+            {
+                return false;
+            }
+
+            string modName = possessive.Groups["mod"].Value.Trim();
+            string optionPhrase = Regex.Replace(
+                possessive.Groups["opt"].Value.Trim(),
+                @"\s+option$",
+                string.Empty,
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1)).Trim();
+            if (modName.Length < 3 || optionPhrase.Length < 3)
+            {
+                return false;
+            }
+
+            ModComponent other = build.FirstOrDefault(component =>
+                component != null && ComponentNameMatchesPhrase(component, modName));
+            if (other?.Options == null)
+            {
+                return true;
+            }
+
+            namedOptionSelected = other.Options.Any(option =>
+                option != null
+                && option.IsSelected
+                && OptionNameContainsPhrase(option, optionPhrase));
+            return true;
+        }
+
+        /// <summary>
+        /// A compat patch named after another mod's namespace
+        /// ("Senni Vek's Ambush Compatibility") is only in play when that option is selected.
+        /// </summary>
+        private static bool TryRequireMatchingForeignOption(
+            [NotNull] Option option,
+            [NotNull] IReadOnlyList<ModComponent> build,
+            out bool foreignOptionSelected)
+        {
+            foreignOptionSelected = false;
+            string selfName = option.Name ?? string.Empty;
+            if (selfName.Length < 10)
+            {
+                return false;
+            }
+
+            Option bestForeign = null;
+            int bestLen = 0;
+            foreach (ModComponent component in build)
+            {
+                if (component?.Options == null)
+                {
+                    continue;
+                }
+
+                foreach (Option foreign in component.Options)
+                {
+                    if (foreign == null
+                        || ReferenceEquals(foreign, option)
+                        || string.IsNullOrWhiteSpace(foreign.Name)
+                        || foreign.Name.Length < 8
+                        || foreign.Name.Length <= bestLen)
+                    {
+                        continue;
+                    }
+
+                    if (PhraseContainsOptionName(selfName, foreign))
+                    {
+                        bestForeign = foreign;
+                        bestLen = foreign.Name.Length;
+                    }
+                }
+            }
+
+            if (bestForeign == null)
+            {
+                return false;
+            }
+
+            foreignOptionSelected = bestForeign.IsSelected;
+            return true;
+        }
+
+        private static bool ComponentNameMatchesPhrase([NotNull] ModComponent component, [NotNull] string phrase)
+        {
+            return BuildHasComponentMatching(new[] { component }, phrase);
+        }
+
+        private static bool OptionNameContainsPhrase([NotNull] Option option, [NotNull] string phrase)
+        {
+            string Canon(string value) => Regex.Replace(
+                (value ?? string.Empty).ToLowerInvariant().Replace("&", " and ", StringComparison.Ordinal),
+                @"[^a-z0-9]+",
+                " ",
+                RegexOptions.None,
+                TimeSpan.FromSeconds(1)).Trim();
+
+            string optionCanon = Canon(option.Name);
+            string phraseCanon = Canon(phrase);
+            if (optionCanon.Length == 0 || phraseCanon.Length == 0)
+            {
+                return false;
+            }
+
+            return optionCanon.Contains(phraseCanon, StringComparison.Ordinal)
+                || phraseCanon.Contains(optionCanon, StringComparison.Ordinal);
+        }
+
+        private static bool BuildHasComponentMatching(
+            [NotNull] IReadOnlyList<ModComponent> build,
+            [NotNull] string phrase)
+        {
+            string needle = ArchiveResolver.Normalize(phrase);
+            if (needle.Length < 4)
+            {
+                return false;
+            }
+
+            foreach (ModComponent component in build)
+            {
+                if (component == null)
+                {
+                    continue;
+                }
+
+                string name = ArchiveResolver.Normalize(component.Name);
+                string heading = ArchiveResolver.Normalize(component.Heading);
+                if (name.Length >= 4
+                    && (name.IndexOf(needle, StringComparison.Ordinal) >= 0
+                        || needle.IndexOf(name, StringComparison.Ordinal) >= 0))
+                {
+                    return true;
+                }
+
+                if (heading.Length >= 4
+                    && (heading.IndexOf(needle, StringComparison.Ordinal) >= 0
+                        || needle.IndexOf(heading, StringComparison.Ordinal) >= 0))
+                {
+                    return true;
+                }
+
+                // Token overlap: "hq blasters" vs "High Quality Blasters"
+                string[] phraseTokens = Regex.Split(phrase.ToLowerInvariant(), @"[^a-z0-9]+")
+                    .Where(t => t.Length >= 4)
+                    .ToArray();
+                if (phraseTokens.Length == 0)
+                {
+                    continue;
+                }
+
+                string hay = (component.Name + " " + (component.Heading ?? string.Empty)).ToLowerInvariant();
+                if (phraseTokens.Count(t => hay.IndexOf(t, StringComparison.Ordinal) >= 0) >= Math.Min(2, phraseTokens.Length))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        [NotNull]
+        private static List<string> SignificantOptionTokens([NotNull] Option option)
+        {
+            string blob = (option.Name ?? string.Empty) + " " + (option.Description ?? string.Empty);
+            string[] stop =
+            {
+                "optional", "option", "install", "installation", "compatibility", "compat",
+                "patch", "integration", "with", "the", "and", "for", "from", "this", "that",
+                "adds", "will", "mod", "main", "base", "default", "basic", "standard",
+                "select", "selected", "have", "installed", "using", "you", "your",
+                "first", "then", "also", "well", "once", "more", "each",
+            };
+            return Regex.Split(blob.ToLowerInvariant(), @"[^a-z0-9]+", RegexOptions.None, TimeSpan.FromSeconds(1))
+                .Where(t => t.Length >= 4)
+                .Where(t => !stop.Contains(t))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+
+        /// <summary>
+        /// After archive generation merges with kept NLP deletes/renames/cleanlist, put Extract
+        /// first and Move last so "delete X before moving" and "copy then rename then move" hold.
+        /// </summary>
+        private static void OrderMergedGuideAndArchiveInstructions([NotNull] ModComponent component)
+        {
+            if (component.Instructions == null || component.Instructions.Count < 2)
+            {
+                return;
+            }
+
+            List<Instruction> ordered = component.Instructions
+                .Select((instruction, index) => new { instruction, index })
+                .OrderBy(t => InstructionMergePriority(t.instruction))
+                .ThenBy(t => t.index)
+                .Select(t => t.instruction)
+                .ToList();
+
+            component.Instructions.Clear();
+            foreach (Instruction instruction in ordered)
+            {
+                component.Instructions.Add(instruction);
+            }
+        }
+
+        /// <summary>
+        /// Guide copy-as ("make a copy … rename it PMBJ01.tga") arrives as Rename of
+        /// <c>&lt;&lt;modDirectory&gt;&gt;\*</c> onto a bare filename under the archive store.
+        /// Copy and Move treat Destination as a folder and append the source leaf, so binding
+        /// the dest to <c>Override\PMBJ01.tga</c> made validation create that path as a
+        /// directory. Copy the extracted file into Override, then Rename to the guide name.
+        /// </summary>
+        private static void BindBareCopyAsInstructions(
+            [NotNull] ModComponent component,
+            [NotNull] string extractedPath,
+            [NotNull] IReadOnlyList<string> fileList)
+        {
+            if (string.IsNullOrWhiteSpace(extractedPath) || fileList == null || fileList.Count == 0)
+            {
+                return;
+            }
+
+            var pendingRenames = new List<(Instruction Copy, Instruction Rename)>();
+            foreach (Instruction instruction in component.Instructions)
+            {
+                if (instruction == null)
+                {
+                    continue;
+                }
+
+                if (instruction.Action != Instruction.ActionType.Rename
+                    && instruction.Action != Instruction.ActionType.Copy)
+                {
+                    continue;
+                }
+
+                if (!IsBareFilenameCopyAs(instruction))
+                {
+                    continue;
+                }
+
+                string destLeaf = instruction.Destination
+                    .Replace("<<modDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                    .Replace("<<kotorDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                    .Replace("<<gameDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                    .Trim('\\', '/', ' ');
+                string hinted = HintedCopyAsSourceLeaf(instruction)
+                    ?? HintedCopyAsSourceFromProse(component);
+                string chosen = ChooseCopyAsSource(fileList, hinted, destLeaf);
+                if (string.IsNullOrEmpty(chosen))
+                {
+                    continue;
+                }
+
+                string sourceLeaf = Path.GetFileName(chosen.Replace('/', Path.DirectorySeparatorChar));
+                instruction.Action = Instruction.ActionType.Copy;
+                instruction.Overwrite = true;
+                instruction.Source = new List<string>
+                {
+                    $@"<<modDirectory>>\{extractedPath}\{chosen.Replace('/', '\\')}",
+                };
+                instruction.Destination = @"<<kotorDirectory>>\Override";
+                Logger.LogVerbose(
+                    $"[AutoInstructionGenerator] Bound copy-as '{destLeaf}' to '{chosen}' under '{extractedPath}'");
+
+                if (!string.IsNullOrEmpty(sourceLeaf)
+                    && !string.Equals(sourceLeaf, destLeaf, StringComparison.OrdinalIgnoreCase))
+                {
+                    var rename = new Instruction
+                    {
+                        Action = Instruction.ActionType.Rename,
+                        Overwrite = true,
+                        Source = new List<string> { $@"<<kotorDirectory>>\Override\{sourceLeaf}" },
+                        Destination = destLeaf,
+                    };
+                    rename.SetParentComponent(component);
+                    pendingRenames.Add((instruction, rename));
+                    Logger.LogVerbose(
+                        $"[AutoInstructionGenerator] Copy-as will rename Override '{sourceLeaf}' to '{destLeaf}'");
+                }
+            }
+
+            foreach ((Instruction copy, Instruction rename) in pendingRenames)
+            {
+                int index = component.Instructions.IndexOf(copy);
+                if (index >= 0)
+                {
+                    component.Instructions.Insert(index + 1, rename);
+                }
+                else
+                {
+                    component.Instructions.Add(rename);
+                }
+            }
+        }
+
+        [CanBeNull]
+        private static string HintedCopyAsSourceLeaf([NotNull] Instruction instruction)
+        {
+            if (instruction.Source == null)
+            {
+                return null;
+            }
+
+            foreach (string source in instruction.Source)
+            {
+                if (string.IsNullOrWhiteSpace(source) || SourceIsUngroundedProseFragment(source))
+                {
+                    continue;
+                }
+
+                string leaf = source
+                    .Replace("<<modDirectory>>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                    .Trim('\\', '/', ' ');
+                leaf = leaf.TrimEnd('*');
+                if (string.IsNullOrEmpty(leaf) || leaf == "*")
+                {
+                    continue;
+                }
+
+                if (leaf.IndexOf('\\') >= 0)
+                {
+                    leaf = leaf.Split('\\').Last();
+                }
+
+                return leaf;
+            }
+
+            return null;
+        }
+
+        [CanBeNull]
+        private static string HintedCopyAsSourceFromProse([NotNull] ModComponent component)
+        {
+            string prose = ((component.Directions ?? string.Empty) + " " + (component.DownloadInstructions ?? string.Empty));
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return null;
+            }
+
+            Match match = Regex.Match(
+                prose,
+                @"\b(?:copy|duplicate)\b[\s\S]{0,80}?\b(?:of|file)\b[\s\S]{0,40}?'([A-Za-z0-9_]+)'",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(2));
+            if (match.Success)
+            {
+                return match.Groups[1].Value;
+            }
+
+            match = Regex.Match(
+                prose,
+                @"\b(?:copy|duplicate)\s+(?:of\s+)?([A-Za-z][A-Za-z0-9_]{3,})",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(2));
+            return match.Success ? match.Groups[1].Value : null;
+        }
+
+        [CanBeNull]
+        private static string ChooseCopyAsSource(
+            [NotNull] IReadOnlyList<string> fileList,
+            [CanBeNull] string hinted,
+            [NotNull] string destLeaf)
+        {
+            List<string> files = fileList
+                .Where(path => !string.IsNullOrWhiteSpace(path)
+                    && !path.EndsWith("/", StringComparison.Ordinal)
+                    && !path.EndsWith("\\", StringComparison.Ordinal)
+                    && !NonGameContentFilter.IsNonGameContent(path))
+                .ToList();
+            if (files.Count == 0)
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(hinted))
+            {
+                string hintStem = Path.GetFileNameWithoutExtension(hinted);
+                List<string> hintedHits = files
+                    .Where(path =>
+                        string.Equals(
+                            Path.GetFileNameWithoutExtension(path),
+                            hintStem,
+                            StringComparison.OrdinalIgnoreCase)
+                        || Path.GetFileName(path).StartsWith(hintStem, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (hintedHits.Count == 1)
+                {
+                    return hintedHits[0];
+                }
+            }
+
+            List<string> game = files
+                .Where(path => NonGameContentFilter.ProtectedGameExtensions.Contains(
+                    Path.GetExtension(path)))
+                .ToList();
+            return game.Count == 1 ? game[0] : null;
+        }
+
+        /// <summary>
+        /// Redrob's cleanlist deletes from the extracted payload folder before Move, not from
+        /// Override (the batch file runs inside "Copy contents to KotOR's Override folder").
+        /// </summary>
+        private static void BindCleanListToPayloadFolder([NotNull] ModComponent component)
+        {
+            foreach (Instruction instruction in component.Instructions)
+            {
+                if (instruction?.Action != Instruction.ActionType.CleanList)
+                {
+                    continue;
+                }
+
+                Instruction move = component.Instructions.FirstOrDefault(
+                    candidate => candidate?.Action == Instruction.ActionType.Move
+                        && candidate.Source != null
+                        && candidate.Source.Count > 0);
+                if (move == null)
+                {
+                    continue;
+                }
+
+                string payload = move.Source[0]
+                    .TrimEnd('*', '\\', '/');
+                if (string.IsNullOrWhiteSpace(payload))
+                {
+                    continue;
+                }
+
+                instruction.Destination = payload;
+                Logger.LogVerbose(
+                    $"[AutoInstructionGenerator] CleanList destination bound to payload folder '{payload}'");
+            }
+        }
+
+        private static int InstructionMergePriority([NotNull] Instruction instruction)
+        {
+            switch (instruction.Action)
+            {
+                case Instruction.ActionType.Extract:
+                    return 0;
+                case Instruction.ActionType.Choose:
+                    return 1;
+                case Instruction.ActionType.Patcher:
+                    return 2;
+                case Instruction.ActionType.Execute:
+                case Instruction.ActionType.Run:
+                    return 3;
+                case Instruction.ActionType.Delete:
+                    return 4;
+                case Instruction.ActionType.Rename:
+                case Instruction.ActionType.Copy:
+                    return 5;
+                case Instruction.ActionType.CleanList:
+                    return 6;
+                case Instruction.ActionType.Move:
+                    return 7;
+                case Instruction.ActionType.DelDuplicate:
+                    return 8;
+                default:
+                    return 9;
+            }
         }
 
         /// <summary>
@@ -2350,6 +4061,13 @@ namespace ModSync.Core.Services
                     continue;
                 }
 
+                if (ArchiveResolver.IsWrongGame(folder, DetectTargetGame()))
+                {
+                    Logger.LogVerbose(
+                        $"[AutoInstructionGenerator] Skipping folder '{folder}' - belongs to the other game");
+                    continue;
+                }
+
                 string potentialSourcePath = $@"<<modDirectory>>\{extractedPath}\{folder}\*";
                 if (IsFolderAlreadyCoveredByInstructions(component, potentialSourcePath))
                 {
@@ -2372,6 +4090,7 @@ namespace ModSync.Core.Services
                     Source = new List<string> { potentialSourcePath },
                     Destination = @"<<gameDirectory>>\Override",
                     Overwrite = true,
+                    ExcludeNonGameContent = true,
                 };
                 moveInstruction.SetParentComponent(potentialOption);
                 potentialOption.Instructions.Add(moveInstruction);
@@ -2450,47 +4169,115 @@ namespace ModSync.Core.Services
             ModComponent component,
             IReadOnlyList<string> fileList,
             string extractedPath,
-            string folderName
+            string folderName,
+            string excludedSubtree = null
         )
         {
             string folderPathInArchive = string.IsNullOrEmpty(folderName) ? null : folderName;
 
-            if (!FolderContainsGameFiles(fileList, folderPathInArchive))
+            List<string> gameFileParents = GameFileParentDirectories(
+                fileList,
+                folderPathInArchive,
+                includeDescendants: !string.IsNullOrEmpty(excludedSubtree));
+            if (gameFileParents.Count == 0)
             {
                 string location = string.IsNullOrEmpty(folderName) ? "root" : $"folder '{folderName}'";
                 Logger.LogVerbose($"[AutoInstructionGenerator] Skipping Move instruction for {location} - no game files found");
                 return;
             }
 
-            string sourcePath = string.IsNullOrEmpty(folderName)
-                ? $@"<<modDirectory>>\{extractedPath}\*"
-                : $@"<<modDirectory>>\{extractedPath}\{folderName}\*";
-
-            if (IsFolderAlreadyCoveredByInstructions(component, sourcePath))
+            // WildcardPathMatch requires the same number of path segments, so
+            // `Korriban HR\*` does not match `Korriban HR/Override/file.tpc`. Emit one
+            // Move per directory that actually holds game files (run 10: Ultimate HR
+            // packs extracted 64-110 files, then Move found 0).
+            foreach (string parent in gameFileParents)
             {
-                string location = string.IsNullOrEmpty(folderName) ? "root" : $"folder '{folderName}'";
-                Logger.LogVerbose($"[AutoInstructionGenerator] Skipping Move instruction for {location} - already covered by existing instructions");
-                return;
+                string normalizedParent = (parent ?? string.Empty).Replace('\\', '/').Trim('/');
+                string normalizedExcluded = (excludedSubtree ?? string.Empty).Replace('\\', '/').Trim('/');
+                if (!string.IsNullOrEmpty(normalizedExcluded)
+                    && (normalizedParent.Equals(normalizedExcluded, StringComparison.OrdinalIgnoreCase)
+                        || normalizedParent.StartsWith(normalizedExcluded + "/", StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                if (ArchiveResolver.IsWrongGame(parent, DetectTargetGame())
+                    || ArchiveResolver.IsWrongGame(folderName, DetectTargetGame()))
+                {
+                    Logger.LogVerbose(
+                        $"[AutoInstructionGenerator] Skipping Move for other-game folder '{parent ?? folderName}'");
+                    continue;
+                }
+
+                string sourcePath = string.IsNullOrEmpty(parent)
+                    ? $@"<<modDirectory>>\{extractedPath}\*"
+                    : $@"<<modDirectory>>\{extractedPath}\{parent.Replace('/', '\\')}\*";
+
+                if (IsFolderAlreadyCoveredByInstructions(component, sourcePath))
+                {
+                    Logger.LogVerbose($"[AutoInstructionGenerator] Skipping Move instruction for '{sourcePath}' - already covered");
+                    continue;
+                }
+
+                var moveInstruction = new Instruction
+                {
+                    Action = Instruction.ActionType.Move,
+                    Source = new List<string> { sourcePath },
+                    Destination = @"<<gameDirectory>>\Override",
+                    Overwrite = true,
+                    ExcludeNonGameContent = true,
+                };
+                moveInstruction.SetParentComponent(component);
+
+                if (!InstructionAlreadyExists(component, moveInstruction))
+                {
+                    component.Instructions.Add(moveInstruction);
+                    Logger.LogVerbose($"[AutoInstructionGenerator] Added Move instruction for '{sourcePath}'");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Parent directories of game files under <paramref name="folderPath"/>, relative to the
+        /// archive root. Flat files yield an empty string (the extraction folder itself).
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> GameFileParentDirectories(
+            [NotNull] IReadOnlyList<string> fileList,
+            [CanBeNull] string folderPath,
+            bool includeDescendants = false)
+        {
+            var parents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string prefix = string.IsNullOrEmpty(folderPath)
+                ? null
+                : folderPath.Replace('\\', '/').TrimEnd('/') + "/";
+
+            foreach (string filePath in fileList)
+            {
+                string entryPath = filePath.Replace('\\', '/');
+                if (!IsGameFile(Path.GetExtension(entryPath)))
+                {
+                    continue;
+                }
+
+                if (prefix == null && !includeDescendants)
+                {
+                    if (entryPath.IndexOf('/') >= 0)
+                    {
+                        continue;
+                    }
+                }
+                else if (prefix != null && !entryPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                int lastSlash = entryPath.LastIndexOf('/');
+                parents.Add(lastSlash < 0 ? string.Empty : entryPath.Substring(0, lastSlash));
             }
 
-            var moveInstruction = new Instruction
-            {
-                Action = Instruction.ActionType.Move,
-                Source = new List<string> { sourcePath },
-                Destination = @"<<gameDirectory>>\Override",
-                Overwrite = true,
-            };
-            moveInstruction.SetParentComponent(component);
-
-            if (!InstructionAlreadyExists(component, moveInstruction))
-            {
-                component.Instructions.Add(moveInstruction);
-                Logger.LogVerbose($"[AutoInstructionGenerator] Added Move instruction for '{sourcePath}'");
-            }
-            else
-            {
-                Logger.LogVerbose($"[AutoInstructionGenerator] Move instruction for '{sourcePath}' already exists, skipping");
-            }
+            return parents.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         /// <param name="fileList">
@@ -2819,5 +4606,8 @@ namespace ModSync.Core.Services
         public bool Success { get; set; }
         public int InstructionsGenerated { get; set; }
         public string SkipReason { get; set; }
+        public string ResolvedArchivePath { get; set; }
+        public string ResolutionTier { get; set; }
+        public string ResolutionReason { get; set; }
     }
 }

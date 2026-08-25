@@ -107,15 +107,20 @@ namespace ModSync.Core
                             continue;
                         case Instruction.ActionType.Extract:
                         case Instruction.ActionType.Choose:
+                        case Instruction.ActionType.Delete:
+                        case Instruction.ActionType.DelDuplicate:
+                        case Instruction.ActionType.CleanList:
+                            // Guide deletes name files inside extracts or missing Override
+                            // targets. CleanList sources live in the repo
+                            // (mod-builds/scripts/cleanlist_k1.txt), not the archive store.
+                            // DelDuplicate operates on the live Override. None of these are
+                            // archive-membership checks.
                             continue;
                         case Instruction.ActionType.Execute:
                         case Instruction.ActionType.Patcher:
                         case Instruction.ActionType.Move:
                         case Instruction.ActionType.Copy:
                         case Instruction.ActionType.Rename:
-                        case Instruction.ActionType.Delete:
-                        case Instruction.ActionType.DelDuplicate:
-                        case Instruction.ActionType.CleanList:
                         case Instruction.ActionType.Run:
                         default:
                             break;
@@ -340,6 +345,34 @@ namespace ModSync.Core
                                 destinationPath = PathHelper.GetCaseSensitivePath(destinationPath).Item1;
                             }
                         }
+                        if (LooksLikeFileDestination(destinationPath))
+                        {
+                            string parentPath = Path.GetDirectoryName(destinationPath);
+                            if (string.IsNullOrWhiteSpace(parentPath)
+                                || !PathValidator.IsValidPath(parentPath)
+                                || !Directory.Exists(parentPath))
+                            {
+                                success = false;
+                                AddError($"Destination folder cannot be found! Got '{parentPath}'", instruction);
+                                if (MainConfig.AttemptFixes && PathValidator.IsValidPath(parentPath))
+                                {
+                                    Logger.Log("Fixing the above error automatically...");
+                                    try
+                                    {
+                                        _ = Directory.CreateDirectory(parentPath);
+                                        success = Directory.Exists(parentPath);
+                                    }
+                                    catch (Exception e)
+                                    {
+                                        Logger.LogException(e);
+                                        AddError(e.Message, instruction);
+                                        success = false;
+                                    }
+                                }
+                            }
+
+                            break;
+                        }
                         if (string.IsNullOrWhiteSpace(destinationPath)
                             || !PathValidator.IsValidPath(destinationPath)
                             || !Directory.Exists(destinationPath))
@@ -503,6 +536,23 @@ namespace ModSync.Core
             return matchResult.Matches
                 ? ArchivePathCode.FoundSuccessfully
                 : ArchivePathCode.NotFoundInArchive;
+        }
+
+        /// <summary>
+        /// Copy/Move destinations that include a filename (Override\N_CommM08.tga) must not
+        /// be created as directories. AttemptFixes used to do that and then real Move failed
+        /// with "already exists" against the leftover folder.
+        /// </summary>
+        private static bool LooksLikeFileDestination([CanBeNull] string destinationPath)
+        {
+            if (string.IsNullOrWhiteSpace(destinationPath))
+            {
+                return false;
+            }
+
+            string leaf = Path.GetFileName(
+                destinationPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            return !string.IsNullOrEmpty(leaf) && Path.HasExtension(leaf);
         }
     }
 }

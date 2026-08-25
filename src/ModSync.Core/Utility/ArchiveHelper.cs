@@ -448,10 +448,8 @@ namespace ModSync.Core.Utility
             if (sevenZipPath is null)
             {
                 await Logger.LogWarningAsync("7z CLI not found in any standard location. Install 7-Zip to improve archive compatibility.").ConfigureAwait(false);
-
-
                 await Logger.LogVerboseAsync($"Searched {possiblePaths.Length} possible 7z locations without success.").ConfigureAwait(false);
-                return fileList;
+                return await TryListArchiveWithUnrarCliAsync(archivePath).ConfigureAwait(false);
             }
 
             try
@@ -468,7 +466,7 @@ namespace ModSync.Core.Utility
                 if (exitCode != 0)
                 {
                     await Logger.LogVerboseAsync($"7z CLI list failed with exit code {exitCode}").ConfigureAwait(false);
-                    return fileList;
+                    return await TryListArchiveWithUnrarCliAsync(archivePath).ConfigureAwait(false);
                 }
 
                 bool inFileSection = false;
@@ -509,33 +507,17 @@ namespace ModSync.Core.Utility
                 if (currentPath != null && !isDirectory)
                 {
                     fileList.Add(currentPath);
-
-
                 }
 
-                if (fileList.Count > 0 && string.Equals(fileList
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-[0], Path.GetFileName(archivePath), StringComparison.Ordinal))
+                if (fileList.Count > 0 && string.Equals(fileList[0], Path.GetFileName(archivePath), StringComparison.Ordinal))
                 {
                     fileList.RemoveAt(0);
+                }
+
+                if (fileList.Count == 0)
+                {
+                    await Logger.LogVerboseAsync("7z CLI listed no files; trying unrar.").ConfigureAwait(false);
+                    return await TryListArchiveWithUnrarCliAsync(archivePath).ConfigureAwait(false);
                 }
 
                 await Logger.LogVerboseAsync($"7z CLI listed {fileList.Count} files in archive").ConfigureAwait(false);
@@ -544,7 +526,184 @@ namespace ModSync.Core.Utility
             catch (Exception ex)
             {
                 await Logger.LogExceptionAsync(ex, $"Failed to list archive with 7z CLI: {archivePath}").ConfigureAwait(false);
-                return fileList;
+                return await TryListArchiveWithUnrarCliAsync(archivePath).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Lists a RAR archive with the <c>unrar</c> CLI. 7-Zip 26+ cannot open some RAR5
+        /// volumes that <c>unrar</c> lists cleanly (UCO compatibility patches).
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        public static async System.Threading.Tasks.Task<List<string>> TryListArchiveWithUnrarCliAsync([NotNull] string archivePath)
+        {
+            if (archivePath is null)
+            {
+                throw new ArgumentNullException(nameof(archivePath));
+            }
+
+            var empty = new List<string>();
+            string unrarPath = await FindUnrarCliAsync().ConfigureAwait(false);
+            if (unrarPath is null)
+            {
+                await Logger.LogVerboseAsync("unrar CLI not found; cannot list RAR5 fallback.").ConfigureAwait(false);
+                return empty;
+            }
+
+            try
+            {
+                string args = $"lb -p- -- \"{archivePath}\"";
+                (int exitCode, string output, string error) = await PlatformAgnosticMethods.ExecuteProcessAsync(
+                    unrarPath,
+                    args,
+                    timeout: 30000,
+                    hideProcess: true,
+                    noLogging: true).ConfigureAwait(false);
+                if (exitCode != 0)
+                {
+                    await Logger.LogVerboseAsync(
+                        $"unrar list failed with exit code {exitCode}: {error}").ConfigureAwait(false);
+                    return empty;
+                }
+
+                List<string> listed = ParseUnrarBareList(output);
+                await Logger.LogVerboseAsync($"unrar listed {listed.Count} files in archive").ConfigureAwait(false);
+                return listed;
+            }
+            catch (Exception ex)
+            {
+                await Logger.LogExceptionAsync(ex, $"Failed to list archive with unrar: {archivePath}").ConfigureAwait(false);
+                return empty;
+            }
+        }
+
+        [NotNull]
+        [ItemNotNull]
+        internal static List<string> ParseUnrarBareList([CanBeNull] string output)
+        {
+            var listed = new List<string>();
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                return listed;
+            }
+
+            foreach (string line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string trimmed = line.Trim();
+                if (trimmed.Length == 0
+                    || trimmed.StartsWith("UNRAR", StringComparison.OrdinalIgnoreCase)
+                    || trimmed.EndsWith("/", StringComparison.Ordinal)
+                    || trimmed.EndsWith("\\", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                listed.Add(trimmed.Replace('\\', '/'));
+            }
+
+            return listed;
+        }
+
+        [ItemCanBeNull]
+        private static async System.Threading.Tasks.Task<string> FindUnrarCliAsync()
+        {
+            string[] possiblePaths =
+            {
+                "unrar",
+                "/usr/bin/unrar",
+                "/usr/local/bin/unrar",
+                "/opt/homebrew/bin/unrar",
+            };
+
+            foreach (string path in possiblePaths)
+            {
+                try
+                {
+                    (int exitCode, string output, string error) = await PlatformAgnosticMethods.ExecuteProcessAsync(
+                        path,
+                        string.Empty,
+                        timeout: 2000,
+                        hideProcess: true,
+                        noLogging: true).ConfigureAwait(false);
+                    string combined = (output ?? string.Empty) + (error ?? string.Empty);
+                    if (exitCode == 0 || combined.IndexOf("UNRAR", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        return path;
+                    }
+                }
+                catch (Exception)
+                {
+                    // Candidate missing.
+                }
+            }
+
+            return null;
+        }
+
+        public static async System.Threading.Tasks.Task<bool> TryExtractWithUnrarCliAsync(
+            [NotNull] string archivePath,
+            [NotNull] string destinationPath,
+            [NotNull] List<string> extractedFiles)
+        {
+            if (archivePath is null)
+            {
+                throw new ArgumentNullException(nameof(archivePath));
+            }
+
+            if (destinationPath is null)
+            {
+                throw new ArgumentNullException(nameof(destinationPath));
+            }
+
+            if (extractedFiles is null)
+            {
+                throw new ArgumentNullException(nameof(extractedFiles));
+            }
+
+            string unrarPath = await FindUnrarCliAsync().ConfigureAwait(false);
+            if (unrarPath is null)
+            {
+                return false;
+            }
+
+            try
+            {
+                string extractFolderName = Path.GetFileNameWithoutExtension(archivePath);
+                string extractPath = Path.Combine(destinationPath, extractFolderName);
+                if (!Directory.Exists(extractPath))
+                {
+                    _ = Directory.CreateDirectory(extractPath);
+                }
+
+                string args = $"x -o+ -y -p- -- \"{archivePath}\" \"{extractPath}{Path.DirectorySeparatorChar}\"";
+                (int exitCode, string _, string error) = await PlatformAgnosticMethods.ExecuteProcessAsync(
+                    unrarPath,
+                    args,
+                    timeout: 120000,
+                    hideProcess: true,
+                    noLogging: false).ConfigureAwait(false);
+                if (exitCode != 0)
+                {
+                    await Logger.LogErrorAsync($"unrar extraction failed with exit code {exitCode}: {error}")
+                        .ConfigureAwait(false);
+                    return false;
+                }
+
+                if (!Directory.Exists(extractPath))
+                {
+                    return false;
+                }
+
+                extractedFiles.AddRange(Directory.GetFiles(extractPath, "*", SearchOption.AllDirectories));
+                await Logger.LogInfoAsync($"Successfully extracted archive using unrar: {archivePath}")
+                    .ConfigureAwait(false);
+                return extractedFiles.Count > 0;
+            }
+            catch (Exception ex)
+            {
+                await Logger.LogExceptionAsync(ex, $"Failed to extract with unrar: {archivePath}").ConfigureAwait(false);
+                return false;
             }
         }
 
@@ -594,8 +753,9 @@ namespace ModSync.Core.Utility
 
             if (sevenZipPath is null)
             {
-                await Logger.LogVerboseAsync("7z CLI not found on PATH").ConfigureAwait(false);
-                return false;
+                await Logger.LogVerboseAsync("7z CLI not found on PATH; trying unrar").ConfigureAwait(false);
+                return await TryExtractWithUnrarCliAsync(archivePath, destinationPath, extractedFiles)
+                    .ConfigureAwait(false);
             }
 
             await Logger.LogVerboseAsync($"Found 7z CLI at: {sevenZipPath}").ConfigureAwait(false);
@@ -622,7 +782,8 @@ namespace ModSync.Core.Utility
                 if (exitCode != 0)
                 {
                     await Logger.LogErrorAsync($"7z CLI extraction failed with exit code {exitCode}").ConfigureAwait(false);
-                    return false;
+                    return await TryExtractWithUnrarCliAsync(archivePath, destinationPath, extractedFiles)
+                        .ConfigureAwait(false);
                 }
 
                 if (Directory.Exists(extractPath))
@@ -633,12 +794,14 @@ namespace ModSync.Core.Utility
                     return true;
                 }
 
-                return false;
+                return await TryExtractWithUnrarCliAsync(archivePath, destinationPath, extractedFiles)
+                    .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 await Logger.LogExceptionAsync(ex, $"Failed to extract with 7z CLI: {archivePath}").ConfigureAwait(false);
-                return false;
+                return await TryExtractWithUnrarCliAsync(archivePath, destinationPath, extractedFiles)
+                    .ConfigureAwait(false);
             }
         }
 
@@ -1152,6 +1315,66 @@ namespace ModSync.Core.Utility
                 (IArchive archive, FileStream stream) = OpenArchive(archivePath);
                 if (archive == null || stream == null)
                 {
+                    return MatchArchivePathViaCli(archivePath, relativePattern);
+                }
+
+                using (archive)
+                using (stream)
+                {
+                    ArchiveMatchResult opened = MatchArchiveEntries(
+                        archivePath,
+                        relativePattern,
+                        archive.Entries.Select(entry => (
+                            EntryPath: entry.Key ?? string.Empty,
+                            IsDirectory: entry.IsDirectory)));
+                    if (opened.CouldOpen && opened.Matches)
+                    {
+                        return opened;
+                    }
+
+                    int fileCount = archive.Entries.Count(entry => !entry.IsDirectory);
+                    if (fileCount == 0)
+                    {
+                        ArchiveMatchResult viaCli = MatchArchivePathViaCli(archivePath, relativePattern);
+                        if (viaCli.CouldOpen)
+                        {
+                            return viaCli;
+                        }
+                    }
+
+                    return opened;
+                }
+            }
+            catch (Exception ex)
+            {
+                ArchiveMatchResult viaCli = MatchArchivePathViaCli(archivePath, relativePattern);
+                if (viaCli.CouldOpen)
+                {
+                    return viaCli;
+                }
+
+                Logger.LogWarning($"[ArchiveHelper] Failed to match archive path '{archivePath}': {ex.Message}");
+                return new ArchiveMatchResult
+                {
+                    IsArchiveFile = true,
+                    CouldOpen = false,
+                    Matches = false,
+                };
+            }
+        }
+
+        [NotNull]
+        private static ArchiveMatchResult MatchArchivePathViaCli(
+            [NotNull] string archivePath,
+            [NotNull] string relativePattern)
+        {
+            try
+            {
+                List<string> listed = TryListArchiveWithSevenZipCliAsync(archivePath)
+                    .GetAwaiter()
+                    .GetResult();
+                if (listed == null || listed.Count == 0)
+                {
                     return new ArchiveMatchResult
                     {
                         IsArchiveFile = true,
@@ -1160,12 +1383,64 @@ namespace ModSync.Core.Utility
                     };
                 }
 
-                using (archive)
-                using (stream)
+                return MatchArchiveEntries(
+                    archivePath,
+                    relativePattern,
+                    listed.Select(entry => (EntryPath: entry, IsDirectory: entry.EndsWith("/", StringComparison.Ordinal)
+                        || entry.EndsWith("\\", StringComparison.Ordinal))));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogVerbose($"[ArchiveHelper] CLI listing failed for '{archivePath}': {ex.Message}");
+                return new ArchiveMatchResult
                 {
-                    string archiveRoot = Path.GetFileNameWithoutExtension(archivePath);
+                    IsArchiveFile = true,
+                    CouldOpen = false,
+                    Matches = false,
+                };
+            }
+        }
 
-                    if (PathHelper.WildcardPathMatch(archiveRoot, relativePattern))
+        [NotNull]
+        private static ArchiveMatchResult MatchArchiveEntries(
+            [NotNull] string archivePath,
+            [NotNull] string relativePattern,
+            [NotNull] IEnumerable<(string EntryPath, bool IsDirectory)> entries)
+        {
+            string archiveRoot = Path.GetFileNameWithoutExtension(archivePath);
+
+            if (PathHelper.WildcardPathMatch(archiveRoot, relativePattern))
+            {
+                return new ArchiveMatchResult
+                {
+                    IsArchiveFile = true,
+                    CouldOpen = true,
+                    Matches = true,
+                };
+            }
+
+            var folderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // An archive either already contains its own top-level folder ("Mod Name/TSLPatcher.exe")
+            // or is flat ("TSLPatcher.exe"), in which case extracting it yields a folder named after
+            // the archive. Both are common and nothing in the file tells us which convention a given
+            // mod used, so BOTH candidate paths are checked against the pattern. Unconditionally
+            // prefixing the archive name doubled the folder for self-rooted archives
+            // ("Character Start Up Changes/Character Start Up Changes/TSLPatcher.exe") and the real
+            // file could never match, failing the install on a file that was present all along.
+            foreach ((string EntryPath, bool IsDirectory) entry in entries)
+            {
+                string entryPath = entry.EntryPath
+                    .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+                    .TrimStart(Path.DirectorySeparatorChar)
+                    .TrimEnd(Path.DirectorySeparatorChar);
+                string pathWithRoot = string.IsNullOrEmpty(entryPath)
+                    ? archiveRoot
+                    : $"{archiveRoot}{Path.DirectorySeparatorChar}{entryPath}";
+
+                foreach (string candidate in CandidateEntryPaths(entryPath, pathWithRoot))
+                {
+                    if (PathHelper.WildcardPathMatch(candidate, relativePattern))
                     {
                         return new ArchiveMatchResult
                         {
@@ -1175,62 +1450,21 @@ namespace ModSync.Core.Utility
                         };
                     }
 
-                    var folderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                    // An archive either already contains its own top-level folder ("Mod Name/TSLPatcher.exe")
-                    // or is flat ("TSLPatcher.exe"), in which case extracting it yields a folder named after
-                    // the archive. Both are common and nothing in the file tells us which convention a given
-                    // mod used, so BOTH candidate paths are checked against the pattern. Unconditionally
-                    // prefixing the archive name doubled the folder for self-rooted archives
-                    // ("Character Start Up Changes/Character Start Up Changes/TSLPatcher.exe") and the real
-                    // file could never match, failing the install on a file that was present all along.
-                    foreach (IArchiveEntry entry in archive.Entries)
+                    string candidateFolder = entry.IsDirectory ? candidate : Path.GetDirectoryName(candidate);
+                    if (!string.IsNullOrEmpty(candidateFolder))
                     {
-                        string entryPath = entry.Key.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
-                        entryPath = entryPath.TrimStart(Path.DirectorySeparatorChar);
-                        string pathWithRoot = string.IsNullOrEmpty(entryPath)
-                            ? archiveRoot
-                            : $"{archiveRoot}{Path.DirectorySeparatorChar}{entryPath}";
-
-                        foreach (string candidate in CandidateEntryPaths(entryPath, pathWithRoot))
-                        {
-                            if (PathHelper.WildcardPathMatch(candidate, relativePattern))
-                            {
-                                return new ArchiveMatchResult
-                                {
-                                    IsArchiveFile = true,
-                                    CouldOpen = true,
-                                    Matches = true,
-                                };
-                            }
-
-                            string candidateFolder = entry.IsDirectory ? candidate : Path.GetDirectoryName(candidate);
-                            if (!string.IsNullOrEmpty(candidateFolder))
-                            {
-                                folderPaths.Add(candidateFolder.TrimEnd(Path.DirectorySeparatorChar));
-                            }
-                        }
+                        folderPaths.Add(candidateFolder.TrimEnd(Path.DirectorySeparatorChar));
                     }
-
-                    bool folderMatch = folderPaths.Any(folder => PathHelper.WildcardPathMatch(folder, relativePattern));
-                    return new ArchiveMatchResult
-                    {
-                        IsArchiveFile = true,
-                        CouldOpen = true,
-                        Matches = folderMatch,
-                    };
                 }
             }
-            catch (Exception ex)
+
+            bool folderMatch = folderPaths.Any(folder => PathHelper.WildcardPathMatch(folder, relativePattern));
+            return new ArchiveMatchResult
             {
-                Logger.LogWarning($"[ArchiveHelper] Failed to match archive path '{archivePath}': {ex.Message}");
-                return new ArchiveMatchResult
-                {
-                    IsArchiveFile = true,
-                    CouldOpen = false,
-                    Matches = false,
-                };
-            }
+                IsArchiveFile = true,
+                CouldOpen = true,
+                Matches = folderMatch,
+            };
         }
 
         /// <summary>

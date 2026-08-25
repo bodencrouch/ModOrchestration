@@ -30,17 +30,24 @@ namespace ModSync.Core.Services.FileSystem
 
         public Task CopyFileAsync(string sourcePath, string destinationPath, bool overwrite)
         {
-            string directoryName = Path.GetDirectoryName(destinationPath);
-            if (directoryName != null && !Directory.Exists(directoryName))
-            {
-                Directory.CreateDirectory(directoryName);
-            }
-
+            PrepareFileDestination(destinationPath, overwrite);
             File.Copy(sourcePath, destinationPath, overwrite);
             return Task.CompletedTask;
         }
 
         public Task MoveFileAsync(string sourcePath, string destinationPath, bool overwrite)
+        {
+            PrepareFileDestination(destinationPath, overwrite);
+            File.Move(sourcePath, destinationPath);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Validation AttemptFixes historically created file-named destinations as empty
+        /// directories (Override\N_CommM08.tga/). File.Move then throws "already exists"
+        /// even with overwrite, because the dest is a folder not a file.
+        /// </summary>
+        private static void PrepareFileDestination(string destinationPath, bool overwrite)
         {
             string directoryName = Path.GetDirectoryName(destinationPath);
             if (directoryName != null && !Directory.Exists(directoryName))
@@ -48,13 +55,19 @@ namespace ModSync.Core.Services.FileSystem
                 Directory.CreateDirectory(directoryName);
             }
 
-            if (File.Exists(destinationPath) && overwrite)
+            if (Directory.Exists(destinationPath))
+            {
+                if (!overwrite)
+                {
+                    throw new IOException($"The directory '{destinationPath}' already exists.");
+                }
+
+                Directory.Delete(destinationPath, recursive: false);
+            }
+            else if (File.Exists(destinationPath) && overwrite)
             {
                 File.Delete(destinationPath);
             }
-
-            File.Move(sourcePath, destinationPath);
-            return Task.CompletedTask;
         }
 
         public Task DeleteFileAsync(string path)
@@ -150,14 +163,6 @@ namespace ModSync.Core.Services.FileSystem
 
                     await Logger.LogAsync($"Extracting archive '{sourcePath}'...").ConfigureAwait(false);
 
-                    // Determine if destination was explicitly provided (different from archive's directory)
-                    // When explicitly provided, extract directly to destination without archive name subfolder
-                    // When using default (archive directory), add archive name subfolder to avoid conflicts
-                    string archiveDirectory = Path.GetDirectoryName(archive.FullName) ?? string.Empty;
-                    string normalizedDestPath = Path.GetFullPath(destPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    string normalizedArchiveDir = Path.GetFullPath(archiveDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    bool isExplicitDestination = !string.Equals(normalizedDestPath, normalizedArchiveDir, StringComparison.OrdinalIgnoreCase);
-
                     if (archive.Extension.Equals(value: ".exe", StringComparison.OrdinalIgnoreCase))
                     {
                         if (ArchiveHelper.TryExtractSevenZipSfx(archive.FullName, destPath, extracted))
@@ -196,10 +201,12 @@ namespace ModSync.Core.Services.FileSystem
                         throw new InvalidOperationException($"'{sourceRelDirPath}' is not a valid 7z self-extracting executable. Cannot extract.");
                     }
 
-                    string extractRootDirectory = isExplicitDestination
-                        ? Path.GetFullPath(destPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                        : Path.GetFullPath(Path.Combine(destPath, Path.GetFileNameWithoutExtension(archive.Name)))
-                            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    // Shared with VirtualFileSystemProvider so validation predicts exactly where the
+                    // real extraction writes; see ArchiveExtractLayout.
+                    string extractRootDirectory = ArchiveExtractLayout.ResolveExtractRoot(
+                        archive.FullName,
+                        destPath,
+                        createDirectories: true);
 
                     using (FileStream stream = File.OpenRead(archive.FullName))
                     {

@@ -94,6 +94,37 @@ namespace ModSync.Tests
             }
         }
 
+        [Test]
+        public void DetranRenameProse_EmitsRenameWithDestinationFilename()
+        {
+            ObservableCollection<Instruction> instructions = Parse(
+                "Make a copy of the file and rename it PMBJ01.tga, then move all files to override.");
+
+            Instruction rename = instructions.FirstOrDefault(i =>
+                i.Action == Instruction.ActionType.Rename || i.Action == Instruction.ActionType.Copy);
+            Assert.That(rename, Is.Not.Null, "Expected Rename/Copy from Detran prose. Got: "
+                + string.Join("; ", instructions.Select(i => $"{i.Action}:{string.Join(',', i.Source ?? new System.Collections.Generic.List<string>())}->{i.Destination}")));
+            Assert.That(rename.Destination, Does.Contain("PMBJ01").IgnoreCase);
+        }
+
+        [Test]
+        public void EbonHawkCopyAsProse_EmitsRenameOrCopyWithSourceAndDest()
+        {
+            ObservableCollection<Instruction> instructions = Parse(
+                "Once the mod is extracted, copy the file 'LDA_EHawk01' and make a duplicate of it. Rename this duplicate to 'M36_EHawk01.tga' and then move all files to the override.");
+
+            Instruction rename = instructions.FirstOrDefault(i =>
+                (i.Action == Instruction.ActionType.Rename || i.Action == Instruction.ActionType.Copy)
+                && (i.Destination ?? string.Empty).IndexOf("M36_EHawk01", System.StringComparison.OrdinalIgnoreCase) >= 0);
+
+            Assert.That(rename, Is.Not.Null, "Expected copy-as to M36_EHawk01. Got: "
+                + string.Join("; ", instructions.Select(i => $"{i.Action}:{string.Join(',', i.Source ?? new System.Collections.Generic.List<string>())}->{i.Destination}")));
+            Assert.That(
+                string.Join(",", rename.Source ?? new System.Collections.Generic.List<string>()),
+                Does.Contain("LDA_EHawk01").IgnoreCase,
+                "Copy-as must retain the quoted source stem, not a bare modDirectory wildcard.");
+        }
+
         private static ObservableCollection<Instruction> Parse(string prose)
         {
             var parser = new NaturalLanguageInstructionParser();

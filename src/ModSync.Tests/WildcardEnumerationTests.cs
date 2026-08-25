@@ -221,5 +221,20 @@ namespace ModSync.Tests
                 });
             }
         }
+
+        [Test]
+        public void EnumerateFilesWithWildcards_NonWildcardDirectory_IsFound()
+        {
+            string folder = Path.Combine(_basePath, "Kebla Yurt Revamp");
+            _ = Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, "readme.txt"), "x");
+
+            List<string> found = PathHelper.EnumerateFilesWithWildcards(
+                new List<string> { folder },
+                new Core.Services.FileSystem.RealFileSystemProvider());
+
+            Assert.That(found, Has.Count.EqualTo(1));
+            Assert.That(found[0], Is.EqualTo(Path.GetFullPath(folder)));
+        }
     }
 }

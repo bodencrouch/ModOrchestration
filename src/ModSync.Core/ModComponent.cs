@@ -96,6 +96,20 @@ namespace ModSync.Core
         private bool _isDownloaded;
         private bool _isValidating;
         private bool _widescreenOnly;
+        [NotNull] private string _sourceFormat = string.Empty;
+
+        /// <summary>
+        /// Runtime provenance for the representation that produced this component. This is deliberately
+        /// excluded from serialized build files: it describes the current ingest boundary, not mod metadata.
+        /// </summary>
+        [NotNull]
+        [JsonIgnore]
+        public string SourceFormat
+        {
+            get => _sourceFormat;
+            set => _sourceFormat = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        }
+
         public Guid Guid
         {
             get => _guid;
@@ -1856,7 +1870,10 @@ namespace ModSync.Core
                         ).ConfigureAwait(false);
                         if (exitCode == Instruction.ActionExitCode.OptionalInstallFailed)
                         {
-                            return InstallExitCode.UserCancelledInstall;
+                            // A failed Choose/option path is a mod failure, not a user abort.
+                            // Mapping this to UserCancelledInstall made --best-effort / --continue-on-mod-failure
+                            // halt the whole batch (InstallationService refuses to continue past "cancel").
+                            return InstallExitCode.UnknownError;
                         }
 
                         if (exitCode == Instruction.ActionExitCode.FileNotFoundPre ||

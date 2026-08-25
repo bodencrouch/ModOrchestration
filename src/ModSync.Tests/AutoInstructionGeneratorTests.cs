@@ -144,12 +144,83 @@ namespace ModSync.Tests
 
                 Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Extract), "First should be Extract");
                 Assert.That(component.Instructions[1].Action, Is.EqualTo(Instruction.ActionType.Patcher), "Second should be Patcher (TSLPatcher before Move)");
-                Assert.That(component.Instructions[2].Action, Is.EqualTo(Instruction.ActionType.Choose), "Third should be Choose for multiple folders");
+                Assert.That(component.Instructions.Skip(2), Has.All.Property(nameof(Instruction.Action))
+                    .EqualTo(Instruction.ActionType.Move), "Loose payload folders must run after the patcher");
+                Assert.That(component.Instructions, Has.Count.EqualTo(4));
             });
         }
 
         [Test]
-        public void GenerateInstructions_MultipleFolders_CreatesChooseWithMoveOptions()
+        public void GenerateInstructions_RootedHybrid_DoesNotDiscardLooseSiblingOfTslpatchdata()
+        {
+            string archivePath = CreateTestArchive("rooted_hybrid.zip", archive =>
+            {
+                AddTextFileToArchive(archive, "Rooted Mod/tslpatchdata/changes.ini", "[Settings]\nLookupGameFolder=1");
+                AddTextFileToArchive(archive, "Rooted Mod/Install.exe", "fake exe");
+                AddTextFileToArchive(archive, "Rooted Mod/OPTIONAL/extra.ncs", "NCS");
+            });
+
+            var component = new ModComponent { Name = "Rooted Hybrid", Guid = Guid.NewGuid() };
+
+            Assert.That(AutoInstructionGenerator.GenerateInstructions(component, archivePath), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(component.InstallationMethod, Is.EqualTo("Hybrid (TSLPatcher + Loose Files)"));
+                Assert.That(component.Instructions, Has.Some.Property(nameof(Instruction.Action))
+                    .EqualTo(Instruction.ActionType.Patcher));
+                Assert.That(component.Instructions, Has.Some.Property(nameof(Instruction.Action))
+                    .EqualTo(Instruction.ActionType.Move));
+                Assert.That(component.Instructions.Single(i => i.Action == Instruction.ActionType.Move).Source[0],
+                    Does.Contain("OPTIONAL"));
+            });
+        }
+
+        [Test]
+        public void GenerateInstructions_RootedNamespaces_CreatesSelectedPatcherOption()
+        {
+            string archivePath = CreateTestArchive("rooted_namespaces.zip", archive =>
+            {
+                AddTextFileToArchive(archive, "Rooted Mod/tslpatchdata/namespaces.ini",
+                    "[Namespaces]\n1=Main\n\n[Main]\nName=Main Installation\nIniName=changes.ini");
+                AddTextFileToArchive(archive, "Rooted Mod/tslpatchdata/changes.ini", "[Settings]\nLookupGameFolder=1");
+                AddTextFileToArchive(archive, "Rooted Mod/Install.exe", "fake exe");
+            });
+
+            var component = new ModComponent { Name = "Rooted Namespaces", Guid = Guid.NewGuid() };
+
+            Assert.That(AutoInstructionGenerator.GenerateInstructions(component, archivePath), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(component.Instructions, Has.Some.Property(nameof(Instruction.Action))
+                    .EqualTo(Instruction.ActionType.Choose));
+                Assert.That(component.Options, Has.Count.EqualTo(1));
+                Assert.That(component.Options[0].IsSelected, Is.True);
+                Assert.That(component.Options[0].Instructions, Has.Some.Property(nameof(Instruction.Action))
+                    .EqualTo(Instruction.ActionType.Patcher));
+            });
+        }
+
+        [Test]
+        public void TryGenerateInstructions_RemoveDuplicateStep_DoesNotRequireAnArchive()
+        {
+            var component = new ModComponent
+            {
+                Name = "Remove Duplicate TGA/TPC",
+                Guid = Guid.NewGuid(),
+            };
+            component.Instructions.Add(new Instruction
+            {
+                Action = Instruction.ActionType.Extract,
+                Source = new List<string> { @"<<modDirectory>>\draft.zip" },
+            });
+
+            Assert.That(AutoInstructionGenerator.TryGenerateInstructionsFromArchive(component), Is.True);
+            Assert.That(component.Instructions, Has.One.Property(nameof(Instruction.Action))
+                .EqualTo(Instruction.ActionType.DelDuplicate));
+        }
+
+        [Test]
+        public void GenerateInstructions_MultipleFolders_CreatesMoveForEveryPayloadFolder()
         {
 
             string archivePath = CreateTestArchive("multi_folder.zip", archive =>
@@ -167,19 +238,12 @@ namespace ModSync.Tests
             {
                 Assert.That(result, Is.True);
                 Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Extract));
-                Assert.That(component.Instructions[1].Action, Is.EqualTo(Instruction.ActionType.Choose));
-                Assert.That(component.Options, Has.Count.EqualTo(3), "Should create three options for three folders");
+                Assert.That(component.Instructions.Skip(1), Has.All.Property(nameof(Instruction.Action))
+                    .EqualTo(Instruction.ActionType.Move));
+                Assert.That(component.Instructions, Has.Count.EqualTo(4));
+                Assert.That(component.Options, Is.Empty,
+                    "Loose payload folders are cumulative; unselected Choose options would silently install nothing");
             });
-
-            foreach (Option option in component.Options)
-            {
-                Assert.That(option.Instructions, Has.Count.EqualTo(1));
-                Assert.Multiple(() =>
-                {
-                    Assert.That(option.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Move));
-                    Assert.That(option.Instructions[0].Destination, Does.Contain("Override"));
-                });
-            }
         }
 
         [Test]

@@ -471,6 +471,20 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public void GetCaseSensitivePath_OverrideSibling_RemapsToExistingLowercaseOverride()
+        {
+            string steamassets = Path.Combine(s_testDirectory, "steamassets");
+            string realOverride = Path.Combine(steamassets, "override");
+            _ = Directory.CreateDirectory(realOverride);
+
+            DirectoryInfo result = PathHelper.GetCaseSensitivePath(
+                new DirectoryInfo(Path.Combine(steamassets, "Override")));
+
+            Assert.That(result.FullName, Is.EqualTo(realOverride));
+            Assert.That(Directory.Exists(Path.Combine(steamassets, "Override")), Is.False);
+        }
+
+        [Test]
         public void GetCaseSensitivePath_EntirePathCaseIncorrect_ReturnsCorrectPath()
         {
 

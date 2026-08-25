@@ -42,13 +42,15 @@ namespace ModSync.Core.Ports.Guides
                 return IngestMarkdown(content, parseDirections);
             }
 
+            bool parsedAsTomlWithoutHint = false;
             if (format is null)
             {
                 // Preserve DetectFormatFromContent's TOML-before-markdown cascade order, but without its
                 // full re-parse-from-scratch cost for the markdown case: try TOML first (cheap, fails fast
                 // on non-TOML content), then attempt markdown directly and keep the parsed result instead
                 // of detecting "markdown" and parsing the same content a second time.
-                if (!TryParsesAsToml(content))
+                parsedAsTomlWithoutHint = TryParsesAsToml(content);
+                if (!parsedAsTomlWithoutHint)
                 {
                     GuideIngestResult markdownAttempt = IngestMarkdown(content, parseDirections);
                     if (markdownAttempt.Components.Count > 0)
@@ -60,6 +62,10 @@ namespace ModSync.Core.Ports.Guides
 
             IReadOnlyList<ModComponent> components =
                 ModComponentSerializationService.DeserializeModComponentFromString(content, format);
+            string detectedFormat = format ?? (parsedAsTomlWithoutHint
+                ? "toml"
+                : ModComponentSerializationService.DetectFormatFromContent(content));
+            StampSourceFormat(components, detectedFormat);
 
             IReadOnlyList<DraftInstructionResult> drafts = Array.Empty<DraftInstructionResult>();
             if (parseDirections && components != null && components.Count > 0)
@@ -67,7 +73,7 @@ namespace ModSync.Core.Ports.Guides
                 drafts = DraftInstructionService.GenerateDraftInstructions(components);
             }
 
-            return new GuideIngestResult(components ?? Array.Empty<ModComponent>(), drafts, format);
+            return new GuideIngestResult(components ?? Array.Empty<ModComponent>(), drafts, detectedFormat);
         }
 
         /// <summary>
@@ -96,6 +102,7 @@ namespace ModSync.Core.Ports.Guides
             MarkdownParserResult parsed = parser.Parse(content);
 
             IReadOnlyList<ModComponent> components = (parsed.Components ?? new List<ModComponent>()).ToList();
+            StampSourceFormat(components, "markdown");
 
             IReadOnlyList<DraftInstructionResult> drafts = Array.Empty<DraftInstructionResult>();
             if (parseDirections && components.Count > 0)
@@ -119,6 +126,16 @@ namespace ModSync.Core.Ports.Guides
         [CanBeNull]
         private static string NullIfEmpty([CanBeNull] string value) =>
             string.IsNullOrWhiteSpace(value) ? null : value;
+
+        private static void StampSourceFormat(
+            [CanBeNull][ItemNotNull] IEnumerable<ModComponent> components,
+            [CanBeNull] string format)
+        {
+            foreach (ModComponent component in components ?? Array.Empty<ModComponent>())
+            {
+                component.SourceFormat = format ?? string.Empty;
+            }
+        }
     }
 
     /// <summary>Default guide emit over <see cref="ModComponentSerializationService.GenerateModDocumentation"/>.</summary>

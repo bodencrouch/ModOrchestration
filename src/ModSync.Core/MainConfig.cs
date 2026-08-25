@@ -454,6 +454,69 @@ namespace ModSync.Core
         }
         [CanBeNull] public string destinationPathFullName => DestinationPath?.FullName;
 
+        /// <summary>
+        /// When the archive library is on a different volume than the game (USB vs home),
+        /// extract trees go here instead of beside the archive. Ultimate HR packs must not
+        /// write extracted TPC trees back into the archive store.
+        /// </summary>
+        [CanBeNull] public static DirectoryInfo ExtractScratchPath { get; set; }
+
+        [CanBeNull]
+        public DirectoryInfo extractScratchPath
+        {
+            get => ExtractScratchPath;
+            set => ExtractScratchPath = value;
+        }
+
+        public static void EnsureExtractScratchAwayFromSource()
+        {
+            if (SourcePath is null)
+            {
+                return;
+            }
+
+            string sourceFull = Path.GetFullPath(SourcePath.FullName);
+            string destFull = DestinationPath is null ? string.Empty : Path.GetFullPath(DestinationPath.FullName);
+            // Path.GetPathRoot is "/" on Linux for USB and NVMe alike, so root comparison
+            // cannot detect the cross-volume case. run20 died extracting Ultimate HR TPCs
+            // back into kotor_mod_archives while a flatpak rsync saturated the USB.
+            bool sourceLooksRemovable = sourceFull.StartsWith("/run/media/", StringComparison.OrdinalIgnoreCase)
+                || sourceFull.StartsWith("/media/", StringComparison.OrdinalIgnoreCase);
+            if (!sourceLooksRemovable)
+            {
+                return;
+            }
+
+            const string hotScratchParent = "/home/brunner56/modsync-hot";
+            // k1extract/ is the manual step workspace (s081+). Auto extracts use a sibling.
+            string folderName = "extract_scratch";
+            if (destFull.IndexOf("K1_auto", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                folderName = "k1_auto_extract";
+            }
+            else if (destFull.IndexOf("K2_auto", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                folderName = "k2_auto_extract";
+            }
+
+            string scratch;
+            if (Directory.Exists(hotScratchParent))
+            {
+                scratch = Path.Combine(hotScratchParent, folderName);
+            }
+            else if (DestinationPath?.Parent != null)
+            {
+                scratch = Path.Combine(DestinationPath.Parent.FullName, folderName);
+            }
+            else
+            {
+                return;
+            }
+
+            _ = Directory.CreateDirectory(scratch);
+            ExtractScratchPath = new DirectoryInfo(scratch);
+        }
+
         /// <summary>Maximum cache size in megabytes for download cache storage (default 10GB). Mutate via <see cref="maxCacheSizeMB"/>.</summary>
         public static long MaxCacheSizeMB { get; set; } = 10240;
         /// <summary>Instance accessor for <see cref="MaxCacheSizeMB"/>.</summary>

@@ -392,6 +392,11 @@ namespace ModSync.Core.Services
                     cancellationToken.ThrowIfCancellationRequested();
 
                     string relativePath = NetFrameworkCompatibility.GetRelativePath(_gameDirectory, gameFile);
+                    if (CheckpointPaths.IsUnderImmutableVanillaDirectory(relativePath))
+                    {
+                        continue;
+                    }
+
                     string gitPath = Path.Combine(_gitDirectory, relativePath);
 
                     Directory.CreateDirectory(Path.GetDirectoryName(gitPath));
@@ -418,6 +423,11 @@ namespace ModSync.Core.Services
                 foreach (string gameFile in gameFiles)
                 {
                     string relativePath = NetFrameworkCompatibility.GetRelativePath(_gameDirectory, gameFile);
+                    if (CheckpointPaths.IsUnderImmutableVanillaDirectory(relativePath))
+                    {
+                        continue;
+                    }
+
                     string gitPath = Path.Combine(_gitDirectory, relativePath);
 
                     if (!File.Exists(gitPath))
