@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using JetBrains.Annotations;
 
 using ModSync.Core.FileSystemUtils;
+using ModSync.Core.Services.Interpretation;
 using ModSync.Core.TSLPatcher;
 using ModSync.Core.Utility;
 
@@ -3014,6 +3015,7 @@ namespace ModSync.Core.Services
             }
 
             ArbitrateMutuallyExclusiveNamespaces(component, prose);
+            ApplyConfiguredExceptions(component);
 
             Logger.LogVerbose(
                 $"[AutoInstructionGenerator] Namespace selection for '{component.Name}': "
@@ -3022,24 +3024,26 @@ namespace ModSync.Core.Services
                     component.Options.Where(o => o != null).Select(o => $"{o.Name}={(o.IsSelected ? "on" : "off")}")));
         }
 
+        [NotNull]
+        private static GuideInterpretationPolicy Policy => GuideInterpretationPolicyStore.Current;
+
         private static bool IsPrimaryNamespaceOption([NotNull] Option option)
         {
-            string name = (option.Name ?? string.Empty).ToLowerInvariant();
-            string desc = (option.Description ?? string.Empty).ToLowerInvariant();
-            if (name.Contains("optional", StringComparison.Ordinal)
-                || desc.Contains("(optional)", StringComparison.Ordinal))
+            if (!Policy.Matching.PreferPrimaryNamespace)
             {
                 return false;
             }
 
-            return name.Contains("main", StringComparison.Ordinal)
-                || name.Contains("base", StringComparison.Ordinal)
-                || name.Contains("default", StringComparison.Ordinal)
-                || name.Contains("basic", StringComparison.Ordinal)
-                || name.Contains("standard", StringComparison.Ordinal)
-                || desc.Contains("default installation", StringComparison.Ordinal)
-                || desc.Contains("main installation", StringComparison.Ordinal)
-                || desc.Contains("the default", StringComparison.Ordinal);
+            string name = (option.Name ?? string.Empty).ToLowerInvariant();
+            string desc = (option.Description ?? string.Empty).ToLowerInvariant();
+            if (Policy.ContainsAny(name, Policy.Tokens.ExcludeFromPrimaryWhenAlso)
+                || Policy.ContainsAny(desc, Policy.Tokens.ExcludeFromPrimaryWhenAlso))
+            {
+                return false;
+            }
+
+            return Policy.ContainsAny(name, Policy.Tokens.PrimaryNamespace)
+                || Policy.ContainsAny(desc, Policy.Tokens.PrimaryDescriptionPhrases);
         }
 
         /// <summary>
@@ -3064,11 +3068,11 @@ namespace ModSync.Core.Services
 
             // "…and install it as well", "also install X" — the guide is stacking namespaces on top
             // of the primary, so they are additive and must not be arbitrated down to one.
-            if (Regex.IsMatch(
-                    prose,
-                    @"\b(as\s+well|also\s+install|in\s+addition|additionally|and\s+install\s+it)\b",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                    TimeSpan.FromSeconds(1)))
+            Regex additive = Policy.CompileOrFallback(
+                "additive_namespace",
+                @"\b(as\s+well|also\s+install|in\s+addition|additionally|and\s+install\s+it)\b",
+                RegexOptions.IgnoreCase);
+            if (additive.IsMatch(prose))
             {
                 return;
             }
@@ -3076,7 +3080,8 @@ namespace ModSync.Core.Services
             // Compatibility / optional namespaces stack on the primary ("install main, then
             // re-run the 100% Brown compatibility patch"). They must not compete with Basic.
             List<Option> alternatives = component.Options
-                .Where(o => o != null && o.IsSelected && !IsOptionalNamespaceOption(o))
+                .Where(o => o != null && o.IsSelected
+                    && (!Policy.Matching.ExcludeOptionalFromMutex || !IsOptionalNamespaceOption(o)))
                 .ToList();
             if (alternatives.Count < 2)
             {
@@ -3157,18 +3162,21 @@ namespace ModSync.Core.Services
 
             // Require "install" after the name so "…Ambush install, … choose Restoration instead"
             // cannot swallow both names and then pick the longer one.
-            Match named = Regex.Match(
-                prose,
+            if (!Policy.Matching.PersonallyRecommendNamedInstall)
+            {
+                return null;
+            }
+
+            Match named = Policy.CompileOrFallback(
+                "personally_recommend_named_install",
                 @"\b(?:I\s+)?personally\s+recommend(?:\s+the)?\s+[""“]?(?<name>[^""”\n,.]{3,60}?)[""”]?\s+install\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                TimeSpan.FromSeconds(1));
+                RegexOptions.IgnoreCase).Match(prose);
             if (!named.Success)
             {
-                named = Regex.Match(
-                    prose,
+                named = Policy.CompileOrFallback(
+                    "default_install_named",
                     @"\bthe\s+default\s+install\s*,\s*[""“]?(?<name>[^""”\n,.]{3,60}?)[""”]?(?=\s|,|\.|$)",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                    TimeSpan.FromSeconds(1));
+                    RegexOptions.IgnoreCase).Match(prose);
             }
 
             if (!named.Success)
@@ -3202,19 +3210,27 @@ namespace ModSync.Core.Services
 
         private static bool PhraseContainsOptionName([NotNull] string phrase, [NotNull] Option option)
         {
-            string canonPhrase = Regex.Replace(
-                (phrase ?? string.Empty).ToLowerInvariant().Replace("&", " and "),
+            if (!Policy.Matching.OptionNameContainsPhrase)
+            {
+                return string.Equals(phrase?.Trim(), option.Name?.Trim(), StringComparison.OrdinalIgnoreCase);
+            }
+
+            string canonPhrase = CanonicalizePhrase(phrase);
+            string canonName = CanonicalizePhrase(option.Name);
+            return canonName.Length >= Policy.Matching.MinPhraseContainsOptionNameLength
+                && canonPhrase.IndexOf(canonName, StringComparison.Ordinal) >= 0;
+        }
+
+        [NotNull]
+        private static string CanonicalizePhrase([CanBeNull] string value)
+        {
+            Regex splitter = Policy.CompileOrFallback(
+                "canonicalize_non_alnum",
                 @"[^a-z0-9]+",
-                " ",
-                RegexOptions.None,
-                TimeSpan.FromSeconds(1)).Trim();
-            string canonName = Regex.Replace(
-                (option.Name ?? string.Empty).ToLowerInvariant().Replace("&", " and "),
-                @"[^a-z0-9]+",
-                " ",
-                RegexOptions.None,
-                TimeSpan.FromSeconds(1)).Trim();
-            return canonName.Length >= 6 && canonPhrase.IndexOf(canonName, StringComparison.Ordinal) >= 0;
+                RegexOptions.None);
+            return splitter.Replace(
+                (value ?? string.Empty).ToLowerInvariant().Replace("&", " and ", StringComparison.Ordinal),
+                " ").Trim();
         }
 
         /// <summary>
@@ -3228,11 +3244,10 @@ namespace ModSync.Core.Services
                 return -1;
             }
 
-            Match m = Regex.Match(
-                prose,
+            Match m = Policy.CompileOrFallback(
+                "explicit_option_ordinal",
                 @"\boption\s+(\d{1,2})\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                TimeSpan.FromSeconds(1));
+                RegexOptions.IgnoreCase).Match(prose);
             if (!m.Success || !int.TryParse(m.Groups[1].Value, out int n) || n <= 0)
             {
                 return -1;
@@ -3255,16 +3270,12 @@ namespace ModSync.Core.Services
                 return 0d;
             }
 
-            // Normalise so "Body & Lightsaber" matches "Body and Lightsaber".
-            string Canon(string s) => Regex.Replace(
-                s.Replace("&", " and "), @"[^a-z0-9]+", " ", RegexOptions.None, TimeSpan.FromSeconds(1)).Trim();
-
-            string canonProse = Canon(lower);
-            string canonName = Canon(name);
+            string canonProse = CanonicalizePhrase(lower);
+            string canonName = CanonicalizePhrase(name);
             if (canonName.Length > 0 && canonProse.Contains(canonName, StringComparison.Ordinal))
             {
                 // Longer exact phrases are more specific than shorter ones they contain.
-                return 1000d + canonName.Length;
+                return Policy.Matching.ExactPhraseScoreBase + canonName.Length;
             }
 
             List<string> tokens = SignificantOptionTokens(option);
@@ -3275,17 +3286,14 @@ namespace ModSync.Core.Services
 
             int matched = tokens.Count(t => canonProse.Contains(t, StringComparison.Ordinal));
             int unmatched = tokens.Count - matched;
-            return matched - (0.5d * unmatched);
+            return matched - (Policy.Matching.UnmatchedTokenPenalty * unmatched);
         }
 
         private static bool IsOptionalNamespaceOption([NotNull] Option option)
         {
             string blob = ((option.Name ?? string.Empty) + " " + (option.Description ?? string.Empty))
                 .ToLowerInvariant();
-            return blob.Contains("optional", StringComparison.Ordinal)
-                || blob.Contains("compatibility", StringComparison.Ordinal)
-                || blob.Contains("compat", StringComparison.Ordinal)
-                || blob.Contains("integration", StringComparison.Ordinal);
+            return Policy.ContainsAny(blob, Policy.Tokens.OptionalNamespace);
         }
 
         private static bool GuideExcludesNamespace([CanBeNull] string prose, [NotNull] Option option)
@@ -3296,11 +3304,14 @@ namespace ModSync.Core.Services
             }
 
             string lower = prose.ToLowerInvariant();
+            string template = Policy.TryGetPattern("guide_excludes_namespace")
+                ?? @"\b(?:skip|ignore|do\s+not\s+install|don't\s+install|recommend\s+against)\b[^\n.]{0,80}\b{token}\b";
             foreach (string token in SignificantOptionTokens(option))
             {
+                string pattern = template.Replace("{token}", Regex.Escape(token), StringComparison.Ordinal);
                 if (Regex.IsMatch(
                         lower,
-                        $@"\b(?:skip|ignore|do\s+not\s+install|don't\s+install|recommend\s+against)\b[^\n.]{{0,80}}\b{Regex.Escape(token)}\b",
+                        pattern,
                         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
                         TimeSpan.FromSeconds(1)))
                 {
@@ -3327,10 +3338,7 @@ namespace ModSync.Core.Services
 
             // "install the main", "base install", "re-run ... optional", "also install X"
             if (IsPrimaryNamespaceOption(option)
-                && (lower.Contains("main", StringComparison.Ordinal)
-                    || lower.Contains("base install", StringComparison.Ordinal)
-                    || lower.Contains("install the mod", StringComparison.Ordinal)
-                    || lower.Contains("run the installer", StringComparison.Ordinal)))
+                && Policy.ContainsAny(lower, Policy.Tokens.GuideRequestsPrimary))
             {
                 return true;
             }
@@ -3339,11 +3347,7 @@ namespace ModSync.Core.Services
             // when its condition mod is present (checked by the caller). Bare "re-run" alone must
             // NOT select every optional (PAVOR only names the K1CP compat option).
             if (IsOptionalNamespaceOption(option)
-                && (lower.Contains("each of the optional", StringComparison.Ordinal)
-                    || lower.Contains("once for each of the optional", StringComparison.Ordinal)
-                    || lower.Contains("for each of the optional installs", StringComparison.Ordinal)
-                    || lower.Contains("all remaining content", StringComparison.Ordinal)
-                    || lower.Contains("also install", StringComparison.Ordinal)))
+                && Policy.ContainsAny(lower, Policy.Tokens.GuideRequestsOptional))
             {
                 return true;
             }
@@ -3354,14 +3358,16 @@ namespace ModSync.Core.Services
                 return false;
             }
 
-            // A single distinctive token (≥6 chars) is enough: "blasters", "loadscreens", "k1cp".
-            if (hits >= 1 && tokens.Any(t => t.Length >= 6 && lower.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0))
+            // A single distinctive token is enough when it meets the configured length.
+            if (hits >= 1 && tokens.Any(t =>
+                    t.Length >= Policy.Matching.MinSingleHitTokenLength
+                    && lower.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0))
             {
                 return true;
             }
 
-            // Short tokens like "k1cp" (length 4) when explicitly named in the guide.
-            if (hits >= 1 && tokens.Any(t => t.Length >= 4 && lower.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0
+            if (hits >= 1 && tokens.Any(t => t.Length >= Policy.Matching.MinNamedHitTokenLength
+                && lower.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0
                 && (lower.Contains("select the " + t, StringComparison.OrdinalIgnoreCase)
                     || lower.Contains(t + " compatibility", StringComparison.OrdinalIgnoreCase)
                     || lower.Contains(t + " compat", StringComparison.OrdinalIgnoreCase))))
@@ -3387,11 +3393,10 @@ namespace ModSync.Core.Services
                 return foreignOptionSelected;
             }
 
-            bool proseNamesSpecificForeignOption = Regex.IsMatch(
-                prose ?? string.Empty,
+            bool proseNamesSpecificForeignOption = Policy.CompileOrFallback(
+                "prose_names_specific_foreign_option",
                 @"['\u2019]s\s+.+\s+option\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                TimeSpan.FromSeconds(1));
+                RegexOptions.IgnoreCase).IsMatch(prose ?? string.Empty);
             if (!proseNamesSpecificForeignOption)
             {
                 foreach (string token in SignificantOptionTokens(option))
@@ -3405,11 +3410,10 @@ namespace ModSync.Core.Services
 
             // "if using X" / "if you utilize X" — require X among build components.
             string blob = ((option.Name ?? string.Empty) + "\n" + (option.Description ?? string.Empty) + "\n" + (prose ?? string.Empty));
-            MatchCollection conditions = Regex.Matches(
-                blob,
+            MatchCollection conditions = Policy.CompileOrFallback(
+                "if_using_condition",
                 @"\bif\s+(?:using|you\s+utilize|you\s+use|installing)\s+(?:the\s+)?(?<mod>[A-Za-z0-9][A-Za-z0-9\s''\-%&.]{2,80}?)(?:\s*,|\s*\.|$|\s+and\b|\s+then\b|\s+re-)",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                TimeSpan.FromSeconds(2));
+                RegexOptions.IgnoreCase).Matches(blob);
 
             foreach (Match match in conditions)
             {
@@ -3437,11 +3441,11 @@ namespace ModSync.Core.Services
             // Unresolved "if you use …" must stay off (the % in "100% Brown" used to
             // abort the capture, then this fallback installed the compatibility patch).
             if (conditions.Count == 0
-                && Regex.IsMatch(
-                    prose ?? string.Empty,
+                && Policy.Matching.UnresolvedIfYouUseDefaultsOff
+                && Policy.CompileOrFallback(
+                    "if_you_use_unresolved",
                     @"\bif\s+(?:using|you\s+use|you\s+utilize|installing)\b",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                    TimeSpan.FromSeconds(1)))
+                    RegexOptions.IgnoreCase).IsMatch(prose ?? string.Empty))
             {
                 return false;
             }
@@ -3461,23 +3465,20 @@ namespace ModSync.Core.Services
             out bool namedOptionSelected)
         {
             namedOptionSelected = false;
-            Match possessive = Regex.Match(
-                phrase,
+            Match possessive = Policy.CompileOrFallback(
+                "possessive_option_condition",
                 @"^(?<mod>.+?)['\u2019]s\s+(?<opt>.+?)(?:\s+option)?\s*$",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                TimeSpan.FromSeconds(1));
+                RegexOptions.IgnoreCase).Match(phrase);
             if (!possessive.Success)
             {
                 return false;
             }
 
             string modName = possessive.Groups["mod"].Value.Trim();
-            string optionPhrase = Regex.Replace(
-                possessive.Groups["opt"].Value.Trim(),
+            string optionPhrase = Policy.CompileOrFallback(
+                "strip_trailing_option",
                 @"\s+option$",
-                string.Empty,
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                TimeSpan.FromSeconds(1)).Trim();
+                RegexOptions.IgnoreCase).Replace(possessive.Groups["opt"].Value.Trim(), string.Empty).Trim();
             if (modName.Length < 3 || optionPhrase.Length < 3)
             {
                 return false;
@@ -3508,7 +3509,7 @@ namespace ModSync.Core.Services
         {
             foreignOptionSelected = false;
             string selfName = option.Name ?? string.Empty;
-            if (selfName.Length < 10)
+            if (selfName.Length < Policy.Matching.MinSelfNameLengthForForeignMatch)
             {
                 return false;
             }
@@ -3527,7 +3528,7 @@ namespace ModSync.Core.Services
                     if (foreign == null
                         || ReferenceEquals(foreign, option)
                         || string.IsNullOrWhiteSpace(foreign.Name)
-                        || foreign.Name.Length < 8
+                        || foreign.Name.Length < Policy.Matching.MinForeignOptionNameLength
                         || foreign.Name.Length <= bestLen)
                     {
                         continue;
@@ -3557,15 +3558,13 @@ namespace ModSync.Core.Services
 
         private static bool OptionNameContainsPhrase([NotNull] Option option, [NotNull] string phrase)
         {
-            string Canon(string value) => Regex.Replace(
-                (value ?? string.Empty).ToLowerInvariant().Replace("&", " and ", StringComparison.Ordinal),
-                @"[^a-z0-9]+",
-                " ",
-                RegexOptions.None,
-                TimeSpan.FromSeconds(1)).Trim();
+            if (!Policy.Matching.OptionNameContainsPhrase)
+            {
+                return string.Equals(option.Name?.Trim(), phrase?.Trim(), StringComparison.OrdinalIgnoreCase);
+            }
 
-            string optionCanon = Canon(option.Name);
-            string phraseCanon = Canon(phrase);
+            string optionCanon = CanonicalizePhrase(option.Name);
+            string phraseCanon = CanonicalizePhrase(phrase);
             if (optionCanon.Length == 0 || phraseCanon.Length == 0)
             {
                 return false;
@@ -3580,7 +3579,7 @@ namespace ModSync.Core.Services
             [NotNull] string phrase)
         {
             string needle = ArchiveResolver.Normalize(phrase);
-            if (needle.Length < 4)
+            if (needle.Length < Policy.Matching.MinComponentNameLength)
             {
                 return false;
             }
@@ -3594,14 +3593,15 @@ namespace ModSync.Core.Services
 
                 string name = ArchiveResolver.Normalize(component.Name);
                 string heading = ArchiveResolver.Normalize(component.Heading);
-                if (name.Length >= 4
+                int min = Policy.Matching.MinComponentNameLength;
+                if (name.Length >= min
                     && (name.IndexOf(needle, StringComparison.Ordinal) >= 0
                         || needle.IndexOf(name, StringComparison.Ordinal) >= 0))
                 {
                     return true;
                 }
 
-                if (heading.Length >= 4
+                if (heading.Length >= min
                     && (heading.IndexOf(needle, StringComparison.Ordinal) >= 0
                         || needle.IndexOf(heading, StringComparison.Ordinal) >= 0))
                 {
@@ -3631,19 +3631,66 @@ namespace ModSync.Core.Services
         private static List<string> SignificantOptionTokens([NotNull] Option option)
         {
             string blob = (option.Name ?? string.Empty) + " " + (option.Description ?? string.Empty);
-            string[] stop =
-            {
-                "optional", "option", "install", "installation", "compatibility", "compat",
-                "patch", "integration", "with", "the", "and", "for", "from", "this", "that",
-                "adds", "will", "mod", "main", "base", "default", "basic", "standard",
-                "select", "selected", "have", "installed", "using", "you", "your",
-                "first", "then", "also", "well", "once", "more", "each",
-            };
-            return Regex.Split(blob.ToLowerInvariant(), @"[^a-z0-9]+", RegexOptions.None, TimeSpan.FromSeconds(1))
-                .Where(t => t.Length >= 4)
+            HashSet<string> stop = new HashSet<string>(
+                Policy.Tokens.SignificantTokenStopwords,
+                StringComparer.Ordinal);
+            Regex splitter = Policy.CompileOrFallback(
+                "canonicalize_non_alnum",
+                @"[^a-z0-9]+",
+                RegexOptions.None);
+            return splitter.Split(blob.ToLowerInvariant())
+                .Where(t => t.Length >= Policy.Matching.MinOptionTokenLength)
                 .Where(t => !stop.Contains(t))
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
+        }
+
+        private static void ApplyConfiguredExceptions([NotNull] ModComponent component)
+        {
+            IReadOnlyList<GuideInterpretationPolicy.InterpretationException> exceptions = Policy.Exceptions;
+            if (exceptions == null || exceptions.Count == 0 || component?.Options == null)
+            {
+                return;
+            }
+
+            string componentBlob = ((component.Name ?? string.Empty) + " " + (component.Heading ?? string.Empty))
+                .ToLowerInvariant();
+            foreach (GuideInterpretationPolicy.InterpretationException exception in exceptions)
+            {
+                if (exception == null || !exception.Select.HasValue)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(exception.WhenComponentContains)
+                    && componentBlob.IndexOf(
+                        exception.WhenComponentContains.ToLowerInvariant(),
+                        StringComparison.Ordinal) < 0)
+                {
+                    continue;
+                }
+
+                foreach (Option option in component.Options)
+                {
+                    if (option == null)
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(exception.WhenOptionContains)
+                        && (option.Name ?? string.Empty).IndexOf(
+                            exception.WhenOptionContains,
+                            StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        continue;
+                    }
+
+                    option.IsSelected = exception.Select.Value;
+                    Logger.LogVerbose(
+                        $"[AutoInstructionGenerator] Interpretation exception '{exception.Id ?? "(unnamed)"}' "
+                        + $"set '{option.Name}' = {(option.IsSelected ? "on" : "off")}.");
+                }
+            }
         }
 
         /// <summary>

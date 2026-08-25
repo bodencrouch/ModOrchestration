@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 
 using JetBrains.Annotations;
 
+using ModSync.Core.Services.Interpretation;
 using ModSync.Core.Utility;
 
 using Newtonsoft.Json.Linq;
@@ -1500,10 +1501,46 @@ namespace ModSync.Core.Services
         private static bool ComponentLooksLikeAPatch([CanBeNull] string componentName)
         {
             string normalized = Normalize(componentName);
-            return normalized.Contains("compatibilitypatch", StringComparison.Ordinal)
-                || normalized.Contains("compatpatch", StringComparison.Ordinal)
-                || normalized.Contains("patchfor", StringComparison.Ordinal)
-                || normalized.EndsWith("patches", StringComparison.Ordinal);
+            GuideInterpretationPolicy.FilterRules filters = GuideInterpretationPolicyStore.Current.Filters;
+            if (ContainsAnyToken(normalized, filters.CompatArchiveTokens)
+                || ContainsAnyToken(normalized, filters.CompatArchiveContains))
+            {
+                return true;
+            }
+
+            IReadOnlyList<string> suffixes = filters.CompatArchiveSuffixes;
+            if (suffixes != null)
+            {
+                for (int i = 0; i < suffixes.Count; i++)
+                {
+                    if (!string.IsNullOrEmpty(suffixes[i])
+                        && normalized.EndsWith(suffixes[i], StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool ContainsAnyToken([NotNull] string normalized, [CanBeNull] IReadOnlyList<string> tokens)
+        {
+            if (tokens == null || tokens.Count == 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < tokens.Count; i++)
+            {
+                if (!string.IsNullOrEmpty(tokens[i])
+                    && normalized.Contains(tokens[i], StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool ComponentLooksLikeAPatchSet([CanBeNull] string componentName)
@@ -2585,7 +2622,10 @@ namespace ModSync.Core.Services
 
         private static bool NameLooksLikeCompatibilityPatch([CanBeNull] string name)
         {
-            return Normalize(name).Contains("compatibilitypatch", StringComparison.Ordinal);
+            string normalized = Normalize(name);
+            IReadOnlyList<string> tokens = GuideInterpretationPolicyStore.Current.Filters.CompatArchiveTokens;
+            return ContainsAnyToken(normalized, tokens)
+                || normalized.Contains("compatibilitypatch", StringComparison.Ordinal);
         }
 
         private static readonly string[] RealArchiveExtensions = { ".zip", ".rar", ".7z" };

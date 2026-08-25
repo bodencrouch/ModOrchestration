@@ -11,6 +11,8 @@ using System.Text.RegularExpressions;
 
 using JetBrains.Annotations;
 
+using ModSync.Core.Services.Interpretation;
+
 namespace ModSync.Core.Parsing
 {
     /// <summary>
@@ -472,10 +474,175 @@ namespace ModSync.Core.Parsing
             ["your movies folder"] = @"<<kotorDirectory>>\Movies",
         };
 
+        private static int s_boundPolicyVersion = -1;
+        private static List<InstructionPattern> s_boundInstructionPatterns;
+        private static List<Regex> s_boundRecommendationPatterns;
+        private static Dictionary<string, Regex> s_boundEntityPatterns;
+        private static Dictionary<string, string> s_boundDestinationMappings;
+
         public NaturalLanguageInstructionParser([CanBeNull] Action<string> logInfo = null, [CanBeNull] Action<string> logVerbose = null)
         {
             _logInfo = logInfo ?? (_ => { });
             _logVerbose = logVerbose ?? (_ => { });
+        }
+
+        [NotNull]
+        private static IReadOnlyList<InstructionPattern> ActiveInstructionPatterns()
+        {
+            EnsurePolicyBindings();
+            return s_boundInstructionPatterns ?? s_instructionPatterns;
+        }
+
+        [NotNull]
+        private static IReadOnlyList<Regex> ActiveRecommendationPatterns()
+        {
+            EnsurePolicyBindings();
+            return s_boundRecommendationPatterns ?? s_recommendationPatterns;
+        }
+
+        [NotNull]
+        private static Dictionary<string, Regex> ActiveEntityPatterns()
+        {
+            EnsurePolicyBindings();
+            return s_boundEntityPatterns ?? s_entityPatterns;
+        }
+
+        [NotNull]
+        private static Dictionary<string, string> ActiveDestinationMappings()
+        {
+            EnsurePolicyBindings();
+            return s_boundDestinationMappings ?? s_destinationMappings;
+        }
+
+        private static void EnsurePolicyBindings()
+        {
+            GuideInterpretationPolicy policy = GuideInterpretationPolicyStore.Current;
+            if (s_boundPolicyVersion == policy.Version && s_boundInstructionPatterns != null)
+            {
+                return;
+            }
+
+            s_boundPolicyVersion = policy.Version;
+            s_boundInstructionPatterns = BindInstructionPatterns(policy);
+            s_boundRecommendationPatterns = BindRecommendationPatterns(policy);
+            s_boundEntityPatterns = BindEntityPatterns(policy);
+            s_boundDestinationMappings = BindDestinations(policy);
+        }
+
+        [CanBeNull]
+        private static List<InstructionPattern> BindInstructionPatterns([NotNull] GuideInterpretationPolicy policy)
+        {
+            if (policy.NlpInstructions == null || policy.NlpInstructions.Count == 0)
+            {
+                return s_instructionPatterns;
+            }
+
+            var bound = new List<InstructionPattern>(policy.NlpInstructions.Count);
+            foreach (GuideInterpretationPolicy.NlpInstructionSpec spec in policy.NlpInstructions)
+            {
+                if (spec == null || string.IsNullOrWhiteSpace(spec.Pattern))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    bound.Add(new InstructionPattern(
+                        spec.Pattern,
+                        spec.Action,
+                        GuideInterpretationPolicyLoader.ParseRegexOptions(spec.Options)));
+                }
+                catch (ArgumentException ex)
+                {
+                    Logger.LogWarning($"[NLP] Skipping invalid instruction pattern '{spec.Id}': {ex.Message}");
+                }
+            }
+
+            return bound.Count > 0 ? bound : s_instructionPatterns;
+        }
+
+        [CanBeNull]
+        private static List<Regex> BindRecommendationPatterns([NotNull] GuideInterpretationPolicy policy)
+        {
+            if (policy.Recommendations == null || policy.Recommendations.Count == 0)
+            {
+                return s_recommendationPatterns;
+            }
+
+            var bound = new List<Regex>(policy.Recommendations.Count);
+            foreach (GuideInterpretationPolicy.NlpPatternSpec spec in policy.Recommendations)
+            {
+                if (spec == null || string.IsNullOrWhiteSpace(spec.Pattern))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    bound.Add(new Regex(
+                        spec.Pattern,
+                        GuideInterpretationPolicyLoader.ParseRegexOptions(spec.Options) | RegexOptions.Compiled,
+                        TimeSpan.FromSeconds(2)));
+                }
+                catch (ArgumentException)
+                {
+                    // Keep going; remaining patterns still apply.
+                }
+            }
+
+            return bound.Count > 0 ? bound : s_recommendationPatterns;
+        }
+
+        [CanBeNull]
+        private static Dictionary<string, Regex> BindEntityPatterns([NotNull] GuideInterpretationPolicy policy)
+        {
+            if (policy.Entities == null || policy.Entities.Count == 0)
+            {
+                return s_entityPatterns;
+            }
+
+            var bound = new Dictionary<string, Regex>(s_entityPatterns, StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, GuideInterpretationPolicy.NlpPatternSpec> pair in policy.Entities)
+            {
+                if (pair.Value == null || string.IsNullOrWhiteSpace(pair.Value.Pattern))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    bound[pair.Key] = new Regex(
+                        pair.Value.Pattern,
+                        GuideInterpretationPolicyLoader.ParseRegexOptions(pair.Value.Options) | RegexOptions.Compiled,
+                        TimeSpan.FromSeconds(2));
+                }
+                catch (ArgumentException)
+                {
+                    // Keep the compiled-in fallback for this key.
+                }
+            }
+
+            return bound;
+        }
+
+        [CanBeNull]
+        private static Dictionary<string, string> BindDestinations([NotNull] GuideInterpretationPolicy policy)
+        {
+            if (policy.Destinations == null || policy.Destinations.Count == 0)
+            {
+                return s_destinationMappings;
+            }
+
+            var bound = new Dictionary<string, string>(s_destinationMappings, StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, string> pair in policy.Destinations)
+            {
+                if (!string.IsNullOrWhiteSpace(pair.Key) && pair.Value != null)
+                {
+                    bound[pair.Key] = pair.Value;
+                }
+            }
+
+            return bound;
         }
 
         /// <summary>
@@ -821,7 +988,7 @@ namespace ModSync.Core.Parsing
             }
 
             // Try each instruction pattern
-            foreach (InstructionPattern pattern in s_instructionPatterns)
+            foreach (InstructionPattern pattern in ActiveInstructionPatterns())
             {
                 Match match = pattern.Regex.Match(unit);
                 if (!match.Success)
@@ -1096,11 +1263,11 @@ namespace ModSync.Core.Parsing
             }
 
             // === Check for Overwrite Instructions ===
-            if (s_entityPatterns["overwrite"].IsMatch(unit))
+            if (ActiveEntityPatterns()["overwrite"].IsMatch(unit))
             {
                 instruction.Overwrite = true;
             }
-            else if (s_entityPatterns["no_overwrite"].IsMatch(unit))
+            else if (ActiveEntityPatterns()["no_overwrite"].IsMatch(unit))
             {
                 instruction.Overwrite = false;
             }
@@ -1217,10 +1384,10 @@ namespace ModSync.Core.Parsing
             var sources = new List<string>();
 
             // === Check for file ranges ===
-            Match rangeMatch = s_entityPatterns["file_range"].Match(fullUnit);
+            Match rangeMatch = ActiveEntityPatterns()["file_range"].Match(fullUnit);
             if (!rangeMatch.Success)
             {
-                rangeMatch = s_entityPatterns["numeric_range"].Match(fullUnit);
+                rangeMatch = ActiveEntityPatterns()["numeric_range"].Match(fullUnit);
             }
 
             if (rangeMatch.Success)
@@ -1232,10 +1399,10 @@ namespace ModSync.Core.Parsing
             }
 
             // === Check for folder references ===
-            Match folderMatch = s_entityPatterns["folder_from"].Match(sourceText);
+            Match folderMatch = ActiveEntityPatterns()["folder_from"].Match(sourceText);
             if (!folderMatch.Success)
             {
-                folderMatch = s_entityPatterns["folder_name"].Match(sourceText);
+                folderMatch = ActiveEntityPatterns()["folder_name"].Match(sourceText);
             }
 
             if (folderMatch.Success)
@@ -1255,7 +1422,7 @@ namespace ModSync.Core.Parsing
             }
 
             // === Check for file lists ===
-            Match fileListMatch = s_entityPatterns["file_list"].Match(sourceText);
+            Match fileListMatch = ActiveEntityPatterns()["file_list"].Match(sourceText);
             if (fileListMatch.Success)
             {
                 string filesText = fileListMatch.Groups["files"].Value;
@@ -1271,7 +1438,7 @@ namespace ModSync.Core.Parsing
             }
 
             // === Check for wildcards ===
-            Match wildcardMatch = s_entityPatterns["wildcard"].Match(sourceText);
+            Match wildcardMatch = ActiveEntityPatterns()["wildcard"].Match(sourceText);
             if (wildcardMatch.Success)
             {
                 string pattern = wildcardMatch.Groups["pattern"].Value;
@@ -1280,7 +1447,7 @@ namespace ModSync.Core.Parsing
             }
 
             // === Check for single file ===
-            Match singleFileMatch = s_entityPatterns["single_file"].Match(sourceText);
+            Match singleFileMatch = ActiveEntityPatterns()["single_file"].Match(sourceText);
             if (singleFileMatch.Success)
             {
                 string file = singleFileMatch.Groups["file"].Value.Trim('"', '\'');
@@ -1404,7 +1571,7 @@ namespace ModSync.Core.Parsing
         private List<string> ApplyExclusions([NotNull] IReadOnlyList<string> sources, [NotNull] string fullUnit)
         {
             // Check for "EXCEPT" clauses
-            Match exceptMatch = s_entityPatterns["except"].Match(fullUnit);
+            Match exceptMatch = ActiveEntityPatterns()["except"].Match(fullUnit);
             if (exceptMatch.Success)
             {
                 string exceptionsText = exceptMatch.Groups["exceptions"].Value;
@@ -1421,7 +1588,7 @@ namespace ModSync.Core.Parsing
             }
 
             // Check for "IGNORE" clauses
-            Match ignoreMatch = s_entityPatterns["ignore"].Match(fullUnit);
+            Match ignoreMatch = ActiveEntityPatterns()["ignore"].Match(fullUnit);
             if (ignoreMatch.Success)
             {
                 string ignoreText = ignoreMatch.Groups["ignore"].Value;
@@ -1458,7 +1625,7 @@ namespace ModSync.Core.Parsing
             excluded.AddRange(ParseFileList(exceptionText));
 
             // Check for folder references
-            Match folderMatch = s_entityPatterns["folder_name"].Match(exceptionText);
+            Match folderMatch = ActiveEntityPatterns()["folder_name"].Match(exceptionText);
             if (folderMatch.Success)
             {
                 string folder = folderMatch.Groups["folder"].Value.Trim();
@@ -1477,7 +1644,7 @@ namespace ModSync.Core.Parsing
             string lower = destination.ToLowerInvariant().Trim();
 
             // Check for direct mappings
-            foreach (KeyValuePair<string, string> mapping in s_destinationMappings)
+            foreach (KeyValuePair<string, string> mapping in ActiveDestinationMappings())
             {
                 if (lower.IndexOf(mapping.Key, StringComparison.OrdinalIgnoreCase) >= 0 || lower.Equals(mapping.Key.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
                 {
@@ -1572,7 +1739,7 @@ namespace ModSync.Core.Parsing
             var options = new List<Option>();
 
             // Look for recommendations
-            foreach (Regex recommendPattern in s_recommendationPatterns)
+            foreach (Regex recommendPattern in ActiveRecommendationPatterns())
             {
                 MatchCollection matches = recommendPattern.Matches(downloadText);
                 foreach (Match match in matches)

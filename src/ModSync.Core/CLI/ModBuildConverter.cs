@@ -380,6 +380,9 @@ namespace ModSync.Core.CLI
 
             [Option("non-interactive", Required = false, HelpText = "Force non-interactive FOMOD behavior (warn-continue or choices file).")]
             public bool NonInteractive { get; set; }
+
+            [Option("interpretation-file", Required = false, HelpText = "Overlay TOML for guide-interpretation policy (regex, tokens, exceptions). Merges over bundled defaults and AppData/ModSync/guide-interpretation.toml.")]
+            public string InterpretationFile { get; set; }
         }
 
         [Verb("convert", HelpText = "Convert between formats or merge instruction sets, output to stdout or file")]

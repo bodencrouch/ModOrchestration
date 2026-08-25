@@ -8,6 +8,8 @@ using System.IO;
 
 using JetBrains.Annotations;
 
+using ModSync.Core.Services.Interpretation;
+
 namespace ModSync.Core.Services
 {
     /// <summary>
@@ -93,33 +95,54 @@ namespace ModSync.Core.Services
             }
 
             string extension = Path.GetExtension(fileName);
+            GuideInterpretationPolicy.FilterRules filters = GuideInterpretationPolicyStore.Current.Filters;
+            HashSet<string> protectedExt = ToSet(filters.ProtectedGameExtensions, ProtectedGameExtensions);
+            HashSet<string> excludedExt = ToSet(filters.NonGameExtensions, ExcludedExtensions);
+            HashSet<string> excludedNames = ToSet(filters.NonGameFileNames, ExcludedFileNames);
+            string appleDouble = string.IsNullOrEmpty(filters.AppleDoublePrefix)
+                ? "._"
+                : filters.AppleDoublePrefix;
+            string officeLock = string.IsNullOrEmpty(filters.OfficeLockPrefix)
+                ? ".~lock"
+                : filters.OfficeLockPrefix;
 
             // A real resource always wins, whatever its name looks like.
-            if (!string.IsNullOrEmpty(extension) && ProtectedGameExtensions.Contains(extension))
+            if (!string.IsNullOrEmpty(extension) && protectedExt.Contains(extension))
             {
                 // AppleDouble sidecars carry the resource's own extension ("._p_attnh1.tga"), so
                 // they must still be rejected.
-                return fileName.StartsWith("._", StringComparison.Ordinal);
+                return fileName.StartsWith(appleDouble, StringComparison.Ordinal);
             }
 
-            // macOS AppleDouble resource forks.
-            if (fileName.StartsWith("._", StringComparison.Ordinal))
+            if (fileName.StartsWith(appleDouble, StringComparison.Ordinal))
             {
                 return true;
             }
 
-            // LibreOffice / OpenOffice lock files left beside an open readme.
-            if (fileName.StartsWith(".~lock", StringComparison.OrdinalIgnoreCase))
+            if (fileName.StartsWith(officeLock, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
 
-            if (ExcludedFileNames.Contains(fileName))
+            if (excludedNames.Contains(fileName))
             {
                 return true;
             }
 
-            return !string.IsNullOrEmpty(extension) && ExcludedExtensions.Contains(extension);
+            return !string.IsNullOrEmpty(extension) && excludedExt.Contains(extension);
+        }
+
+        [NotNull]
+        private static HashSet<string> ToSet(
+            [CanBeNull] IReadOnlyList<string> configured,
+            [NotNull] HashSet<string> fallback)
+        {
+            if (configured == null || configured.Count == 0)
+            {
+                return fallback;
+            }
+
+            return new HashSet<string>(configured, StringComparer.OrdinalIgnoreCase);
         }
     }
 }

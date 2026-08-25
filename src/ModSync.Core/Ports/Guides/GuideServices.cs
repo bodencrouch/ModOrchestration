@@ -12,6 +12,7 @@ using JetBrains.Annotations;
 
 using ModSync.Core.Parsing;
 using ModSync.Core.Services;
+using ModSync.Core.Services.Interpretation;
 
 namespace ModSync.Core.Ports.Guides
 {

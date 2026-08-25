@@ -13,6 +13,7 @@ using System.Text.RegularExpressions;
 
 using JetBrains.Annotations;
 
+using ModSync.Core.Services.Interpretation;
 using ModSync.Core.Utility;
 
 namespace ModSync.Core.Services
@@ -41,13 +42,37 @@ namespace ModSync.Core.Services
 
         internal static bool IsBuiltinNssCrash([CanBeNull] string patcherText)
         {
-            return !string.IsNullOrEmpty(patcherText)
-                && patcherText.IndexOf(BuiltinCrashMarker, StringComparison.Ordinal) >= 0;
+            if (string.IsNullOrEmpty(patcherText))
+            {
+                return false;
+            }
+
+            IReadOnlyList<string> markers = GuideInterpretationPolicyStore.Current.UnixNss.CrashMarkers;
+            if (markers != null && markers.Count > 0)
+            {
+                for (int i = 0; i < markers.Count; i++)
+                {
+                    if (!string.IsNullOrEmpty(markers[i])
+                        && patcherText.IndexOf(markers[i], StringComparison.Ordinal) >= 0)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            return patcherText.IndexOf(BuiltinCrashMarker, StringComparison.Ordinal) >= 0;
         }
 
         internal static void EnableSaveProcessedScripts([NotNull] DirectoryInfo tslPatcherDirectory)
         {
             if (tslPatcherDirectory is null || !tslPatcherDirectory.Exists)
+            {
+                return;
+            }
+
+            if (!GuideInterpretationPolicyStore.Current.UnixNss.SaveProcessedScripts)
             {
                 return;
             }

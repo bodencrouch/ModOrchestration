@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using JetBrains.Annotations;
 
 using ModSync.Core.FileSystemUtils;
+using ModSync.Core.Services.Interpretation;
 using ModSync.Core.Utility;
 
 namespace ModSync.Core.Services
