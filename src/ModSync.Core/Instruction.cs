@@ -1635,6 +1635,11 @@ namespace ModSync.Core
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*LookupGameFolder\s*=\s*1\s*$", replacement: "LookupGameFolder=0");
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*ConfirmMessage\s*=\s*.*$", replacement: "ConfirmMessage=N/A");
 
+                    bool omitNamespaceIndex;
+                    tslPatcherDirectory = SanitizeLinuxHoloNamespaces(
+                        tslPatcherDirectory,
+                        Arguments,
+                        out omitNamespaceIndex);
                     EnsureInfoRtfBesideChangesIni(tslPatcherDirectory);
 
                     // Holo 1.5.1's Unix NSS builtin crashes ('str' object has no attribute 'info').
@@ -1671,7 +1676,7 @@ namespace ModSync.Core
                         argList.Add("-y");
                     }
 
-                    if (!string.IsNullOrEmpty(Arguments))
+                    if (!omitNamespaceIndex && !string.IsNullOrEmpty(Arguments))
                     {
                         argList.Add("--namespace-option-index");
                         argList.Add(Arguments.Trim());
@@ -1956,6 +1961,278 @@ namespace ModSync.Core
                 .ExtractAndInstallAsync(sourcePath, gameDirectory).ConfigureAwait(false);
 
             return installed ? ActionExitCode.Success : ActionExitCode.ChildProcessError;
+        }
+
+        /// <summary>
+        /// Linux HoloPatcher 1.5.1 imports <c>rte_editor.py</c> whenever a namespace <c>InfoName</c>
+        /// is a <c>.rte</c>. That module calls <c>ctypes.windll</c> at import time and pops a blocking
+        /// GUI <c>AttributeError</c>. Convert those info files to <c>.rtf</c>, fill missing
+        /// <c>IniName</c>/<c>Description</c> keys, and flatten the selected namespace's <c>DataPath</c>
+        /// so Holo never reads <c>namespaces.ini</c> for that install (K1 Sentinel Sneak Attack / Multifire).
+        /// </summary>
+        [NotNull]
+        private static DirectoryInfo SanitizeLinuxHoloNamespaces(
+            [NotNull] DirectoryInfo tslPatcherDirectory,
+            [CanBeNull] string namespaceArgument,
+            out bool omitNamespaceIndex)
+        {
+            omitNamespaceIndex = false;
+            if (tslPatcherDirectory is null || !tslPatcherDirectory.Exists)
+            {
+                return tslPatcherDirectory;
+            }
+
+            FileInfo namespacesIni;
+            try
+            {
+                namespacesIni = tslPatcherDirectory
+                    .GetFiles("namespaces.ini", SearchOption.AllDirectories)
+                    .FirstOrDefault();
+            }
+            catch (Exception)
+            {
+                return tslPatcherDirectory;
+            }
+
+            if (namespacesIni is null || namespacesIni.Directory is null)
+            {
+                ConvertRteInfoDocuments(tslPatcherDirectory);
+                return tslPatcherDirectory;
+            }
+
+            DirectoryInfo namespacesRoot = namespacesIni.Directory;
+            Dictionary<string, Dictionary<string, string>> sections;
+            try
+            {
+                using (var reader = new StreamReader(namespacesIni.FullName))
+                {
+                    sections = IniHelper.ParseNamespacesIni(reader);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not parse '{namespacesIni.FullName}': {ex.Message}");
+                ConvertRteInfoDocuments(tslPatcherDirectory);
+                return tslPatcherDirectory;
+            }
+
+            if (sections is null || sections.Count == 0)
+            {
+                ConvertRteInfoDocuments(tslPatcherDirectory);
+                return tslPatcherDirectory;
+            }
+
+            Dictionary<string, string> indexSection;
+            sections.TryGetValue("Namespaces", out indexSection);
+            var namespaceOrder = new List<string>();
+            if (indexSection != null)
+            {
+                foreach (KeyValuePair<string, string> entry in indexSection.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrWhiteSpace(entry.Value) && !namespaceOrder.Contains(entry.Value, StringComparer.OrdinalIgnoreCase))
+                    {
+                        namespaceOrder.Add(entry.Value);
+                    }
+                }
+            }
+
+            foreach (KeyValuePair<string, Dictionary<string, string>> section in sections)
+            {
+                if (section.Key.Equals("Namespaces", StringComparison.OrdinalIgnoreCase) || section.Value is null)
+                {
+                    continue;
+                }
+
+                string dataPath = section.Value.TryGetValue("DataPath", out string dataPathValue)
+                    ? dataPathValue.Trim()
+                    : section.Key;
+                string sectionDir = string.IsNullOrWhiteSpace(dataPath)
+                    ? namespacesRoot.FullName
+                    : Path.Combine(namespacesRoot.FullName, dataPath.Replace('/', Path.DirectorySeparatorChar));
+
+                if (!section.Value.ContainsKey("IniName"))
+                {
+                    section.Value["IniName"] = "changes.ini";
+                }
+
+                if (!section.Value.ContainsKey("Description"))
+                {
+                    string name = section.Value.TryGetValue("Name", out string named) ? named : section.Key;
+                    section.Value["Description"] = string.IsNullOrWhiteSpace(name) ? section.Key : name;
+                }
+
+                string infoName = section.Value.TryGetValue("InfoName", out string infoValue)
+                    ? infoValue.Trim()
+                    : "info.rtf";
+                if (infoName.EndsWith(".rte", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConvertRteInfoDocument(sectionDir, infoName);
+                    section.Value["InfoName"] = Path.ChangeExtension(infoName, ".rtf");
+                }
+                else
+                {
+                    ConvertRteInfoDocuments(new DirectoryInfo(sectionDir));
+                }
+            }
+
+            try
+            {
+                WriteNamespacesIni(namespacesIni.FullName, sections, indexSection, namespaceOrder);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not rewrite '{namespacesIni.FullName}': {ex.Message}");
+            }
+
+            int selected = 0;
+            if (!string.IsNullOrWhiteSpace(namespaceArgument))
+            {
+                int.TryParse(
+                    namespaceArgument.Trim(),
+                    System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out selected);
+            }
+
+            string selectedKey = null;
+            if (selected >= 0 && selected < namespaceOrder.Count)
+            {
+                selectedKey = namespaceOrder[selected];
+            }
+            else if (namespaceOrder.Count == 1)
+            {
+                selectedKey = namespaceOrder[0];
+            }
+
+            Dictionary<string, string> selectedSection = null;
+            if (!string.IsNullOrWhiteSpace(selectedKey))
+            {
+                sections.TryGetValue(selectedKey, out selectedSection);
+            }
+
+            if (selectedSection != null)
+            {
+                string dataPath = selectedSection.TryGetValue("DataPath", out string dataPathValue)
+                    ? dataPathValue.Trim()
+                    : selectedKey;
+                if (!string.IsNullOrWhiteSpace(dataPath)
+                    && dataPath != "."
+                    && dataPath != "./"
+                    && dataPath.IndexOf("..", StringComparison.Ordinal) < 0)
+                {
+                    string flatDir = Path.Combine(
+                        namespacesRoot.FullName,
+                        dataPath.Replace('/', Path.DirectorySeparatorChar));
+                    if (Directory.Exists(flatDir) && File.Exists(Path.Combine(flatDir, "changes.ini")))
+                    {
+                        ConvertRteInfoDocuments(new DirectoryInfo(flatDir));
+                        Logger.LogVerbose(
+                            $"[Patcher] Flattened Linux Holo namespace '{selectedKey}' to '{flatDir}' (avoids rte_editor/ctypes.windll).");
+                        omitNamespaceIndex = true;
+                        return new DirectoryInfo(flatDir);
+                    }
+                }
+            }
+
+            ConvertRteInfoDocuments(tslPatcherDirectory);
+            return tslPatcherDirectory;
+        }
+
+        private static void ConvertRteInfoDocuments([CanBeNull] DirectoryInfo directory)
+        {
+            if (directory is null || !directory.Exists)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (FileInfo rte in directory.GetFiles("*.rte", SearchOption.AllDirectories))
+                {
+                    ConvertRteInfoDocument(rte.DirectoryName, rte.Name);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not convert .rte info documents under '{directory.FullName}': {ex.Message}");
+            }
+        }
+
+        private static void ConvertRteInfoDocument([CanBeNull] string directory, [CanBeNull] string infoName)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(infoName))
+            {
+                return;
+            }
+
+            string rtePath = Path.Combine(directory, infoName);
+            if (!infoName.EndsWith(".rte", StringComparison.OrdinalIgnoreCase))
+            {
+                rtePath = Path.Combine(directory, Path.ChangeExtension(infoName, ".rte"));
+            }
+
+            if (!File.Exists(rtePath))
+            {
+                return;
+            }
+
+            string rtfPath = Path.ChangeExtension(rtePath, ".rtf");
+            const string MinimalRtf = @"{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\par}";
+            try
+            {
+                if (!File.Exists(rtfPath))
+                {
+                    File.WriteAllText(rtfPath, MinimalRtf);
+                }
+
+                File.Delete(rtePath);
+                Logger.LogVerbose($"[Patcher] Converted '{Path.GetFileName(rtePath)}' to '{Path.GetFileName(rtfPath)}' so Linux HoloPatcher will not import rte_editor (ctypes.windll).");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not convert '{rtePath}' to RTF: {ex.Message}");
+            }
+        }
+
+        private static void WriteNamespacesIni(
+            [NotNull] string path,
+            [NotNull] Dictionary<string, Dictionary<string, string>> sections,
+            [CanBeNull] Dictionary<string, string> indexSection,
+            [NotNull] IReadOnlyList<string> namespaceOrder)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("[Namespaces]");
+            if (indexSection != null)
+            {
+                foreach (KeyValuePair<string, string> entry in indexSection)
+                {
+                    sb.Append(entry.Key).Append('=').AppendLine(entry.Value);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < namespaceOrder.Count; i++)
+                {
+                    sb.Append("Namespace").Append(i + 1).Append('=').AppendLine(namespaceOrder[i]);
+                }
+            }
+
+            foreach (KeyValuePair<string, Dictionary<string, string>> section in sections)
+            {
+                if (section.Key.Equals("Namespaces", StringComparison.OrdinalIgnoreCase) || section.Value is null)
+                {
+                    continue;
+                }
+
+                sb.AppendLine();
+                sb.Append('[').Append(section.Key).AppendLine("]");
+                foreach (KeyValuePair<string, string> entry in section.Value)
+                {
+                    sb.Append(entry.Key).Append('=').AppendLine(entry.Value);
+                }
+            }
+
+            File.WriteAllText(path, sb.ToString());
         }
 
         /// <summary>
