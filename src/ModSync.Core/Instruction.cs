@@ -1635,11 +1635,7 @@ namespace ModSync.Core
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*LookupGameFolder\s*=\s*1\s*$", replacement: "LookupGameFolder=0");
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*ConfirmMessage\s*=\s*.*$", replacement: "ConfirmMessage=N/A");
 
-                    bool omitNamespaceIndex;
-                    tslPatcherDirectory = SanitizeLinuxHoloNamespaces(
-                        tslPatcherDirectory,
-                        Arguments,
-                        out omitNamespaceIndex);
+                    tslPatcherDirectory = SanitizeLinuxHoloNamespaces(tslPatcherDirectory);
                     EnsureInfoRtfBesideChangesIni(tslPatcherDirectory);
 
                     // Holo 1.5.1's Unix NSS builtin crashes ('str' object has no attribute 'info').
@@ -1676,7 +1672,7 @@ namespace ModSync.Core
                         argList.Add("-y");
                     }
 
-                    if (!omitNamespaceIndex && !string.IsNullOrEmpty(Arguments))
+                    if (!string.IsNullOrEmpty(Arguments))
                     {
                         argList.Add("--namespace-option-index");
                         argList.Add(Arguments.Trim());
@@ -1966,17 +1962,15 @@ namespace ModSync.Core
         /// <summary>
         /// Linux HoloPatcher 1.5.1 imports <c>rte_editor.py</c> whenever a namespace <c>InfoName</c>
         /// is a <c>.rte</c>. That module calls <c>ctypes.windll</c> at import time and pops a blocking
-        /// GUI <c>AttributeError</c>. Convert those info files to <c>.rtf</c>, fill missing
-        /// <c>IniName</c>/<c>Description</c> keys, and flatten the selected namespace's <c>DataPath</c>
-        /// so Holo never reads <c>namespaces.ini</c> for that install (K1 Sentinel Sneak Attack / Multifire).
+        /// GUI <c>AttributeError</c>. Convert every namespace's info file to <c>.rtf</c> and fill
+        /// missing <c>IniName</c>/<c>Description</c> keys before Holo ever reads <c>namespaces.ini</c>.
+        /// Do not point Holo directly at a flattened namespace <c>DataPath</c> instead: its CLI
+        /// requires <c>--tslpatchdata</c> to be the directory containing <c>namespaces.ini</c>, or it
+        /// refuses with "No mod chosen: Select your mod directory first." (K1 Sentinel Sneak Attack).
         /// </summary>
         [NotNull]
-        private static DirectoryInfo SanitizeLinuxHoloNamespaces(
-            [NotNull] DirectoryInfo tslPatcherDirectory,
-            [CanBeNull] string namespaceArgument,
-            out bool omitNamespaceIndex)
+        private static DirectoryInfo SanitizeLinuxHoloNamespaces([NotNull] DirectoryInfo tslPatcherDirectory)
         {
-            omitNamespaceIndex = false;
             if (tslPatcherDirectory is null || !tslPatcherDirectory.Exists)
             {
                 return tslPatcherDirectory;
@@ -2084,56 +2078,13 @@ namespace ModSync.Core
                 Logger.LogWarning($"[Patcher] Could not rewrite '{namespacesIni.FullName}': {ex.Message}");
             }
 
-            int selected = 0;
-            if (!string.IsNullOrWhiteSpace(namespaceArgument))
-            {
-                int.TryParse(
-                    namespaceArgument.Trim(),
-                    System.Globalization.NumberStyles.Integer,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    out selected);
-            }
-
-            string selectedKey = null;
-            if (selected >= 0 && selected < namespaceOrder.Count)
-            {
-                selectedKey = namespaceOrder[selected];
-            }
-            else if (namespaceOrder.Count == 1)
-            {
-                selectedKey = namespaceOrder[0];
-            }
-
-            Dictionary<string, string> selectedSection = null;
-            if (!string.IsNullOrWhiteSpace(selectedKey))
-            {
-                sections.TryGetValue(selectedKey, out selectedSection);
-            }
-
-            if (selectedSection != null)
-            {
-                string dataPath = selectedSection.TryGetValue("DataPath", out string dataPathValue)
-                    ? dataPathValue.Trim()
-                    : selectedKey;
-                if (!string.IsNullOrWhiteSpace(dataPath)
-                    && dataPath != "."
-                    && dataPath != "./"
-                    && dataPath.IndexOf("..", StringComparison.Ordinal) < 0)
-                {
-                    string flatDir = Path.Combine(
-                        namespacesRoot.FullName,
-                        dataPath.Replace('/', Path.DirectorySeparatorChar));
-                    if (Directory.Exists(flatDir) && File.Exists(Path.Combine(flatDir, "changes.ini")))
-                    {
-                        ConvertRteInfoDocuments(new DirectoryInfo(flatDir));
-                        Logger.LogVerbose(
-                            $"[Patcher] Flattened Linux Holo namespace '{selectedKey}' to '{flatDir}' (avoids rte_editor/ctypes.windll).");
-                        omitNamespaceIndex = true;
-                        return new DirectoryInfo(flatDir);
-                    }
-                }
-            }
-
+            // Do NOT point Holo at the selected namespace's flattened DataPath directly: its CLI
+            // requires --tslpatchdata to be the directory containing namespaces.ini (with
+            // --namespace-option-index selecting from it) or it refuses with "No mod chosen:
+            // Select your mod directory first." and exits without patching anything. The .rte ->
+            // .rtf conversion above already ran for every section (including the selected one),
+            // which is what actually prevents the rte_editor/ctypes.windll import crash - Holo
+            // reading namespaces.ini normally afterward is safe once no section names a .rte.
             ConvertRteInfoDocuments(tslPatcherDirectory);
             return tslPatcherDirectory;
         }
