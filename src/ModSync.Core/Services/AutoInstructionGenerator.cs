@@ -560,8 +560,14 @@ namespace ModSync.Core.Services
                 return true;
             }
 
+            if (rest.IndexOf('"') >= 0)
+            {
+                return true;
+            }
+
+            // "files from your override" is prose only when no real filename survived.
             if (lower.Contains("files from", StringComparison.Ordinal)
-                || rest.IndexOf('"') >= 0)
+                && !Path.HasExtension(rest.TrimEnd('*')))
             {
                 return true;
             }
@@ -2254,6 +2260,7 @@ namespace ModSync.Core.Services
             }
 
             BindBareCopyAsInstructions(component, extractedPath, fileList);
+            BindGuideSecondaryPaths(component, extractedPath, fileList);
             BindCleanListToPayloadFolder(component);
 
             return component.Instructions.Count > 0;
@@ -3955,25 +3962,295 @@ namespace ModSync.Core.Services
                     return 0;
                 case Instruction.ActionType.Choose:
                     return 1;
+                case Instruction.ActionType.Delete:
+                    // Guide-directed deletes from the extracted tree (e.g. keblastore.utm in
+                    // tslpatchdata) must run before the patcher. Override cleanups stay after.
+                    return DeleteTargetsExtractedModTree(instruction) ? 2 : 6;
                 case Instruction.ActionType.Patcher:
-                    return 2;
+                    return 3;
                 case Instruction.ActionType.Execute:
                 case Instruction.ActionType.Run:
-                    return 3;
-                case Instruction.ActionType.Delete:
                     return 4;
                 case Instruction.ActionType.Rename:
                 case Instruction.ActionType.Copy:
                     return 5;
                 case Instruction.ActionType.CleanList:
-                    return 6;
-                case Instruction.ActionType.Move:
                     return 7;
-                case Instruction.ActionType.DelDuplicate:
+                case Instruction.ActionType.Move:
                     return 8;
-                default:
+                case Instruction.ActionType.DelDuplicate:
                     return 9;
+                default:
+                    return 10;
             }
+        }
+
+        private static bool DeleteTargetsExtractedModTree([NotNull] Instruction instruction)
+        {
+            if (instruction.Source == null || instruction.Source.Count == 0)
+            {
+                return false;
+            }
+
+            return instruction.Source.Any(source =>
+                !string.IsNullOrWhiteSpace(source)
+                && source.IndexOf("<<kotorDirectory>>", StringComparison.OrdinalIgnoreCase) < 0
+                && source.IndexOf("<<gameDirectory>>", StringComparison.OrdinalIgnoreCase) < 0
+                && source.IndexOf("<<modDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        /// <summary>
+        /// Bind guide-prose Delete/Rename leftovers onto the extracted tree or Override.
+        /// A bare <c>&lt;&lt;modDirectory&gt;&gt;\keblastore.utm</c> is the TSLPatchdata file
+        /// the guide said to remove before the patcher, not a missing file at the extract root.
+        /// </summary>
+        private static void BindGuideSecondaryPaths(
+            [NotNull] ModComponent component,
+            [NotNull] string extractedPath,
+            [CanBeNull] IReadOnlyList<string> fileList)
+        {
+            if (string.IsNullOrWhiteSpace(extractedPath))
+            {
+                return;
+            }
+
+            string directions = (component.Directions ?? string.Empty) + "\n" + (component.Description ?? string.Empty);
+            IReadOnlyList<string> listing = fileList ?? Array.Empty<string>();
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                if (instruction?.Source == null || instruction.Source.Count == 0)
+                {
+                    continue;
+                }
+
+                if (instruction.Action == Instruction.ActionType.Delete)
+                {
+                    instruction.Source = instruction.Source
+                        .Select(source => BindGuideDeleteSource(source, extractedPath, listing, directions))
+                        .ToList();
+                }
+                else if (instruction.Action == Instruction.ActionType.Rename)
+                {
+                    instruction.Source = instruction.Source
+                        .Select(BindGuideRenameSource)
+                        .ToList();
+                }
+            }
+
+            SynthesizeMissingGuideSecondaries(component, extractedPath, listing, directions);
+        }
+
+        [NotNull]
+        private static string BindGuideDeleteSource(
+            [NotNull] string source,
+            [NotNull] string extractedPath,
+            [NotNull] IReadOnlyList<string> fileList,
+            [NotNull] string directions)
+        {
+            if (source.IndexOf("<<kotorDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0
+                || source.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return source;
+            }
+
+            string leaf = GuidePathLeaf(source);
+            if (string.IsNullOrWhiteSpace(leaf) || leaf.IndexOf('*') >= 0 || leaf.IndexOf("<<", StringComparison.Ordinal) >= 0)
+            {
+                return source;
+            }
+
+            int nameAt = directions.IndexOf(leaf, StringComparison.OrdinalIgnoreCase);
+            int tslAt = directions.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase);
+            int overrideAt = directions.IndexOf("override", StringComparison.OrdinalIgnoreCase);
+            bool preferTsl = tslAt >= 0 && (nameAt < 0 || Math.Abs(nameAt - tslAt) <= Math.Abs(nameAt - overrideAt) || overrideAt < 0);
+
+            if (preferTsl)
+            {
+                string listed = fileList.FirstOrDefault(entry =>
+                    Path.GetFileName(entry.Replace('/', Path.DirectorySeparatorChar))
+                        .Equals(leaf, StringComparison.OrdinalIgnoreCase)
+                    && entry.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (!string.IsNullOrEmpty(listed))
+                {
+                    string bound = $@"<<modDirectory>>\{extractedPath}\{listed.Replace('/', '\\')}";
+                    Logger.LogVerbose($"[AutoInstructionGenerator] Bound tslpatchdata delete '{leaf}' to '{bound}'");
+                    return bound;
+                }
+            }
+
+            if (overrideAt >= 0)
+            {
+                string bound = $@"<<kotorDirectory>>\Override\{leaf}";
+                Logger.LogVerbose($"[AutoInstructionGenerator] Bound Override delete '{leaf}' to '{bound}'");
+                return bound;
+            }
+
+            return source;
+        }
+
+        [NotNull]
+        private static string GuidePathLeaf([CanBeNull] string source)
+        {
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                return string.Empty;
+            }
+
+            string trimmed = source.Trim().Trim('\'', '"', ' ', '*');
+            int slash = Math.Max(trimmed.LastIndexOf('\\'), trimmed.LastIndexOf('/'));
+            return slash >= 0 ? trimmed.Substring(slash + 1) : trimmed;
+        }
+
+        [NotNull]
+        private static string BindGuideRenameSource([NotNull] string source)
+        {
+            if (source.IndexOf("<<kotorDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return source;
+            }
+
+            string leaf = GuidePathLeaf(source);
+            if (string.IsNullOrWhiteSpace(leaf) || !Path.HasExtension(leaf) || leaf.IndexOf("<<", StringComparison.Ordinal) >= 0)
+            {
+                return source;
+            }
+
+            return $@"<<kotorDirectory>>\Override\{leaf}";
+        }
+
+        private static void SynthesizeMissingGuideSecondaries(
+            [NotNull] ModComponent component,
+            [NotNull] string extractedPath,
+            [NotNull] IReadOnlyList<string> fileList,
+            [NotNull] string directions)
+        {
+            if (string.IsNullOrWhiteSpace(directions))
+            {
+                return;
+            }
+
+            Match tslDelete = Regex.Match(
+                directions,
+                @"tslpatchdata[^.]{0,80}delete the file ['""]?(?<file>[\w.-]+\.\w+)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1));
+            if (!tslDelete.Success)
+            {
+                tslDelete = Regex.Match(
+                    directions,
+                    @"delete the file ['""]?(?<file>[\w.-]+\.\w+)['""]?[^.]{0,40}tslpatchdata",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(1));
+            }
+
+            if (tslDelete.Success)
+            {
+                string leaf = tslDelete.Groups["file"].Value;
+                if (!component.Instructions.Any(i =>
+                        i.Action == Instruction.ActionType.Delete
+                        && i.Source != null
+                        && i.Source.Any(s => Path.GetFileName(s.Replace('/', Path.DirectorySeparatorChar))
+                            .Equals(leaf, StringComparison.OrdinalIgnoreCase))))
+                {
+                    string listed = fileList.FirstOrDefault(entry =>
+                        Path.GetFileName(entry.Replace('/', Path.DirectorySeparatorChar))
+                            .Equals(leaf, StringComparison.OrdinalIgnoreCase))
+                        ?? $@"tslpatchdata\{leaf}";
+                    var del = new Instruction
+                    {
+                        Action = Instruction.ActionType.Delete,
+                        Overwrite = false,
+                        Source = new List<string>
+                        {
+                            $@"<<modDirectory>>\{extractedPath}\{listed.Replace('/', '\\')}",
+                        },
+                    };
+                    del.SetParentComponent(component);
+                    component.Instructions.Add(del);
+                    Logger.LogVerbose($"[AutoInstructionGenerator] Synthesized tslpatchdata delete for '{leaf}'");
+                }
+            }
+
+            Match rename = Regex.Match(
+                directions,
+                @"rename the files ['""]?(?<a>[\w.-]+)['""]? and ['""]?(?<b>[\w.-]+)['""]? to ['""]?(?<c>[\w.-]+)['""]? and ['""]?(?<d>[\w.-]+)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1));
+            if (rename.Success)
+            {
+                AddOverrideRenameIfMissing(component, rename.Groups["a"].Value, rename.Groups["c"].Value);
+                AddOverrideRenameIfMissing(component, rename.Groups["b"].Value, rename.Groups["d"].Value);
+            }
+
+            Match overrideList = Regex.Match(
+                directions,
+                @"delete the following files from your override directory:\s*(?<list>[^\n]+)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1));
+            if (overrideList.Success)
+            {
+                foreach (string raw in Regex.Split(overrideList.Groups["list"].Value, @"\s*(?:,| and )\s*", RegexOptions.IgnoreCase))
+                {
+                    string leaf = raw.Trim().TrimEnd('.').Trim('\'', '"', ' ');
+                    if (string.IsNullOrWhiteSpace(leaf) || !Path.HasExtension(leaf))
+                    {
+                        continue;
+                    }
+
+                    if (component.Instructions.Any(i =>
+                            i.Action == Instruction.ActionType.Delete
+                            && i.Source != null
+                            && i.Source.Any(s =>
+                                s.IndexOf("<<kotorDirectory>>", StringComparison.OrdinalIgnoreCase) >= 0
+                                && Path.GetFileName(s.Replace('/', Path.DirectorySeparatorChar))
+                                    .Equals(leaf, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        continue;
+                    }
+
+                    var del = new Instruction
+                    {
+                        Action = Instruction.ActionType.Delete,
+                        Overwrite = false,
+                        Source = new List<string> { $@"<<kotorDirectory>>\Override\{leaf}" },
+                    };
+                    del.SetParentComponent(component);
+                    component.Instructions.Add(del);
+                    Logger.LogVerbose($"[AutoInstructionGenerator] Synthesized Override delete for '{leaf}'");
+                }
+            }
+        }
+
+        private static void AddOverrideRenameIfMissing(
+            [NotNull] ModComponent component,
+            [NotNull] string fromLeaf,
+            [NotNull] string toLeaf)
+        {
+            if (string.IsNullOrWhiteSpace(fromLeaf) || string.IsNullOrWhiteSpace(toLeaf))
+            {
+                return;
+            }
+
+            if (component.Instructions.Any(i =>
+                    i.Action == Instruction.ActionType.Rename
+                    && i.Source != null
+                    && i.Source.Any(s => Path.GetFileName(s.Replace('/', Path.DirectorySeparatorChar))
+                        .Equals(fromLeaf, StringComparison.OrdinalIgnoreCase))))
+            {
+                return;
+            }
+
+            var rename = new Instruction
+            {
+                Action = Instruction.ActionType.Rename,
+                Overwrite = true,
+                Source = new List<string> { $@"<<kotorDirectory>>\Override\{fromLeaf}" },
+                Destination = toLeaf,
+            };
+            rename.SetParentComponent(component);
+            component.Instructions.Add(rename);
+            Logger.LogVerbose($"[AutoInstructionGenerator] Synthesized Override rename '{fromLeaf}' → '{toLeaf}'");
         }
 
         /// <summary>

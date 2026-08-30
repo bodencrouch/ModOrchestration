@@ -11877,3 +11877,129 @@ Function 'yacc' at /home/brunner56/modsync-hot/work/tmp/_MEIpUdRkP/ply/yacc.pyc:
   signature = "leftORleftANDleftBITWISE_ORleftBITWISE_XORleftBITWISE_ANDleftEQUALSNOT_EQUALSleftGREATER_THANLESS_THANGREATER_THAN_OR_EQUALSLESS_THAN_OR_EQUALSleftBITWISE_LEFTBITWISE_RIGHTleftADDMINUSleftMULTIPLYDIVIDEMODrightBITWISE_NOTNOTleftINCREMENTDECREMENTACTION_TYPE ADD ADDITION_ASSIGNMENT_OPERATOR AND BITWISE_AND BITWISE_LEFT BITWISE_NOT BITWISE_OR BITWISE_RIGHT BITWISE_XOR BREAK_CONTROL CASE_CONTROL CONTINUE_CONTROL DECREMENT DEFAULT_CONTROL DIVIDE DIVISION_ASSIGNMENT_OPERATOR DO_CONTROL EFFECT_TYPE ELSE_CONTROL ...<truncated>
   lr = <ply.yacc.LRTable object at 0x7ff455994a60>
   module = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7ff455994670>
+Assertion with Exception Trace: Exception 'Looks like you have not installed the main component of my mod yet!' of type '<class 'ImportError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1353, in <module>
+  File "__main__.py", line 1348, in main
+  File "__main__.py", line 163, in __init__
+  File "__main__.py", line 375, in handle_commandline
+  File "__main__.py", line 391, in _begin_oneshot
+  File "__main__.py", line 1071, in begin_install_thread
+  File "__main__.py", line 1069, in begin_install_thread
+  File "__main__.py", line 1150, in _execute_mod_install
+  File "pykotor/tslpatcher/patcher.py", line 100, in config
+ImportError: Looks like you have not installed the main component of my mod yet!
+
+Stack Trace Variables:
+
+Function '<module>' at /home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/__main__.py:1353:
+  __annotations__ = {'CURRENT_VERSION': 'tuple[int, ...]'}
+  _pyi_main_co = <code object <module> at 0x7fa1727a5840, file "__main__.py", line 1>
+  sys = <module 'sys' (built-in)>
+  pyimod02_importers = <module 'pyimod02_importers' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod02_importers.py'>
+  os = <module 'os' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/base_library.zip/os.pyc'>
+  VIRTENV = 'VIRTUAL_ENV'
+  python_path = ['/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/base_library.zip', '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/lib-dynload', '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N']
+  pth = '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N'
+  encodings = <module 'encodings' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/base_library.zip/encodings/__init__.pyc'>
+  pyimod03_ctypes = <module 'pyimod03_ctypes' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod03_ctypes.py'>
+  entry = '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/tk'
+  annotations = _Feature((3, 7, 0, 'beta', 1), (3, 11, 0, 'alpha', 0), 16777216)
+  base64 = <module 'base64' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/base64.pyc'>
+  contextlib = <module 'contextlib' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/contextlib.pyc'>
+  ctypes = <module 'ctypes' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/ctypes/__init__.pyc'>
+  inspect = <module 'inspect' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/inspect.pyc'>
+  io = <module 'io' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/base_library.zip/io.pyc'>
+  json = <module 'json' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/json/__init__.pyc'>
+  pathlib = <module 'pathlib' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/pathlib.pyc'>
+  subprocess = <module 'subprocess' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/subprocess.pyc'>
+  tempfile = <module 'tempfile' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/tempfile.pyc'>
+  time = <module 'time' (built-in)>
+  tk = <module 'tkinter' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/tkinter/__init__.pyc'>
+  traceback = <module 'traceback' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/base_library.zip/traceback.pyc'>
+  webbrowser = <module 'webbrowser' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/webbrowser.pyc'>
+  ArgumentParser = <class 'argparse.ArgumentParser'>
+  Namespace = <class 'argparse.Namespace'>
+  datetime = <class 'datetime.datetime'>
+  timedelta = <class 'datetime.timedelta'>
+  timezone = <class 'datetime.timezone'>
+  IntEnum = <enum 'IntEnum'>
+  Event = <class 'threading.Event'>
+  Thread = <class 'threading.Thread'>
+  filedialog = <module 'tkinter.filedialog' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/tkinter/filedialog.pyc'>
+  messagebox = <module 'tkinter.messagebox' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/tkinter/messagebox.pyc'>
+  ttk = <module 'tkinter.ttk' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/tkinter/ttk.pyc'>
+  tkfont = <module 'tkinter.font' from '/home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/tkinter/font.pyc'>
+  TYPE_CHECKING = False
+  Callable = typing.Callable
+  NoReturn = typing.NoReturn
+  Game = <enum 'Game'>
+  BinaryReader = <class 'pykotor.common.stream.BinaryReader'>
+  ResourceIdentifier = <class 'pykotor.extract.file.ResourceIdentifier'>
+  decode_bytes_with_fallbacks = <function decode_bytes_with_fallbacks at 0x7fa171e0b7f0>
+  CaseAwarePath = <class 'pykotor.tools.path.CaseAwarePath'>
+  find_kotor_paths_from_default = <function find_kotor_paths_from_default at 0x7fa16374ecb0>
+  PatchLog = <class 'pykotor.tslpatcher.logger.PatchLog'>
+  PatchLogger = <class 'pykotor.tslpatcher.logger.PatchLogger'>
+  ModInstaller = <class 'pykotor.tslpatcher.patcher.ModInstaller'>
+  ConfigReader = <class 'pykotor.tslpatcher.reader.ConfigReader'>
+  NamespaceReader = <class 'pykotor.tslpatcher.reader.NamespaceReader'>
+  ModUninstaller = <class 'pykotor.tslpatcher.uninstall.ModUninstaller'>
+  format_exception_with_variables = <function format_exception_with_variables at 0x7fa163dd8820>
+  universal_simplify_exception = <function universal_simplify_exception at 0x7fa163dd85e0>
+  striprtf = <function striprtf at 0x7fa171de5870>
+  Path = <class 'utility.system.path.Path'>
+  ToolTip = <class 'utility.tkinter.tooltip.ToolTip'>
+  CURRENT_VERSION = (1, 5, 1)
+  VERSION_LABEL = 'v1.5.1'
+  ExitCode = <enum 'ExitCode'>
+  HoloPatcherError = <class '__main__.HoloPatcherError'>
+  parse_args = <function parse_args at 0x7fa1727930a0>
+  App = <class '__main__.App'>
+  onAppCrash = <function onAppCrash at 0x7fa1634c5ab0>
+  is_frozen = <function is_frozen at 0x7fa1634c7910>
+  main = <function main at 0x7fa1634c79a0>
+
+Function 'main' at /home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/__main__.py:1348:
+
+Function '__init__' at /home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/__main__.py:163:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/home/brunner56/modsync-hot/K1_auto', tslpatchdata="/home/brunner56/modsync-hot/k1_auto_extract/K1 Twi'lek Male NPC Diversity/KotOR 1 Twi'lek Male NPC Diversity", namespace_option_index=2, console=False, uninstall=False, install=True, validate=False)
+  __class__ = <class '__main__.App'>
+
+Function 'handle_commandline' at /home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/__main__.py:375:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/home/brunner56/modsync-hot/K1_auto', tslpatchdata="/home/brunner56/modsync-hot/k1_auto_extract/K1 Twi'lek Male NPC Diversity/KotOR 1 Twi'lek Male NPC Diversity", namespace_option_index=2, console=False, uninstall=False, install=True, validate=False)
+  num_cmdline_actions = 1
+
+Function '_begin_oneshot' at /home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/__main__.py:391:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/home/brunner56/modsync-hot/K1_auto', tslpatchdata="/home/brunner56/modsync-hot/k1_auto_extract/K1 Twi'lek Male NPC Diversity/KotOR 1 Twi'lek Male NPC Diversity", namespace_option_index=2, console=False, uninstall=False, install=True, validate=False)
+
+Function 'begin_install_thread' at /home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/__main__.py:1071:
+  should_cancel_thread = <threading.Event object at 0x7fa1634d1120>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7fa1634d1f30>
+  ini_file_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\k1 twi'lek male npc diversity\kotor 1 twi'lek male npc diversity\tslpatchdata\changes_senniamb.ini)
+  namespace_mod_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\k1 twi'lek male npc diversity\kotor 1 twi'lek male npc diversity\tslpatchdata)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fa1631d5d50>
+  self = <__main__.App object .>
+
+Function 'begin_install_thread' at /home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/__main__.py:1069:
+  should_cancel_thread = <threading.Event object at 0x7fa1634d1120>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7fa1634d1f30>
+  ini_file_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\k1 twi'lek male npc diversity\kotor 1 twi'lek male npc diversity\tslpatchdata\changes_senniamb.ini)
+  namespace_mod_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\k1 twi'lek male npc diversity\kotor 1 twi'lek male npc diversity\tslpatchdata)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fa1631d5d50>
+  self = <__main__.App object .>
+
+Function '_execute_mod_install' at /home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/__main__.py:1150:
+  self = <__main__.App object .>
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fa1631d5d50>
+  should_cancel_thread = <threading.Event object at 0x7fa1634d1120>
+
+Function 'config' at /home/brunner56/modsync-hot/work/tmp/_MEIlffB2N/pykotor/tslpatcher/patcher.pyc:100:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fa1631d5d50>
+  ini_file_bytes = b"; =====================================================[v1.0.5b1]====\r\n; TSLPATCHER - GENERATED MODIFICATIONS FILE (14/06/2024)\r\n; ===================================================================\r\n; This file is automatically generated and as such has no formatting\r\n; to speak of. You can insert blank lines between sections (but NOT\r\n; between keys within a section!) and add comment lines starting\r\n; with semicolon to make it more readable without breaking anything.\r\n; -------------------...<truncated>
+  ini_text = "; =====================================================[v1.0.5b1]====\r\n; TSLPATCHER - GENERATED MODIFICATIONS FILE (14/06/2024)\r\n; ===================================================================\r\n; This file is automatically generated and as such has no formatting\r\n; to speak of. You can insert blank lines between sections (but NOT\r\n; between keys within a section!) and add comment lines starting\r\n; with semicolon to make it more readable without breaking anything.\r\n; --------------------...<truncated>
+  requiredfile_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto\override\llk_sennivek.tpc)

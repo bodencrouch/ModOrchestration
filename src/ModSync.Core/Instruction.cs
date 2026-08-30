@@ -7,6 +7,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1750,7 +1751,32 @@ namespace ModSync.Core
 
                     if (exitCode != 0)
                     {
-                        return ActionExitCode.PatcherError;
+                        bool intended = IsGuideDirectedTslPatchdataDeleteOutcome(patcherText);
+                        if (!intended)
+                        {
+                            try
+                            {
+                                List<string> logErrors = await VerifyInstall().ConfigureAwait(false);
+                                intended = logErrors.Count > 0
+                                    && logErrors.All(IsGuideDirectedTslPatchdataDeleteError);
+                            }
+                            catch (Exception)
+                            {
+                                intended = false;
+                            }
+                        }
+
+                        if (intended)
+                        {
+                            await Logger.LogAsync(
+                                    "Patcher exited non-zero after a guide-directed tslpatchdata delete (intended missing-source error); treating as success.")
+                                .ConfigureAwait(false);
+                            exitCode = 0;
+                        }
+                        else
+                        {
+                            return ActionExitCode.PatcherError;
+                        }
                     }
 
                     try
@@ -1762,6 +1788,10 @@ namespace ModSync.Core
                                 .Where(line => !Services.UnixNssCompileRecovery.IsBuiltinNssCrash(line))
                                 .ToList();
                         }
+
+                        installErrors = installErrors
+                            .Where(line => !IsGuideDirectedTslPatchdataDeleteError(line))
+                            .ToList();
 
                         if (installErrors.Count <= 0)
                         {
@@ -2000,6 +2030,94 @@ namespace ModSync.Core
             }
 
             return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
+        private bool IsGuideDirectedTslPatchdataDeleteOutcome([CanBeNull] string patcherText)
+        {
+            if (string.IsNullOrEmpty(patcherText))
+            {
+                return false;
+            }
+
+            bool completed = patcherText.IndexOf("Successfully completed", StringComparison.OrdinalIgnoreCase) >= 0
+                || patcherText.IndexOf("Total patches:", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!completed)
+            {
+                return false;
+            }
+
+            List<string> errors = patcherText
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.IndexOf("[Error]", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("Error: ", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("FileNotFoundError", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("Could not locate resource to patch", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("Could not load source file to patch", StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+            return errors.Count > 0 && errors.All(IsGuideDirectedTslPatchdataDeleteError);
+        }
+
+        private bool IsGuideDirectedTslPatchdataDeleteError([CanBeNull] string line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return false;
+            }
+
+            if (!HasGuideDirectedTslPatchdataDelete())
+            {
+                return false;
+            }
+
+            // Holo splits the missing-source pair: this line has no filename, the
+            // next line names the deleted tslpatchdata file (e.g. keblastore.utm).
+            if (line.IndexOf("Could not load source file to patch", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            string directions = _parentComponent?.Directions ?? string.Empty;
+            return Regex.Matches(line, @"[\w.-]+\.\w+", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1))
+                .Cast<Match>()
+                .Select(m => m.Value)
+                .Any(name =>
+                    name.IndexOf("installlog", StringComparison.OrdinalIgnoreCase) < 0
+                    && name.IndexOf("FileNotFound", StringComparison.OrdinalIgnoreCase) < 0
+                    && (directions.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0
+                        || ComponentDeletesTslPatchdataFile(name)));
+        }
+
+        private bool HasGuideDirectedTslPatchdataDelete()
+        {
+            string directions = _parentComponent?.Directions;
+            if (!string.IsNullOrWhiteSpace(directions)
+                && directions.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase) >= 0
+                && directions.IndexOf("delete", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return _parentComponent?.Instructions?.Any(instruction =>
+                       instruction != null
+                       && instruction.Action == ActionType.Delete
+                       && instruction.Source != null
+                       && instruction.Source.Any(source =>
+                           !string.IsNullOrWhiteSpace(source)
+                           && source.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase) >= 0))
+                   == true;
+        }
+
+        private bool ComponentDeletesTslPatchdataFile([NotNull] string fileName)
+        {
+            return _parentComponent?.Instructions?.Any(instruction =>
+                       instruction != null
+                       && instruction.Action == ActionType.Delete
+                       && instruction.Source != null
+                       && instruction.Source.Any(source =>
+                           !string.IsNullOrWhiteSpace(source)
+                           && source.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase) >= 0
+                           && source.IndexOf(fileName, StringComparison.OrdinalIgnoreCase) >= 0))
+                   == true;
         }
 
         private async Task<List<string>> VerifyInstall([ItemNotNull] IReadOnlyList<string> sourcePaths = null)
