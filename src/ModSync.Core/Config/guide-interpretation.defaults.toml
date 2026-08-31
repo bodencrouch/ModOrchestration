@@ -36,7 +36,7 @@ personally_recommend_named_install = '''\b(?:I\s+)?personally\s+recommend(?:\s+t
 default_install_named = '''\bthe\s+default\s+install\s*,\s+["“]?(?<name>[^"”\n,.]{3,60}?)["”]?(?=\s|,|\.|$)'''
 explicit_option_ordinal = '''\boption\s+(\d{1,2})\b'''
 additive_namespace = '''\b(as\s+well|also\s+install|in\s+addition|additionally|and\s+install\s+it)\b'''
-guide_excludes_namespace = '''\b(?:skip|ignore|do\s+not\s+install|don't\s+install|recommend\s+against)\b[^\n.]{0,80}\b{token}\b'''
+guide_excludes_namespace = '''\b(?:skip|ignore|do\s+not\s+install|don't\s+install|recommend\s+against|recommend\s+not)\b[^\n.]{0,80}\b{token}\b'''
 possessive_option_condition = '''^(?<mod>.+?)['\u2019]s\s+(?<opt>.+?)(?:\s+option)?\s*$'''
 if_using_condition = '''\bif\s+(?:using|you\s+utilize|you\s+use|installing)\s+(?:the\s+)?(?<mod>[A-Za-z0-9][A-Za-z0-9\s'\-%&.]{2,80}?)(?:\s*,|\s*\.|$|\s+and\b|\s+then\b|\s+re-)'''
 if_you_use_unresolved = '''\bif\s+(?:using|you\s+use|you\s+utilize|installing)\b'''

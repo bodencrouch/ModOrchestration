@@ -1637,6 +1637,7 @@ namespace ModSync.Core
 
                     tslPatcherDirectory = SanitizeLinuxHoloNamespaces(tslPatcherDirectory);
                     EnsureInfoRtfBesideChangesIni(tslPatcherDirectory);
+                    _ = IniHelper.DropDangling2daRowReferences(tslPatcherDirectory);
 
                     // Holo 1.5.1's Unix NSS builtin crashes ('str' object has no attribute 'info').
                     // The K1/K2 manuals recovered with wine nwnnsscomp.exe; do that here so fail-closed
@@ -1644,6 +1645,7 @@ namespace ModSync.Core
                     if (Services.UnixNssCompileRecovery.HostNeedsWineCompiler())
                     {
                         Services.UnixNssCompileRecovery.EnableSaveProcessedScripts(tslPatcherDirectory);
+                        Services.UnixNssCompileRecovery.EnsureNwscriptInPatcherTree(tslPatcherDirectory);
                         _ = Services.UnixNssCompileRecovery.TryRewriteTokenFreeCompileList(tslPatcherDirectory, Arguments);
                     }
 
@@ -1721,15 +1723,24 @@ namespace ModSync.Core
                                     args
                                 ).ConfigureAwait(false);
                         }
-                        else
+                        else if (_fileSystemProvider?.IsDryRun == true)
                         {
                             (exitCode, output, error) = await _fileSystemProvider.ExecuteProcessAsync(
                                 holopatcherPath,
                                 args
                             ).ConfigureAwait(false);
                         }
+                        else
+                        {
+                            (exitCode, output, error) = await PlatformAgnosticMethods.ExecuteProcessAsync(
+                                holopatcherPath,
+                                args,
+                                logLinePrefix: "[Patcher] "
+                            ).ConfigureAwait(false);
+                        }
                     }
 
+                    await PipePatcherLogIntoModSyncAsync(tslPatcherDirectory.FullName, output, error).ConfigureAwait(false);
                     await Logger.LogAsync($"Patcher exited with exit code {exitCode}").ConfigureAwait(false);
                     bool nssRecovered = false;
                     string patcherText = (output ?? string.Empty) + Environment.NewLine + (error ?? string.Empty);
@@ -1786,7 +1797,7 @@ namespace ModSync.Core
                         if (nssRecovered)
                         {
                             installErrors = installErrors
-                                .Where(line => !Services.UnixNssCompileRecovery.IsBuiltinNssCrash(line))
+                                .Where(line => !Services.UnixNssCompileRecovery.IsRecoveredNssSupportError(line))
                                 .ToList();
                         }
 
@@ -1963,7 +1974,10 @@ namespace ModSync.Core
         /// Linux HoloPatcher 1.5.1 imports <c>rte_editor.py</c> whenever a namespace <c>InfoName</c>
         /// is a <c>.rte</c>. That module calls <c>ctypes.windll</c> at import time and pops a blocking
         /// GUI <c>AttributeError</c>. Convert every namespace's info file to <c>.rtf</c> and fill
-        /// missing <c>IniName</c>/<c>Description</c> keys before Holo ever reads <c>namespaces.ini</c>.
+        /// missing <c>IniName</c>/<c>Description</c>/<c>InfoName</c> keys before Holo ever reads
+        /// <c>namespaces.ini</c>. Holo 1.5.1 treats a missing <c>InfoName</c> as a blocking
+        /// <c>KeyError</c> dialog even when <c>info.rtf</c> already sits beside <c>changes.ini</c>
+        /// (K1 JC's Mandalorian Armor).
         /// Do not point Holo directly at a flattened namespace <c>DataPath</c> instead: its CLI
         /// requires <c>--tslpatchdata</c> to be the directory containing <c>namespaces.ini</c>, or it
         /// refuses with "No mod chosen: Select your mod directory first." (K1 Sentinel Sneak Attack).
@@ -2058,15 +2072,25 @@ namespace ModSync.Core
                 string infoName = section.Value.TryGetValue("InfoName", out string infoValue)
                     ? infoValue.Trim()
                     : "info.rtf";
+                if (string.IsNullOrWhiteSpace(infoName))
+                {
+                    infoName = "info.rtf";
+                }
+
                 if (infoName.EndsWith(".rte", StringComparison.OrdinalIgnoreCase))
                 {
                     ConvertRteInfoDocument(sectionDir, infoName);
-                    section.Value["InfoName"] = Path.ChangeExtension(infoName, ".rtf");
+                    infoName = Path.ChangeExtension(infoName, ".rtf");
                 }
                 else
                 {
                     ConvertRteInfoDocuments(new DirectoryInfo(sectionDir));
                 }
+
+                // Holo 1.5.1 always reads this key (KeyError if absent). Write it even when the
+                // info document already exists beside changes.ini.
+                section.Value["InfoName"] = infoName;
+                EnsureNamedInfoDocument(sectionDir, infoName);
             }
 
             try
@@ -2142,6 +2166,36 @@ namespace ModSync.Core
             catch (Exception ex)
             {
                 Logger.LogWarning($"[Patcher] Could not convert '{rtePath}' to RTF: {ex.Message}");
+            }
+        }
+
+        private static void EnsureNamedInfoDocument([CanBeNull] string directory, [CanBeNull] string infoName)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(infoName))
+            {
+                return;
+            }
+
+            try
+            {
+                if (!Directory.Exists(directory))
+                {
+                    return;
+                }
+
+                string infoPath = Path.Combine(directory, infoName);
+                if (File.Exists(infoPath))
+                {
+                    return;
+                }
+
+                const string MinimalRtf = @"{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\par}";
+                File.WriteAllText(infoPath, MinimalRtf);
+                Logger.LogVerbose($"[Patcher] Wrote placeholder '{infoName}' in '{directory}' so Linux HoloPatcher has InfoName.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not ensure info document '{infoName}' in '{directory}': {ex.Message}");
             }
         }
 
@@ -2395,6 +2449,104 @@ namespace ModSync.Core
             }
             await Logger.LogVerboseAsync("No errors found in TSLPatcher installation log file").ConfigureAwait(false);
             return allErrorLines;
+        }
+
+        /// <summary>
+        /// Copies the patcher's install log (or leftover stdout/stderr) into the ModSync log
+        /// stream with a <c>[Patcher]</c> prefix. Lines already captured from the process are
+        /// skipped so live-prefixed stdout is not replayed.
+        /// </summary>
+        private static async Task PipePatcherLogIntoModSyncAsync(
+            [CanBeNull] string tslPatcherDirectory,
+            [CanBeNull] string stdout,
+            [CanBeNull] string stderr)
+        {
+            var alreadyLogged = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string line in SplitPatcherLogLines(stdout))
+            {
+                if (line.Length > 0)
+                {
+                    _ = alreadyLogged.Add(line);
+                }
+            }
+
+            foreach (string line in SplitPatcherLogLines(stderr))
+            {
+                if (line.Length > 0)
+                {
+                    _ = alreadyLogged.Add(line);
+                }
+            }
+
+            string fileText = TryReadPatcherInstallLog(tslPatcherDirectory);
+            IEnumerable<string> sourceLines = !string.IsNullOrWhiteSpace(fileText)
+                ? SplitPatcherLogLines(fileText)
+                : SplitPatcherLogLines(stdout).Concat(SplitPatcherLogLines(stderr));
+
+            foreach (string line in sourceLines)
+            {
+                if (line.Length == 0 || alreadyLogged.Contains(line))
+                {
+                    continue;
+                }
+
+                await Logger.LogAsync("[Patcher] " + line).ConfigureAwait(false);
+            }
+        }
+
+        [NotNull]
+        private static IEnumerable<string> SplitPatcherLogLines([CanBeNull] string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                yield break;
+            }
+
+            foreach (string raw in text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string line = raw.Trim();
+                if (line.Length > 0)
+                {
+                    yield return line;
+                }
+            }
+        }
+
+        [CanBeNull]
+        private static string TryReadPatcherInstallLog([CanBeNull] string tslPatcherDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(tslPatcherDirectory) || !Directory.Exists(tslPatcherDirectory))
+            {
+                return null;
+            }
+
+            string txt = Path.Combine(tslPatcherDirectory, "installlog.txt");
+            if (File.Exists(txt))
+            {
+                try
+                {
+                    return File.ReadAllText(txt);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogVerbose($"[Patcher] Could not read '{txt}': {ex.Message}");
+                }
+            }
+
+            string rtf = Path.Combine(tslPatcherDirectory, "installlog.rtf");
+            if (File.Exists(rtf))
+            {
+                try
+                {
+                    return File.ReadAllText(rtf);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogVerbose($"[Patcher] Could not read '{rtf}': {ex.Message}");
+                }
+            }
+
+            return null;
         }
         public event PropertyChangedEventHandler PropertyChanged;
         private void OnPropertyChanged([CallerMemberName][CanBeNull] string propertyName = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

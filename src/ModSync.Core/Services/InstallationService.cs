@@ -687,6 +687,40 @@ Exception Type: {ex.GetType().FullName}";
             return (null, false);
         }
 
+        /// <summary>
+        /// Accepts a workspace or cargo target directory (not only the binary).
+        /// Prefers <c>target/release/odypatcher</c> over debug when a repo root is given.
+        /// </summary>
+        internal static string TryResolveOdyPatcherFromDirectory(string configured)
+        {
+            if (string.IsNullOrWhiteSpace(configured) || !Directory.Exists(configured))
+            {
+                return null;
+            }
+
+            string[] names = { "odypatcher", "odypatcher.exe", "OdyPatcher", "OdyPatcher.exe" };
+            string[] searchDirs =
+            {
+                configured,
+                Path.Combine(configured, "target", "release"),
+                Path.Combine(configured, "target", "debug"),
+            };
+
+            foreach (string dir in searchDirs)
+            {
+                foreach (string name in names)
+                {
+                    string candidate = Path.Combine(dir, name);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return null;
+        }
+
         /// <summary>Resolves the OdyPatcher CLI executable from its configured path, PATH, or app directories.</summary>
         public static async Task<(string path, bool found)> FindOdyPatcherExecutableAsync(string baseDir = null, string resourcesDir = null)
         {
@@ -697,6 +731,13 @@ Exception Type: {ex.GetType().FullName}";
                 {
                     await Logger.LogVerboseAsync($"[OdyPatcher] Using configured executable: {configured}").ConfigureAwait(false);
                     return (configured, true);
+                }
+
+                string fromDir = TryResolveOdyPatcherFromDirectory(configured);
+                if (fromDir != null)
+                {
+                    await Logger.LogVerboseAsync($"[OdyPatcher] Using executable from workspace: {fromDir}").ConfigureAwait(false);
+                    return (fromDir, true);
                 }
 
                 await Logger.LogWarningAsync($"[OdyPatcher] Configured path not found: {configured}").ConfigureAwait(false);
@@ -760,12 +801,12 @@ Exception Type: {ex.GetType().FullName}";
 
                 string odyArgs = args.TrimStart();
                 await Logger.LogVerboseAsync($"[OdyPatcher] {odyPath} {odyArgs}").ConfigureAwait(false);
-                if (fileSystemProvider != null)
+                if (fileSystemProvider != null && fileSystemProvider.IsDryRun)
                 {
                     return await fileSystemProvider.ExecuteProcessAsync(odyPath, odyArgs).ConfigureAwait(false);
                 }
 
-                return await PlatformAgnosticMethods.ExecuteProcessAsync(odyPath, odyArgs).ConfigureAwait(false);
+                return await PlatformAgnosticMethods.ExecuteProcessAsync(odyPath, odyArgs, logLinePrefix: "[Patcher] ").ConfigureAwait(false);
             }
 
             if (string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase))
@@ -779,12 +820,12 @@ Exception Type: {ex.GetType().FullName}";
                 string prefix = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? string.Empty : "--console ";
                 string fullArgs = prefix + args.TrimStart();
                 await Logger.LogVerboseAsync($"[KPatcher] {kPath} {fullArgs}").ConfigureAwait(false);
-                if (fileSystemProvider != null)
+                if (fileSystemProvider != null && fileSystemProvider.IsDryRun)
                 {
                     return await fileSystemProvider.ExecuteProcessAsync(kPath, fullArgs).ConfigureAwait(false);
                 }
 
-                return await PlatformAgnosticMethods.ExecuteProcessAsync(kPath, fullArgs).ConfigureAwait(false);
+                return await PlatformAgnosticMethods.ExecuteProcessAsync(kPath, fullArgs, logLinePrefix: "[Patcher] ").ConfigureAwait(false);
             }
 
             return await RunHolopatcherAsync(args).ConfigureAwait(false);
@@ -1271,7 +1312,6 @@ Exception Type: {ex.GetType().FullName}";
                                 ).ConfigureAwait(false);
 
                                 coordinator.CheckpointManager.State.ComponentCheckpoints[component.Guid] = checkpoint.CommitId;
-                                await Logger.LogAsync($"✓ Checkpoint created: {checkpoint.ShortCommitId}").ConfigureAwait(false);
                             }
                             catch (Exception ex)
                             {

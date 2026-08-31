@@ -219,6 +219,119 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public void BetterTwilekHeads_ResolvesSpentFolderTwinToK1Archive()
+        {
+            IReadOnlyList<FileInfo> library = Library(
+                "K1 Twi'lek Heads v1.3.3.7z",
+                "TSL Twi'lek Heads v1.3.2.7z",
+                "hd_twilek_female.rar");
+
+            ArchiveResolution result = ArchiveResolver.Resolve(
+                "Better Twi'lek Heads",
+                new[] { "https://deadlystream.com/files/file/1430-k1-better-twilek-male-heads/" },
+                library,
+                ArchiveResolver.GameMarker.Kotor1);
+
+            Assert.That(result.IsResolved, Is.True, result.Reason);
+            Assert.That(result.Archive.Name, Is.EqualTo("K1 Twi'lek Heads v1.3.3.7z"));
+        }
+
+        /// <summary>
+        /// Measured on the 2026-08-24 K1 Holo run: the library had a leftover folder whose
+        /// name equals the guide heading, next to the real <c>K1 Twi'lek Heads v1.3.3.7z</c>.
+        /// ExactName latched onto the folder and Holo applied that folder's stale 11-patch
+        /// Slim ini (textures + <c>twilek_m04.tpc</c>, no <c>n_komadh</c> / <c>n_xorh</c> /
+        /// <c>twilek_m05</c> models). The 7z's Option A is 22 patches and includes the models.
+        /// </summary>
+        [Test]
+        public void BetterTwilekHeads_HeadingNamedFolder_DoesNotBeatTheK1Archive()
+        {
+            IReadOnlyList<FileInfo> library = Library(
+                "K1 Twi'lek Heads v1.3.3.7z",
+                "TSL Twi'lek Heads v1.3.2.7z",
+                "Better Twi'lek Heads",
+                "hd_twilek_female.rar");
+
+            ArchiveResolution result = ArchiveResolver.Resolve(
+                "Better Twi'lek Heads",
+                new[] { "https://deadlystream.com/files/file/1430-k1-better-twilek-male-heads/" },
+                library,
+                ArchiveResolver.GameMarker.Kotor1);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.IsResolved, Is.True, result.Reason);
+                Assert.That(result.Archive.Name, Is.EqualTo("K1 Twi'lek Heads v1.3.3.7z"), result.Reason);
+            });
+        }
+
+        [Test]
+        public void BetterTwilekHeads_FolderOnly_StillResolvesWhenNoArchive()
+        {
+            IReadOnlyList<FileInfo> library = Library("Better Twi'lek Heads");
+
+            ArchiveResolution result = ArchiveResolver.Resolve(
+                "Better Twi'lek Heads",
+                new[] { "https://deadlystream.com/files/file/1430-k1-better-twilek-male-heads/" },
+                library,
+                ArchiveResolver.GameMarker.Kotor1);
+
+            Assert.That(result.IsResolved, Is.True, result.Reason);
+            Assert.That(result.Archive.Name, Is.EqualTo("Better Twi'lek Heads"));
+        }
+
+        [Test]
+        public void DarthMalaksArmor_NexusId9_PicksArmourSpelling()
+        {
+            IReadOnlyList<FileInfo> library = Library(
+                "TSL_Darth_Malaks_Armour_PMBM05_Reskin-9-1-0.7z",
+                "N_DarthMalak01.tga");
+
+            ArchiveResolution result = ArchiveResolver.Resolve(
+                "Darth Malak's Armor",
+                new[] { "http://www.nexusmods.com/kotor2/mods/9/?" },
+                library,
+                ArchiveResolver.GameMarker.Kotor2);
+
+            Assert.That(result.IsResolved, Is.True, result.Reason);
+            Assert.That(result.Archive.Name, Is.EqualTo("TSL_Darth_Malaks_Armour_PMBM05_Reskin-9-1-0.7z"));
+        }
+
+        [Test]
+        public void RelightingTsl_ApplyAllFiles_KeepsEveryArchive()
+        {
+            IReadOnlyList<FileInfo> library = Library(
+                "relightingtsl_102PERfklnt_1.0.zip",
+                "relightingtsl_003EBOg_1.2.zip",
+                "relightingtsl_298TELk_1.0.zip",
+                "relightingtsl_101PERt_2.1.zip");
+
+            ArchiveResolution result = ArchiveResolver.Resolve(
+                "Relighting TSL",
+                new[] { "https://deadlystream.com/files/file/2752-relighting-tsl-early-release/" },
+                library,
+                ArchiveResolver.GameMarker.Kotor2,
+                new[]
+                {
+                    "Download and apply all files, unless NOT using TSLRCM "
+                    + "(in which case, skip relightingtsl_298TELk_1.0.zip).",
+                });
+
+            Assert.That(result.IsResolved, Is.True, result.Reason);
+            Assert.That(result.AdditionalArchives.Count, Is.EqualTo(3), result.Reason);
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                result.Archive.Name,
+            };
+            foreach (FileInfo extra in result.AdditionalArchives)
+            {
+                _ = names.Add(extra.Name);
+            }
+
+            Assert.That(names.Count, Is.EqualTo(4));
+        }
+
+        [Test]
         public void ExplicitReskinFriendlyRecommendation_NarrowsPatcherVariants()
         {
             IReadOnlyList<FileInfo> library = Library(

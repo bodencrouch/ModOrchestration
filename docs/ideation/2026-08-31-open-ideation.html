@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: Open directions in ModSync</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&amp;family=IBM+Plex+Serif:ital,wght@0,500;0,600;1,500&amp;display=swap">
+  <style>
+    :root {
+      --bg: #f6f1e8;
+      --ink: #1c1914;
+      --muted: #5c564c;
+      --rule: #d4cbb8;
+      --card: #fffdf8;
+      --accent: #8a3d12;
+      --accent-soft: #f3e2d4;
+      --accent-text: #6b2e0c;
+      --ok-soft: #e4efe4;
+      --ok-text: #1f4a2a;
+      --warn-soft: #f6ead0;
+      --warn-text: #6a4a10;
+      --chip: #eee6d8;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    strong { color: inherit; font-weight: 600; }
+    a { color: var(--accent); }
+    .page {
+      max-width: 56rem;
+      margin: 0 auto;
+      padding: 2.25rem 1.25rem 4rem;
+    }
+    .prose { max-width: 70ch; }
+    header.mast {
+      border-bottom: 1px solid var(--rule);
+      padding-bottom: 1.25rem;
+      margin-bottom: 1.75rem;
+    }
+    .eyebrow {
+      font-size: 0.72rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent-text);
+      font-weight: 600;
+    }
+    h1 {
+      font-family: "IBM Plex Serif", Georgia, serif;
+      font-size: 1.85rem;
+      font-weight: 600;
+      line-height: 1.25;
+      margin: 0.35rem 0 0.85rem;
+    }
+    h2 {
+      font-family: "IBM Plex Serif", Georgia, serif;
+      font-size: 1.35rem;
+      margin: 2.25rem 0 0.7rem;
+    }
+    h3 {
+      font-size: 1.12rem;
+      margin: 0;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+    .chip {
+      display: inline-block;
+      padding: 0.18rem 0.55rem;
+      border-radius: 999px;
+      background: var(--chip);
+      color: var(--ink);
+      font-size: 0.82rem;
+    }
+    .chip.conf-high { background: var(--ok-soft); color: var(--ok-text); }
+    .chip.cx-high { background: var(--warn-soft); color: var(--warn-text); }
+    .chip.cx-med { background: var(--accent-soft); color: var(--accent-text); }
+    nav.toc {
+      background: var(--card);
+      border: 1px solid var(--rule);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+      margin: 1.25rem 0;
+    }
+    nav.toc ol { margin: 0.35rem 0 0; padding-left: 1.2rem; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.6rem;
+      margin: 1.1rem 0 0;
+    }
+    .stat {
+      background: var(--card);
+      border: 1px solid var(--rule);
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+    }
+    .stat b { display: block; font-size: 1.25rem; }
+    .stat span { color: var(--muted); font-size: 0.8rem; }
+    section { margin-bottom: 0.5rem; }
+    .jump {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.85rem;
+      margin: 0 0 1.1rem;
+      padding: 0;
+      list-style: none;
+    }
+    article.idea {
+      background: var(--card);
+      border: 1px solid var(--rule);
+      border-radius: 12px;
+      padding: 1.1rem 1.15rem 1.2rem;
+      margin: 0 0 1.15rem;
+    }
+    article.idea .head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.45rem 0.7rem;
+      margin-bottom: 0.7rem;
+    }
+    article.idea dl {
+      display: grid;
+      grid-template-columns: 7.2rem 1fr;
+      gap: 0.35rem 0.75rem;
+      margin: 0.85rem 0 0;
+    }
+    article.idea dt {
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding-top: 0.15rem;
+    }
+    article.idea dd { margin: 0; }
+    figure.diagram {
+      margin: 0.9rem 0 0.2rem;
+      padding: 0.7rem;
+      background: var(--bg);
+      border-radius: 10px;
+      overflow-x: auto;
+    }
+    figure.diagram figcaption {
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin-top: 0.45rem;
+    }
+    table.reject {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    table.reject th, table.reject td {
+      text-align: left;
+      vertical-align: top;
+      padding: 0.45rem 0.5rem;
+      border-bottom: 1px solid var(--rule);
+    }
+    table.reject th { color: var(--muted); font-weight: 600; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    footer.composition-signal {
+      margin-top: 2.5rem;
+      padding-top: 0.9rem;
+      border-top: 1px solid var(--rule);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    @media (max-width: 720px) {
+      .stats { grid-template-columns: 1fr 1fr; }
+      article.idea dl { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="mast">
+      <p class="eyebrow">Ideation</p>
+      <h1>Open directions in ModSync</h1>
+      <div class="meta">
+        <span class="chip">Date <time datetime="2026-08-31">2026-08-31</time></span>
+        <span class="chip">Topic open</span>
+        <span class="chip">Mode repo-grounded</span>
+        <span class="chip">Surprise-me</span>
+      </div>
+      <div class="stats" aria-label="Run counts">
+        <div class="stat"><b>48</b><span>raw frame ideas</span></div>
+        <div class="stat"><b>8</b><span>cross-cutting merges</span></div>
+        <div class="stat"><b>7</b><span>survivors</span></div>
+        <div class="stat"><b>49</b><span>cut with reasons</span></div>
+      </div>
+    </header>
+
+    <nav class="toc" aria-label="Sections">
+      <p class="eyebrow">On this page</p>
+      <ol>
+        <li><a href="#grounding-context">Grounding Context</a></li>
+        <li><a href="#topic-axes">Topic Axes</a></li>
+        <li><a href="#ranked-ideas">Ranked Ideas</a></li>
+        <li><a href="#rejection-summary">Rejection Summary</a></li>
+      </ol>
+    </nav>
+
+    <section id="grounding-context">
+      <h2>Grounding Context</h2>
+      <div class="prose">
+        <p><strong>Codebase context.</strong> ModSync is a .NET 9 + Avalonia installer for Star Wars: KOTOR. Core owns instructions, the virtual file system, and Holo / Ody / KPatcher engines. The GUI is a wizard. Tests live in one project. The live contract this week is to prove <code>mod-builds/content/k{1,2}/full.md</code> installs identically to a literal human run. Instruction paths must use <code>&lt;&lt;modDirectory&gt;&gt;</code> / <code>&lt;&lt;kotorDirectory&gt;&gt;</code>. Validation uses the virtual file system. Install order is load-bearing: loose files are last-writer-wins, and patchers bake 2DAMEMORY row indices into <code>.ncs</code>. Exit code 0 is not proof. This week’s dirty Core includes Unix NSS recovery, ArchiveResolver, dangling 2DA rows, and Linux Holo InfoName / <code>.rte</code> work.</p>
+        <p><strong>Pain and leverage.</strong> Silent-wrong steps survive because a heartbeat looks like a result. Linux Holo can hang on CWD, Tk dialogs, or <code>ctypes.windll</code>. Ody rejects <code>--flag=value</code>. DryRun models classic game-directory destinations and does not simulate managed hardlink staging. The README says the installer does not download; the wizard and agent playbook already do. Leverage already sits in <code>install --direct-markdown</code>, checkpoints, ledgers, the shared validation pipeline, and scripts such as <code>cli_validate</code> and <code>diff_manual_vs_auto</code>.</p>
+        <p><strong>Past learnings.</strong> <code>docs/solutions</code> holds agent-guidance layering (one home per fact) and the manual-release workflow. It does not yet hold installer-domain findings. GitHub Releases stay manual.</p>
+        <p><strong>External context.</strong> TSLPatcher is the community oracle. Holo <code>--validate</code> is INI / config syntax, not content equality. KotorDiff (PyPI 2025) differs GFF / 2DA / TLK / ERF and falls back to SHA256 for NCS. Adjacent patterns: Wabbajack compile-from-golden, Vortex Replicate, WeiDU <code>weidu.log</code>, ME3Tweaks MixIns + hash. The useful compiler analogy is gcc versus clang: compare the resource AST, not packed ERF bytes.</p>
+        <p><strong>Additional context.</strong> STRATEGY.md (2026-07-13) still frames encode-on-Holo-CLI and multi-author publish. The live bar this week is twelve-tree <code>full.md</code> parity, not that publish track.</p>
+      </div>
+    </section>
+
+    <section id="topic-axes">
+      <h2>Topic Axes</h2>
+      <p class="prose">Decomposition skipped — surprise-me mode.</p>
+    </section>
+
+    <section id="ranked-ideas">
+      <h2>Ranked Ideas</h2>
+      <p class="prose">Seven directions survived critique. Combinations that were stronger than their parts are ranked first. Axis tags are omitted because decomposition was skipped.</p>
+      <ul class="jump">
+        <li><a href="#i1">1. Witness PASS type</a></li>
+        <li><a href="#i2">2. DryRun identity split</a></li>
+        <li><a href="#i3">3. Guide-as-source + digest expiry</a></li>
+        <li><a href="#i4">4. Generation store</a></li>
+        <li><a href="#i5">5. Honest download product</a></li>
+        <li><a href="#i6">6. Linux Holo supervisor</a></li>
+        <li><a href="#i7">7. full.md sentence-form grammar</a></li>
+      </ul>
+
+      <article class="idea" id="i1">
+        <div class="head">
+          <h3>1. Witness PASS type</h3>
+          <span class="chip conf-high">Confidence 85%</span>
+          <span class="chip cx-high">Complexity High</span>
+        </div>
+        <p>Make one Core type the only green light. A step is not a pass because a child exited 0. It is a pass when the patcher log is clean, the scoped tree actually changed, the change sits inside the step’s claim, and a format-aware resource differ (GFF / 2DA / TLK / ERF; SHA256 only for NCS) agrees. Packed ERF or TLK byte drift is a packing dissent, not a fail, and only after semantic equality is proved. Holo <code>--validate</code> stays an INI check. Optional later: a two-engine resource vote as a published verdict, not as a fourth mystery engine.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 720 168" width="720" height="168" role="img" aria-label="Exit 0 versus four-clause PASS">
+            <rect x="8" y="28" width="150" height="52" rx="8" fill="#eee6d8" stroke="#1c1914"/>
+            <text x="83" y="50" text-anchor="middle" font-size="13" fill="#1c1914">child exit 0</text>
+            <text x="83" y="68" text-anchor="middle" font-size="11" fill="#5c564c">heartbeat</text>
+            <path d="M166 54 H214" stroke="#8a3d12" stroke-width="2"/>
+            <polygon points="214,49 226,54 214,59" fill="#8a3d12"/>
+            <rect x="234" y="28" width="130" height="52" rx="8" fill="#f6ead0" stroke="#6a4a10"/>
+            <text x="299" y="59" text-anchor="middle" font-size="13" fill="#6a4a10">false green</text>
+            <rect x="8" y="108" width="88" height="44" rx="8" fill="#e4efe4" stroke="#1f4a2a"/>
+            <text x="52" y="135" text-anchor="middle" font-size="12" fill="#1f4a2a">log</text>
+            <rect x="108" y="108" width="88" height="44" rx="8" fill="#e4efe4" stroke="#1f4a2a"/>
+            <text x="152" y="135" text-anchor="middle" font-size="12" fill="#1f4a2a">delta</text>
+            <rect x="208" y="108" width="88" height="44" rx="8" fill="#e4efe4" stroke="#1f4a2a"/>
+            <text x="252" y="135" text-anchor="middle" font-size="12" fill="#1f4a2a">scope</text>
+            <rect x="308" y="108" width="110" height="44" rx="8" fill="#e4efe4" stroke="#1f4a2a"/>
+            <text x="363" y="135" text-anchor="middle" font-size="12" fill="#1f4a2a">resources</text>
+            <path d="M428 130 H476" stroke="#1f4a2a" stroke-width="2"/>
+            <polygon points="476,125 488,130 476,135" fill="#1f4a2a"/>
+            <rect x="496" y="108" width="210" height="44" rx="8" fill="#f3e2d4" stroke="#6b2e0c"/>
+            <text x="601" y="135" text-anchor="middle" font-size="13" fill="#6b2e0c">PASS — only green</text>
+            <text x="8" y="18" font-size="12" fill="#5c564c">Today a heartbeat can write pass. The move is a four-clause type.</text>
+          </svg>
+          <figcaption>Illustrative: exit 0 remains a heartbeat; PASS is the ink.</figcaption>
+        </figure>
+        <dl>
+          <dt>Description</dt>
+          <dd>Productize D7 and the mission’s semantic-compare rule as one type consumed by CLI, ValidatePage, Installing, and <code>diff_manual_vs_auto</code>.</dd>
+          <dt>Basis</dt>
+          <dd><code>direct:</code> CONTRIBUTING.md writes a ledger <code>pass</code> only after the mutation matches the step’s claim. <code>direct:</code> unified-install-parity-mission.md: verify patcher success from logs and resulting resources, not process exit. Compare loose resources by identity and ERFs by contained resources; packing-only byte diffs are acceptable only after semantic equality. <code>external:</code> KotorDiff as the format-aware differ; Holo <code>--validate</code> is <code>ValidateConfig</code>, not equality.</dd>
+          <dt>Rationale</dt>
+          <dd>Twelve-tree nights already pay for this judgment by hand. Until PASS is a type, every engine, script, and wizard page can invent a shorter beep.</dd>
+          <dt>Downsides</dt>
+          <dd>Needs a Core equality kernel and per-step expected-delta discipline. Some packing-only diffs will stay noisy until the differ is trusted. Does not by itself fix hanging children or wrong archives.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="i2">
+        <div class="head">
+          <h3>2. DryRun identity split</h3>
+          <span class="chip conf-high">Confidence 80%</span>
+          <span class="chip cx-med">Complexity Medium</span>
+        </div>
+        <p>Stop selling one green badge for two predicates. The virtual file system answers “is this plan well-typed?” — placeholders, wildcards, missing archives, classic destinations. It does not answer “what will install do?” when managed staging or hardlink snapshots are in play. Proof is a disposable hardlink clone on the real filesystem, or an explicit refusal to claim install equality. ValidatePage and <code>cli_validate</code> must not share a single green with apply.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 720 150" width="720" height="150" role="img" aria-label="Type-check lane versus proof lane">
+            <rect x="16" y="36" width="250" height="88" rx="10" fill="#fffdf8" stroke="#1c1914"/>
+            <text x="141" y="62" text-anchor="middle" font-size="14" fill="#1c1914">VFS DryRun</text>
+            <text x="141" y="84" text-anchor="middle" font-size="12" fill="#5c564c">placeholders · wildcards</text>
+            <text x="141" y="104" text-anchor="middle" font-size="12" fill="#5c564c">classic kotor paths</text>
+            <rect x="454" y="36" width="250" height="88" rx="10" fill="#e4efe4" stroke="#1f4a2a"/>
+            <text x="579" y="62" text-anchor="middle" font-size="14" fill="#1f4a2a">hardlink clone</text>
+            <text x="579" y="84" text-anchor="middle" font-size="12" fill="#1f4a2a">staging · COW identity</text>
+            <text x="579" y="104" text-anchor="middle" font-size="12" fill="#1f4a2a">install equality</text>
+            <path d="M280 80 H430" stroke="#8a3d12" stroke-width="2" stroke-dasharray="6 5"/>
+            <text x="355" y="28" text-anchor="middle" font-size="12" fill="#8a3d12">no shared green badge</text>
+          </svg>
+          <figcaption>Illustrative: two answers, two badges. DryRun is a type-check.</figcaption>
+        </figure>
+        <dl>
+          <dt>Description</dt>
+          <dd>Name the tree DryRun did not simulate as a first-class result. Keep VFS. Do not grow it into a second universe that pretends to be hardlink physics.</dd>
+          <dt>Basis</dt>
+          <dd><code>direct:</code> docs/knowledgebase/validation-pipeline.md: DryRun models classic destinations under <code>&lt;&lt;kotorDirectory&gt;&gt;</code> and does not simulate profile staging roots or hardlink deploy. <code>direct:</code> docs/knowledgebase/modbuild-paranoia-doctrine.md: ext4 hardlink snapshots are effectively free. <code>reasoned:</code> a second simulated world will keep missing the fixture (the jig) that real writes go through.</dd>
+          <dt>Rationale</dt>
+          <dd>Parity U4 already states the split. The product still shows one green. That is how “validate passed” becomes D7’s cousin.</dd>
+          <dt>Downsides</dt>
+          <dd>Hardlink proof costs disk and time versus a VFS walk. Copy must change so users are not promised a dress rehearsal. Deleting VFS entirely is out — the sandbox rule still requires it for analysis.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="i3">
+        <div class="head">
+          <h3>3. Guide-as-source + digest expiry</h3>
+          <span class="chip conf-high">Confidence 78%</span>
+          <span class="chip cx-med">Complexity Medium</span>
+        </div>
+        <p>Treat <code>content/k{1,2}/full.md</code> as the living source, an IR as what Core executes, and <code>KOTOR*_Full.toml</code> as a compile cache you can delete. Stamp every TOML run with guide hash + ingest commit. The comfortable GUI/CLI path loads the guide. A prebuilt full TOML is a labeled fixture that cannot be a reference install. STRATEGY’s “instruction file stays the single source of truth” and its Full.toml pass-rate metric are the thing being retired, not papered over.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 720 120" width="720" height="120" role="img" aria-label="Living guide versus expired TOML digest">
+            <rect x="16" y="28" width="200" height="64" rx="10" fill="#e4efe4" stroke="#1f4a2a"/>
+            <text x="116" y="56" text-anchor="middle" font-size="14" fill="#1f4a2a">full.md</text>
+            <text x="116" y="76" text-anchor="middle" font-size="11" fill="#1f4a2a">living source</text>
+            <path d="M224 60 H286" stroke="#1c1914" stroke-width="2"/>
+            <polygon points="286,55 298,60 286,65" fill="#1c1914"/>
+            <rect x="306" y="28" width="160" height="64" rx="10" fill="#fffdf8" stroke="#1c1914"/>
+            <text x="386" y="56" text-anchor="middle" font-size="14" fill="#1c1914">IR</text>
+            <text x="386" y="76" text-anchor="middle" font-size="11" fill="#5c564c">what Core runs</text>
+            <path d="M474 60 H536" stroke="#1c1914" stroke-width="2"/>
+            <polygon points="536,55 548,60 536,65" fill="#1c1914"/>
+            <rect x="556" y="28" width="148" height="64" rx="10" fill="#f6ead0" stroke="#6a4a10"/>
+            <text x="630" y="56" text-anchor="middle" font-size="14" fill="#6a4a10">Full.toml</text>
+            <text x="630" y="76" text-anchor="middle" font-size="11" fill="#6a4a10">digest · expires</text>
+          </svg>
+          <figcaption>Illustrative: the digest cannot outrank the living guide.</figcaption>
+        </figure>
+        <dl>
+          <dt>Description</dt>
+          <dd>Put D1a on the default load/install surface. Emission becomes decompile. Agents stop validating a drifted fixture because it was the easy click.</dd>
+          <dt>Basis</dt>
+          <dd><code>direct:</code> unified-install-parity-mission.md supersession 1: a current <code>content/k1/full.md</code> or <code>content/k2/full.md</code> is the authority; prebuilt <code>KOTOR*_Full.toml</code> files are fixtures or diagnostics only. <code>direct:</code> STRATEGY.md still calls the instruction file the single source of truth and still metrics full-build pass rate against those TOMLs.</dd>
+          <dt>Rationale</dt>
+          <dd>The mission and STRATEGY are two products. Picking “guide is source” collapses convert / ingest / round-trip into a compiler story.</dd>
+          <dt>Downsides</dt>
+          <dd>Breaks muscle memory for anyone who still launches from Full.toml. Requires an IR story so Markdown is not executed as ad-hoc string soup. Does not by itself teach unknown sentence forms (see idea 7).</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="i4">
+        <div class="head">
+          <h3>4. Generation store</h3>
+          <span class="chip">Confidence 72%</span>
+          <span class="chip cx-high">Complexity High</span>
+        </div>
+        <p>Promote “restore snapshot before N, fix, replay N onward in guide order” from prose into the only legal motion of the game tree. Step N writes generation N as a hardlink copy-on-write of N−1 plus that step’s writes. The kotor directory is a pointer. Rollback is retargeting the pointer, then verifying hash identity. Append-at-end becomes unrepresentable: there is no live tree to tack a missed step onto. Hardlinks must break on first write so a snapshot cannot be mutated through a shared inode.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 720 140" width="720" height="140" role="img" aria-label="Generation pointer instead of in-place mutation">
+            <rect x="20" y="36" width="120" height="56" rx="8" fill="#fffdf8" stroke="#1c1914"/>
+            <text x="80" y="70" text-anchor="middle" font-size="13" fill="#1c1914">gen N−1</text>
+            <rect x="200" y="36" width="120" height="56" rx="8" fill="#fffdf8" stroke="#1c1914"/>
+            <text x="260" y="70" text-anchor="middle" font-size="13" fill="#1c1914">gen N</text>
+            <rect x="380" y="36" width="120" height="56" rx="8" fill="#e4efe4" stroke="#1f4a2a"/>
+            <text x="440" y="70" text-anchor="middle" font-size="13" fill="#1f4a2a">gen N+1</text>
+            <path d="M148 64 H192" stroke="#1c1914" stroke-width="2"/>
+            <path d="M328 64 H372" stroke="#1c1914" stroke-width="2"/>
+            <rect x="548" y="28" width="150" height="72" rx="10" fill="#f3e2d4" stroke="#6b2e0c"/>
+            <text x="623" y="58" text-anchor="middle" font-size="13" fill="#6b2e0c">kotor pointer</text>
+            <text x="623" y="78" text-anchor="middle" font-size="11" fill="#6b2e0c">→ gen N+1</text>
+            <text x="20" y="122" font-size="12" fill="#5c564c">Rollback retargets the pointer. There is no end to append to.</text>
+          </svg>
+          <figcaption>Illustrative: the working copy is a pointer, not a writable present.</figcaption>
+        </figure>
+        <dl>
+          <dt>Description</dt>
+          <dd>Checkpoints and paranoia snapshots already assume this is cheap. Make it the store, not an operator ritual, and refuse write-through hardlinks.</dd>
+          <dt>Basis</dt>
+          <dd><code>direct:</code> AGENTS.md: if step N fails you may not install it after N+k; restore the snapshot taken before N and replay onward. Measured 2026-08-05: 103 files differing and 59 removed after append-at-end. <code>direct:</code> manual-parity-testing-methodology.md: an in-place write through a hardlink changes the snapshot too. <code>direct:</code> k1-oneshot-parity-spec.md: never compare a tree that continued past a failure to <code>K1_manual</code>.</dd>
+          <dt>Rationale</dt>
+          <dd>Order is physics because one tree is mutated. If the tree cannot be mutated in place, the destructive protocol is a pointer move, and last-writer inversion cannot land on “current” without a new generation.</dd>
+          <dt>Downsides</dt>
+          <dd>Rewrites InstallationService, managed deploy, and the Installing page. Disk multiplies with generation count unless old gens are pruned. “Infinite git of every write” is a later extreme, not this idea.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="i5">
+        <div class="head">
+          <h3>5. Honest download product</h3>
+          <span class="chip conf-high">Confidence 80%</span>
+          <span class="chip cx-med">Complexity Medium</span>
+        </div>
+        <p>The public contract and the running product disagree. README says the installer does not download and that archives must already sit in one folder. The wizard’s Fetch Downloads step, <code>nxm://</code>, and the headless playbook already do Nexus / MEGA / CAPTCHA work. Pick one product and say it in both places: either a declared acquire phase with typed failure classes (stale DeadlyStream id, Nexus Turnstile, MEGA needs a browser, HTML saved as <code>.rar</code>), or a hard stop that matches the README and keeps fetch outside Core.</p>
+        <dl>
+          <dt>Description</dt>
+          <dd>End the dual-truth. The interesting object is the boundary — sealed, hashed, typed archives in <code>&lt;&lt;modDirectory&gt;&gt;</code> — not a new locker brand name.</dd>
+          <dt>Basis</dt>
+          <dd><code>direct:</code> README.md: “First and foremost the installer does NOT download all required mods, it requires that all mods are downloaded, unextracted, to the same folder.” <code>direct:</code> STRATEGY.md still wants to remove the manual download-and-place chain and already ships <code>nxm://</code>.</dd>
+          <dt>Rationale</dt>
+          <dd>Operator time this week is often host walls, not install math. Users who believe the README get no help; users who believe Fetch Downloads hit a product that denies the job exists.</dd>
+          <dt>Downsides</dt>
+          <dd>Either choice is a product-identity vote. Making acquire official invites CAPTCHA and host policy into the installer. Evicting fetch means the GUI must stop offering it. This idea does not pick the side — it insists the sides stop pretending to be the same product.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="i6">
+        <div class="head">
+          <h3>6. Linux Holo child-process supervisor</h3>
+          <span class="chip">Confidence 76%</span>
+          <span class="chip cx-med">Complexity Medium</span>
+        </div>
+        <p>Linux Holo is not a quiet CLI. Invoked from the wrong CWD it can poll a wrong-but-existing path in a ~4ms loop with zero output. <code>--console</code> can still hang forever on an unhandled exception dialog. ModSync should own a supervisor: control CWD, bound silence, classify working / hung / dialog / dead, and never leave a human or agent watching an empty pipe. InfoName / <code>.rte</code> sanitizers stay; they are not a substitute for knowing the child is stuck.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 720 120" width="720" height="120" role="img" aria-label="Four child states the supervisor must name">
+            <rect x="16" y="32" width="150" height="56" rx="8" fill="#e4efe4" stroke="#1f4a2a"/>
+            <text x="91" y="66" text-anchor="middle" font-size="14" fill="#1f4a2a">working</text>
+            <rect x="196" y="32" width="150" height="56" rx="8" fill="#f6ead0" stroke="#6a4a10"/>
+            <text x="271" y="66" text-anchor="middle" font-size="14" fill="#6a4a10">hung</text>
+            <rect x="376" y="32" width="150" height="56" rx="8" fill="#f3e2d4" stroke="#6b2e0c"/>
+            <text x="451" y="66" text-anchor="middle" font-size="14" fill="#6b2e0c">dialog</text>
+            <rect x="556" y="32" width="150" height="56" rx="8" fill="#eee6d8" stroke="#1c1914"/>
+            <text x="631" y="66" text-anchor="middle" font-size="14" fill="#1c1914">dead</text>
+            <text x="16" y="108" font-size="12" fill="#5c564c">An empty pipe is not “still patching.” The supervisor names the state.</text>
+          </svg>
+          <figcaption>Illustrative: four states, one owner — ModSync, not the child’s silence.</figcaption>
+        </figure>
+        <dl>
+          <dt>Description</dt>
+          <dd>Ship hang and dialog classification before the next Linux full-build night. Engine-start receipts (parsed argv, first log line) belong here as preconditions, not as a separate “Ody equals-sign” product.</dd>
+          <dt>Basis</dt>
+          <dd><code>direct:</code> CONTRIBUTING.md: wrong CWD polls forever with zero output and zero timeout; <code>--console</code> does not guarantee non-interactive operation. <code>direct:</code> Instruction.cs documents Linux Holo 1.5.1 importing <code>rte_editor.py</code> on a <code>.rte</code> InfoName and calling <code>ctypes.windll</code>.</dd>
+          <dt>Rationale</dt>
+          <dd>This week’s dirty Core is a symptom. The recurring pain is an unattended child that can look busy while doing nothing.</dd>
+          <dt>Downsides</dt>
+          <dd>Dialog detection on Linux is messy. A supervisor does not replace owning patcher semantics. Treating “never invoke Holo” as the idea overclaims the <code>rte_editor</code> quote.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="i7">
+        <div class="head">
+          <h3>7. full.md sentence-form grammar</h3>
+          <span class="chip">Confidence 70%</span>
+          <span class="chip cx-high">Complexity High</span>
+        </div>
+        <p>Lift the surveyed instruction forms — option / namespace, delete, cross-mod conditional, run-patcher-N-times, rename / copy-as, overwrite guidance — into a versioned grammar that <code>--direct-markdown</code> must accept or fail closed. An unknown sentence is a parser bug, not a silent skip. GuideDirective then binds to forms, not an over-wide verb library. STRATEGY’s multi-author track becomes “markdown that uses these forms,” not another convert special-case.</p>
+        <dl>
+          <dt>Description</dt>
+          <dd>Make ingestion an ISA. Convert gaps (NPC Clothing, HQ Blasters, and the rest) pay the same parser instead of accumulating one-off coalesces.</dd>
+          <dt>Basis</dt>
+          <dd><code>direct:</code> docs/knowledgebase/k1-oneshot-parity-spec.md: if a guide sentence cannot currently be turned into an instruction, the parser must learn that sentence form. The top three forms — option selection, deletion, and cross-mod conditionals — carry most of the risk.</dd>
+          <dt>Rationale</dt>
+          <dd>Idea 3 makes the guide the source. This idea is how a source stays executable as authors write new sentences. Without it, “guide is authority” is a policy that still silently drops prose.</dd>
+          <dt>Downsides</dt>
+          <dd>A closed grammar is a long ingest project. Fail-closed will halt runs that today limp through. Does not replace archive identity or PASS.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <h2>Rejection Summary</h2>
+      <p class="prose">Forty-eight frame ideas and eight combinations were generated, then cut. Absorbed items lost to a stronger survivor. Refuted items had a basis that did not support the move, or a cited line that does not mean what was claimed.</p>
+      <table class="reject">
+        <thead>
+          <tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>Step-proof object</td><td>Duplicates a stronger idea (Witness PASS type).</td></tr>
+          <tr><td>3</td><td>DryRun names the unsimulated tree</td><td>Duplicates a stronger idea (DryRun identity split).</td></tr>
+          <tr><td>5</td><td>Engine-start proof from Ody argv</td><td>Basis refuted: <code>--flag=value</code> is argv parsing, not engine-start proof.</td></tr>
+          <tr><td>6</td><td>Comfortable path is the guide path</td><td>Duplicates a stronger idea (Guide-as-source + digest expiry).</td></tr>
+          <tr><td>7</td><td>Copy-on-write rollback</td><td>Duplicates a stronger idea (Generation store).</td></tr>
+          <tr><td>8</td><td>Cold-start operator pack</td><td>Vacancy overstated; re-discover quote is docs hygiene, not a product. Below meeting-test.</td></tr>
+          <tr><td>9</td><td>Delete DryRun as a proof surface</td><td>Absorbed into DryRun identity split, which keeps VFS as a type-check.</td></tr>
+          <tr><td>10</td><td>Installer is the oracle</td><td>Basis refuted: STRATEGY SSOT plus shared-wrong 2DAMEMORY kill installer-as-oracle.</td></tr>
+          <tr><td>11</td><td>Never invoke Linux Holo / patcher IR</td><td>Basis refuted: <code>rte_editor</code> supports sanitize or supervise, not abandoning Holo CLI.</td></tr>
+          <tr><td>12</td><td>Strike process exit / KotorDiff gate</td><td>Duplicates a stronger idea (Witness PASS type).</td></tr>
+          <tr><td>13</td><td>Evict download from Core</td><td>Opposite of Honest download; weaker than forcing one product identity.</td></tr>
+          <tr><td>14</td><td>Demote GuideDirective</td><td>Cited tier definition does not show over-binding. Below meeting-test.</td></tr>
+          <tr><td>15</td><td>2DAMEMORY as weidu.log</td><td><code>weidu.log</code> is an install transcript, not a token-to-row map. Below meeting-test.</td></tr>
+          <tr><td>16</td><td>Each step is a generation</td><td>Duplicates a stronger idea (Generation store).</td></tr>
+          <tr><td>17</td><td>Guide is the program; TOML is object code</td><td>Duplicates a stronger idea (Guide-as-source + digest expiry).</td></tr>
+          <tr><td>18</td><td>ModSync is a proof checker</td><td>Duplicates a stronger idea (Witness PASS type).</td></tr>
+          <tr><td>19</td><td>Patchers are witnesses</td><td>Duplicates a stronger idea (Witness PASS type).</td></tr>
+          <tr><td>20</td><td>DryRun is a type-check</td><td>Restatement of 3. Below meeting-test.</td></tr>
+          <tr><td>21</td><td>Sealed player replay</td><td>Wabbajack is analogous; “encode on Holo CLI” is live patching. Better as a later brainstorm of 1 or 4.</td></tr>
+          <tr><td>22</td><td>Order is a published conflict policy</td><td>Interesting but better as a brainstorm variant of Generation store, not a separate product.</td></tr>
+          <tr><td>23</td><td>Acquisition as a first-class phase</td><td>Same README / STRATEGY fight as 5; does not add a new basis.</td></tr>
+          <tr><td>24</td><td>Core Parse / Plan / Apply+Witness</td><td>Already covered by the mission’s frontend rule; Apply+Witness is inside Witness PASS.</td></tr>
+          <tr><td>25</td><td>Content-equality kernel</td><td>Duplicates a stronger idea (Witness PASS type).</td></tr>
+          <tr><td>26</td><td>2DAMEMORY map as the install AST</td><td>Basis refuted: <code>HasPatcherTokens</code> is an <code>IndexOf</code> boolean, not a map.</td></tr>
+          <tr><td>28</td><td>VFS simulates Real + hardlink + patcher</td><td>Quotes show a gap; they do not entail growing VFS into that physics. C3 is the better split.</td></tr>
+          <tr><td>29</td><td>PatcherRunResult schema</td><td>Restatement of 1 / 19. Below meeting-test.</td></tr>
+          <tr><td>30</td><td>Restore-replay as the only Core primitive</td><td>Duplicates a stronger idea (Generation store).</td></tr>
+          <tr><td>31</td><td>Learnings as pipeline fixtures</td><td>“One home per fact” argues against stuffing learnings into the pipeline. Below meeting-test.</td></tr>
+          <tr><td>32</td><td>Ledger as bidirectional contract</td><td>Basis refuted: oneshot says the ledger is not an input to the installer.</td></tr>
+          <tr><td>33</td><td>Shuttle PASS / BACKUP vote</td><td>Decorative versus already-required resource compare. Below meeting-test.</td></tr>
+          <tr><td>34</td><td>Fab traveler for 2DAMEMORY</td><td>Stretched analogy; 103 / 59 is order inversion, not a lot traveler. Below meeting-test.</td></tr>
+          <tr><td>35</td><td>GMP chart-recorder PASS</td><td>Restates the methodology four-clause pass. Below meeting-test.</td></tr>
+          <tr><td>36</td><td>Digital-twin fixture inside VFS</td><td>A VFS twin does not stop hardlink write-through on disk. Below meeting-test.</td></tr>
+          <tr><td>37</td><td>Posek versus digest</td><td>Duplicates a stronger idea (Guide-as-source + digest expiry).</td></tr>
+          <tr><td>38</td><td>Historically Informed Performance of TSLPatcher</td><td>Restates the manual-oracle bar. Below meeting-test.</td></tr>
+          <tr><td>39</td><td>Evidence locker</td><td>Neither README nor STRATEGY names a locker. Absorbed into Honest download.</td></tr>
+          <tr><td>40</td><td>NMR ensemble, not crystal packing</td><td>Restates 18 / 25. Below meeting-test.</td></tr>
+          <tr><td>41</td><td>Compile-once Override</td><td>AGENTS explains order damage; it does not entail “users never run a patcher.”</td></tr>
+          <tr><td>42</td><td>Zero-engine Core is TSLPatcher</td><td>Basis refuted versus STRATEGY “built on HoloPatcher's CLI.”</td></tr>
+          <tr><td>43</td><td>Delete the VFS world</td><td>Basis refuted: .cursorrules forbids RealFileSystemProvider for validation.</td></tr>
+          <tr><td>44</td><td>Quad-engine consensus</td><td>Basis refuted: no fourth engine to vote; Ody argv is not a quorum.</td></tr>
+          <tr><td>45</td><td>Exit 0 is mechanically KotorDiff-empty</td><td>Basis refuted: oneshot skips validation; that is not a success definition.</td></tr>
+          <tr><td>46</td><td>Zero golden trees / community witnesses</td><td>Basis refuted: oneshot requires byte-equivalent <code>K1_manual</code>.</td></tr>
+          <tr><td>47</td><td>Agent-only installer; freeze the GUI</td><td>Basis refuted: STRATEGY primary is players; mission requires GUI == CLI.</td></tr>
+          <tr><td>48</td><td>Infinite CoW game-git</td><td>Leap from existing snapshots. Below meeting-test.</td></tr>
+          <tr><td>C2</td><td>2DAMEMORY traveler AST</td><td>Built from weak and refuted parts (15 / 26 / 34). Below meeting-test.</td></tr>
+          <tr><td>C5</td><td>Acquisition locker boundary</td><td>“Locker” is not in the sources; Honest download is the grounded form.</td></tr>
+          <tr><td>C6</td><td>Sealed player replay + HIP authoring</td><td>HIP cuts against sealing; Wabbajack-style compile-once is a later fork.</td></tr>
+          <tr><td>C8</td><td>Operator contract + bidirectional ledger</td><td>Load-bearing ledger half contradicted by the oneshot oracle line.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer class="composition-signal">Composed 2026-08-31T06:45Z by ce-ideate from a surprise-me <code>/ce-ideate</code> invocation on ModSync.</footer>
+  </div>
+</body>
+</html>

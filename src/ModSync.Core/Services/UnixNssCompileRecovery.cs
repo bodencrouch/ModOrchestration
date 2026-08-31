@@ -65,6 +65,95 @@ namespace ModSync.Core.Services
             return patcherText.IndexOf(BuiltinCrashMarker, StringComparison.Ordinal) >= 0;
         }
 
+        /// <summary>
+        /// After a successful wine recovery, Holo's leftover <c>nwscript.nss</c> copy
+        /// failures and the "install completed with errors" summary are not real
+        /// missing-game-file problems — the recovered <c>.ncs</c> is already in Override.
+        /// </summary>
+        internal static bool IsRecoveredNssSupportError([CanBeNull] string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return false;
+            }
+
+            if (IsBuiltinNssCrash(line))
+            {
+                return true;
+            }
+
+            if (line.IndexOf("The install completed with errors", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            if (line.IndexOf("nwscript.nss", StringComparison.OrdinalIgnoreCase) >= 0
+                && (line.IndexOf("Could not locate", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("Could not load", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("FileNotFoundError", StringComparison.OrdinalIgnoreCase) >= 0))
+            {
+                return true;
+            }
+
+            // Filename-less partner of the nwscript copy error (timestamp may contain ':').
+            const string loadCopy = "Could not load source file to copy";
+            int loadIdx = line.IndexOf(loadCopy, StringComparison.OrdinalIgnoreCase);
+            if (loadIdx >= 0)
+            {
+                string after = line.Substring(loadIdx + loadCopy.Length).Trim().Trim(':').Trim();
+                return after.Length == 0;
+            }
+
+            return false;
+        }
+
+        internal static void EnsureNwscriptInPatcherTree([NotNull] DirectoryInfo tslPatcherDirectory)
+        {
+            if (tslPatcherDirectory is null || !tslPatcherDirectory.Exists)
+            {
+                return;
+            }
+
+            string dest = Path.Combine(tslPatcherDirectory.FullName, "nwscript.nss");
+            if (File.Exists(dest))
+            {
+                return;
+            }
+
+            EnsureInclude(tslPatcherDirectory.FullName, tslPatcherDirectory.FullName, "nwscript.nss");
+            if (!File.Exists(dest))
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (string dir in Directory.EnumerateDirectories(
+                    tslPatcherDirectory.FullName,
+                    "*",
+                    SearchOption.AllDirectories))
+                {
+                    string leaf = Path.GetFileName(dir);
+                    if (leaf == null
+                        || (!leaf.StartsWith("mod", StringComparison.OrdinalIgnoreCase)
+                            && !leaf.Equals("tslpatchdata", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    string copy = Path.Combine(dir, "nwscript.nss");
+                    if (!File.Exists(copy))
+                    {
+                        File.Copy(dest, copy);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogVerbose($"[NSS] Could not stage nwscript.nss into namespace folders: {ex.Message}");
+            }
+        }
+
         internal static void EnableSaveProcessedScripts([NotNull] DirectoryInfo tslPatcherDirectory)
         {
             if (tslPatcherDirectory is null || !tslPatcherDirectory.Exists)
@@ -608,7 +697,12 @@ namespace ModSync.Core.Services
         }
 
         [CanBeNull]
-        private static string FindNwnnsscomp([NotNull] string preferredDir, [NotNull] string searchRoot)
+        private static string _cachedCompiler;
+
+        internal static void ResetCompilerCacheForTests() => _cachedCompiler = null;
+
+        [CanBeNull]
+        internal static string FindNwnnsscomp([NotNull] string preferredDir, [NotNull] string searchRoot)
         {
             string local = Path.Combine(preferredDir, "nwnnsscomp.exe");
             if (File.Exists(local))
@@ -616,7 +710,84 @@ namespace ModSync.Core.Services
                 return local;
             }
 
-            return Directory.EnumerateFiles(searchRoot, "nwnnsscomp.exe", SearchOption.AllDirectories).FirstOrDefault();
+            string inRoot = SafeFindFirst(searchRoot, "nwnnsscomp.exe");
+            if (!string.IsNullOrEmpty(inRoot))
+            {
+                return inRoot;
+            }
+
+            string env = Environment.GetEnvironmentVariable("MODSYNC_NWNNSSCOMP");
+            if (!string.IsNullOrWhiteSpace(env) && File.Exists(env))
+            {
+                return env;
+            }
+
+            if (!string.IsNullOrEmpty(_cachedCompiler) && File.Exists(_cachedCompiler))
+            {
+                return _cachedCompiler;
+            }
+
+            string parent = Directory.GetParent(searchRoot)?.FullName;
+            if (!string.IsNullOrEmpty(parent))
+            {
+                string sibling = FindNwnnsscompUnderExtractParent(parent);
+                if (!string.IsNullOrEmpty(sibling))
+                {
+                    _cachedCompiler = sibling;
+                    Logger.LogVerbose($"[NSS] Using nwnnsscomp.exe from sibling extract '{sibling}'.");
+                    return sibling;
+                }
+            }
+
+            return null;
+        }
+
+        [CanBeNull]
+        private static string FindNwnnsscompUnderExtractParent([NotNull] string parent)
+        {
+            try
+            {
+                foreach (string child in Directory.EnumerateDirectories(parent))
+                {
+                    string[] candidates =
+                    {
+                        Path.Combine(child, "tslpatchdata", "nwnnsscomp.exe"),
+                        Path.Combine(child, Path.GetFileName(child), "tslpatchdata", "nwnnsscomp.exe"),
+                    };
+                    foreach (string candidate in candidates)
+                    {
+                        if (File.Exists(candidate))
+                        {
+                            return candidate;
+                        }
+                    }
+                }
+
+                return SafeFindFirst(parent, "nwnnsscomp.exe");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogVerbose($"[NSS] Sibling nwnnsscomp search failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        [CanBeNull]
+        private static string SafeFindFirst([NotNull] string root, [NotNull] string fileName)
+        {
+            if (!Directory.Exists(root))
+            {
+                return null;
+            }
+
+            try
+            {
+                return Directory.EnumerateFiles(root, fileName, SearchOption.AllDirectories).FirstOrDefault();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         [CanBeNull]
@@ -689,10 +860,48 @@ namespace ModSync.Core.Services
                 return;
             }
 
-            string found = Directory.EnumerateFiles(searchRoot, fileName, SearchOption.AllDirectories).FirstOrDefault();
+            string found = SafeFindFirst(searchRoot, fileName);
+            if (string.IsNullOrEmpty(found))
+            {
+                string parent = Directory.GetParent(searchRoot)?.FullName;
+                if (!string.IsNullOrEmpty(parent))
+                {
+                    found = FindIncludeUnderExtractParent(parent, fileName);
+                }
+            }
+
             if (!string.IsNullOrEmpty(found))
             {
                 File.Copy(found, dest);
+            }
+        }
+
+        [CanBeNull]
+        private static string FindIncludeUnderExtractParent([NotNull] string parent, [NotNull] string fileName)
+        {
+            try
+            {
+                foreach (string child in Directory.EnumerateDirectories(parent))
+                {
+                    string[] candidates =
+                    {
+                        Path.Combine(child, "tslpatchdata", fileName),
+                        Path.Combine(child, Path.GetFileName(child), "tslpatchdata", fileName),
+                    };
+                    foreach (string candidate in candidates)
+                    {
+                        if (File.Exists(candidate))
+                        {
+                            return candidate;
+                        }
+                    }
+                }
+
+                return SafeFindFirst(parent, fileName);
+            }
+            catch (Exception)
+            {
+                return null;
             }
         }
 

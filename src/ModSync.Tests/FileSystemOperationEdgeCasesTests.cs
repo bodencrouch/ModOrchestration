@@ -522,6 +522,25 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public void EnsureExtractScratch_K1Ody_UsesDedicatedScratchNotHoloExtract()
+        {
+            if (!Directory.Exists("/home/brunner56/modsync-hot"))
+            {
+                Assert.Ignore("modsync-hot NVMe scratch parent is not present on this machine");
+            }
+
+            _config.sourcePath = new DirectoryInfo("/run/media/brunner56/MyBook/kotor_mod_archives");
+            _config.destinationPath = new DirectoryInfo("/home/brunner56/modsync-hot/K1_ody");
+            MainConfig.EnsureExtractScratchAwayFromSource();
+
+            Assert.That(
+                MainConfig.ExtractScratchPath?.FullName,
+                Is.EqualTo("/home/brunner56/modsync-hot/k1_ody_extract"),
+                "K1 Ody must not share k1_auto_extract with the live Holo writer"
+            );
+        }
+
+        [Test]
         public async Task ExtractFile_WhenScratchSet_DoesNotWriteBesideArchive()
         {
             var archivePath = Path.Combine(_modDirectory, "Ultimate Dantooine High Resolution.rar.zip");

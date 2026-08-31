@@ -136,5 +136,55 @@ namespace ModSync.Tests
                 Is.False,
                 "K1CP optional must stay off when K1CP is not in the build");
         }
+
+        [Test]
+        public void SelectNamespaceOptions_ExcludesExtraTextures_WhenGuideRecommendsNotRerunning()
+        {
+            var component = new ModComponent
+            {
+                Name = "JC's Mandalorian Armor",
+                Directions =
+                    "Install Option A. I recommend NOT re-running the patcher to install the extra textures, "
+                    + "as upscaled textures installed in UCO are much higher-quality than these.",
+                Options =
+                {
+                    new Option
+                    {
+                        Guid = Guid.NewGuid(),
+                        Name = "Option A: Unmasked",
+                        Description = "The unmasked Mandalorian armor.",
+                        IsSelected = false,
+                    },
+                    new Option
+                    {
+                        Guid = Guid.NewGuid(),
+                        Name = "Option B: Masked",
+                        Description = "The masked Mandalorian armor.",
+                        IsSelected = false,
+                    },
+                    new Option
+                    {
+                        Guid = Guid.NewGuid(),
+                        Name = "Extra Textures",
+                        Description = "Additional lower-resolution Mandalorian textures.",
+                        IsSelected = false,
+                    },
+                },
+            };
+
+            AutoInstructionGenerator.SelectNamespaceOptionsFromGuide(
+                component,
+                new List<ModComponent> { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(component.Options[0].IsSelected, Is.True, "Option A must be selected");
+                Assert.That(component.Options[1].IsSelected, Is.False, "Option B must stay off");
+                Assert.That(
+                    component.Options[2].IsSelected,
+                    Is.False,
+                    "Guide says not to install Extra Textures; mentioning the name must not select it");
+            });
+        }
     }
 }

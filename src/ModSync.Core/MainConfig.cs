@@ -489,6 +489,9 @@ namespace ModSync.Core
 
             const string hotScratchParent = "/home/brunner56/modsync-hot";
             // k1extract/ is the manual step workspace (s081+). Auto extracts use a sibling.
+            // Check K1_auto / K2_auto before K*_ody: a name like K1_auto_ody contains "K1_auto"
+            // and must keep using k1_auto_extract. Dedicated Ody trees are named K1_ody / K2_ody
+            // so they do not share the live Holo extract scratch.
             string folderName = "extract_scratch";
             if (destFull.IndexOf("K1_auto", StringComparison.OrdinalIgnoreCase) >= 0)
             {
@@ -497,6 +500,14 @@ namespace ModSync.Core
             else if (destFull.IndexOf("K2_auto", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 folderName = "k2_auto_extract";
+            }
+            else if (destFull.IndexOf("K1_ody", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                folderName = "k1_ody_extract";
+            }
+            else if (destFull.IndexOf("K2_ody", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                folderName = "k2_ody_extract";
             }
 
             string scratch;

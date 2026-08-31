@@ -572,12 +572,18 @@ namespace ModSync.Core.Services
                 return true;
             }
 
-            // "the\*", "override\*", "patcher\*", "installer\*" — destination/article leftovers.
+            // "the\*", "them\*", "override\*", "patcher\*", "installer\*" — article/pronoun leftovers
+            // (K2 Terminal Texture drafted Rename them* / them*/them* from "copy them").
             if (Regex.IsMatch(
                     rest,
-                    @"^(the|override|patcher|installer)(?:[\\/]\*)?$",
+                    @"^(the|them|override|patcher|installer)(?:[\\/]\*)?$",
                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
                     TimeSpan.FromSeconds(1)))
+            {
+                return true;
+            }
+
+            if (rest.StartsWith("them*", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -3007,6 +3013,11 @@ namespace ModSync.Core.Services
                     continue;
                 }
 
+                if (GuideExcludesNamespace(prose, option))
+                {
+                    continue;
+                }
+
                 if (!GuideRequestsNamespace(prose, option))
                 {
                     continue;
@@ -3019,6 +3030,14 @@ namespace ModSync.Core.Services
                 }
 
                 option.IsSelected = true;
+            }
+
+            foreach (Option option in component.Options)
+            {
+                if (option != null && GuideExcludesNamespace(prose, option))
+                {
+                    option.IsSelected = false;
+                }
             }
 
             ArbitrateMutuallyExclusiveNamespaces(component, prose);
@@ -3312,7 +3331,7 @@ namespace ModSync.Core.Services
 
             string lower = prose.ToLowerInvariant();
             string template = Policy.TryGetPattern("guide_excludes_namespace")
-                ?? @"\b(?:skip|ignore|do\s+not\s+install|don't\s+install|recommend\s+against)\b[^\n.]{0,80}\b{token}\b";
+                ?? @"\b(?:skip|ignore|do\s+not\s+install|don't\s+install|recommend\s+against|recommend\s+not)\b[^\n.]{0,80}\b{token}\b";
             foreach (string token in SignificantOptionTokens(option))
             {
                 string pattern = template.Replace("{token}", Regex.Escape(token), StringComparison.Ordinal);

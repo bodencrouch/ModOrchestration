@@ -240,6 +240,18 @@ namespace ModSync.Core.Services
                 return byNamedFile;
             }
 
+            // "Download only the Damaged version" names a product that does not share
+            // tokens with the component title. That has to win before UniqueTokenSubset
+            // keeps only "computer"+"panel" archives and drops the Damaged file.
+            // Restricted to download-only/just (not "recommend") so this does not
+            // re-run PreferExplicitGuideVariant over the whole library.
+            ArchiveResolution byDownloadOnly = ResolveByDownloadOnlyVariant(
+                extraSignals, candidates, targetGame);
+            if (byDownloadOnly != null)
+            {
+                return byDownloadOnly;
+            }
+
             // A Nexus id is the page's own files. Guide prose that "recommends" another
             // later mod (UCO Patches → Character Textures) must not outrank that id.
             ArchiveResolution byModId = ResolveByNexusModId(componentName, componentUrls, candidates, targetGame);
@@ -285,7 +297,12 @@ namespace ModSync.Core.Services
             }
 
             ArchiveResolution byName = ResolveByName(searchTerms, candidates, targetGame);
-            if (byName != null)
+            // A leftover extract folder whose name equals the guide heading is ExactName,
+            // but it is not identity. The 2026-08-24 K1 Holo run latched onto
+            // "Better Twi'lek Heads/" and applied that folder's stale 11-patch Slim ini
+            // while `K1 Twi'lek Heads v1.3.3.7z` sat beside it. Keep the folder as a
+            // fallback only when no later tier uniquely picks a real archive.
+            if (byName != null && !IsFolderOnlyHit(byName))
             {
                 return byName;
             }
@@ -299,59 +316,66 @@ namespace ModSync.Core.Services
             // "darth"+"malak") silently picks Darth_Malaks_Lightsaber over Malak.rar.
             logical = DiscardExtraProduct(logical, componentName);
 
+            ArchiveResolution folderFallback = IsFolderOnlyHit(byName) ? byName : null;
+
             ArchiveResolution byAcronym = ResolveByAcronym(componentName, logical, targetGame);
-            if (byAcronym != null)
+            if (TryTakeArchiveHit(byAcronym, ref folderFallback, out ArchiveResolution acronymHit))
             {
-                return byAcronym;
+                return acronymHit;
             }
 
             ArchiveResolution byAcronymContained = ResolveByAcronymContained(componentName, logical, targetGame);
-            if (byAcronymContained != null)
+            if (TryTakeArchiveHit(byAcronymContained, ref folderFallback, out ArchiveResolution acronymContainedHit))
             {
-                return byAcronymContained;
+                return acronymContainedHit;
             }
 
             ArchiveResolution byExpandedAcronym = ResolveByExpandedAcronym(
                 componentName, extraSignals, logical, targetGame);
-            if (byExpandedAcronym != null)
+            if (TryTakeArchiveHit(byExpandedAcronym, ref folderFallback, out ArchiveResolution expandedHit))
             {
-                return byExpandedAcronym;
+                return expandedHit;
             }
 
             ArchiveResolution bySlugAuthor = ResolveBySlugAuthorSubject(componentUrls, logical, targetGame);
-            if (bySlugAuthor != null)
+            if (TryTakeArchiveHit(bySlugAuthor, ref folderFallback, out ArchiveResolution slugHit))
             {
-                return bySlugAuthor;
+                return slugHit;
             }
 
             ArchiveResolution byAuthorPrefix = ResolveByAuthorPrefix(author, componentName, logical, targetGame);
-            if (byAuthorPrefix != null)
+            if (TryTakeArchiveHit(byAuthorPrefix, ref folderFallback, out ArchiveResolution authorHit))
             {
-                return byAuthorPrefix;
+                return authorHit;
             }
 
             ArchiveResolution byLongToken = ResolveByUniqueLongToken(identityTerms, logical, targetGame);
-            if (byLongToken != null)
+            if (TryTakeArchiveHit(byLongToken, ref folderFallback, out ArchiveResolution longTokenHit))
             {
-                return byLongToken;
+                return longTokenHit;
             }
 
             ArchiveResolution byLastToken = ResolveByLastTokenExact(componentName, logical, targetGame);
-            if (byLastToken != null)
+            if (TryTakeArchiveHit(byLastToken, ref folderFallback, out ArchiveResolution lastTokenHit))
             {
-                return byLastToken;
+                return lastTokenHit;
             }
 
-            ArchiveResolution byDropped = ResolveByDroppedTokenSubset(componentName, logical, targetGame, identityTerms);
-            if (byDropped != null)
+            ArchiveResolution byDropped = ResolveByDroppedTokenSubset(componentName, logical, targetGame, searchTerms);
+            if (TryTakeArchiveHit(byDropped, ref folderFallback, out ArchiveResolution droppedHit))
             {
-                return byDropped;
+                return droppedHit;
             }
 
             ArchiveResolution byCompact = ResolveByCompactProductToken(componentName, logical, targetGame);
-            if (byCompact != null)
+            if (TryTakeArchiveHit(byCompact, ref folderFallback, out ArchiveResolution compactHit))
             {
-                return byCompact;
+                return compactHit;
+            }
+
+            if (folderFallback != null)
+            {
+                return folderFallback;
             }
 
             return new ArchiveResolution
@@ -692,12 +716,29 @@ namespace ModSync.Core.Services
                     {
                         // "Korriban Sith Art" vs "Sith Art-1632-..." — the archive title is
                         // contained in the component name. StartsWith cannot see that.
+                        // Armor/armour is the same word (Nexus id 9: Darth Malak's Armor vs
+                        // TSL_Darth_Malaks_Armour_…).
                         narrowed = viable
                             .Where(a =>
                             {
                                 string title = Normalize(TitleBeforeNexusSuffix(a.Name));
-                                return title.Length >= 4
-                                    && normalizedComponent.IndexOf(title, StringComparison.Ordinal) >= 0;
+                                if (title.Length < 4)
+                                {
+                                    return false;
+                                }
+
+                                if (normalizedComponent.IndexOf(title, StringComparison.Ordinal) >= 0)
+                                {
+                                    return true;
+                                }
+
+                                string foldedTitle = title.Replace("armour", "armor", StringComparison.Ordinal);
+                                string foldedComponent = normalizedComponent.Replace(
+                                    "armour",
+                                    "armor",
+                                    StringComparison.Ordinal);
+                                return foldedComponent.IndexOf(foldedTitle, StringComparison.Ordinal) >= 0
+                                    || foldedTitle.IndexOf(foldedComponent, StringComparison.Ordinal) >= 0;
                             })
                             .ToList();
                     }
@@ -1069,7 +1110,13 @@ namespace ModSync.Core.Services
                 return new List<string>();
             }
 
-            return Regex.Split(value, @"[^A-Za-z0-9]+", RegexOptions.None, TimeSpan.FromSeconds(5))
+            // Twi'lek / Malak's must stay one word. Splitting on apostrophe dropped
+            // "twi"+"lek" (both < 4) and left Better Twi'lek Heads with no product token.
+            string joined = value
+                .Replace("'", string.Empty, StringComparison.Ordinal)
+                .Replace("\u2019", string.Empty, StringComparison.Ordinal);
+
+            return Regex.Split(joined, @"[^A-Za-z0-9]+", RegexOptions.None, TimeSpan.FromSeconds(5))
                 .Select(t => t.ToLowerInvariant())
                 .Where(t => t.Length >= 4)
                 .Where(t => !t.Equals("kotor", StringComparison.Ordinal)
@@ -1087,6 +1134,16 @@ namespace ModSync.Core.Services
             if (haystack.IndexOf(token, StringComparison.Ordinal) >= 0)
             {
                 return true;
+            }
+
+            if (token.Equals("armor", StringComparison.Ordinal))
+            {
+                return haystack.IndexOf("armour", StringComparison.Ordinal) >= 0;
+            }
+
+            if (token.Equals("armour", StringComparison.Ordinal))
+            {
+                return haystack.IndexOf("armor", StringComparison.Ordinal) >= 0;
             }
 
             if (token.Equals("renovation", StringComparison.Ordinal))
@@ -1226,6 +1283,7 @@ namespace ModSync.Core.Services
             // invisible and "High Quality Skyboxes II" matched the seven-file patch
             // "High quality skyboxes model fixes.rar" on high+quality+skyboxes alone.
             viable = DiscardSequelMismatch(viable, componentName);
+            viable = PreferRealArchivesOverHeadingFolders(viable);
 
             if (viable.Count == 1)
             {
@@ -1413,6 +1471,20 @@ namespace ModSync.Core.Services
                     Reason =
                         $"{reason} {viable.Count} archives matched; an 'and <extra product>' sibling "
                         + "the component does not mention was discarded.",
+                };
+            }
+
+            if (RequestsApplyAllFiles(narrowingSignals) && withoutExtra.Count >= 2)
+            {
+                List<FileInfo> allFiles = withoutExtra.Select(PreferArchiveFile).ToList();
+                return new ArchiveResolution
+                {
+                    Archive = allFiles[0],
+                    AdditionalArchives = allFiles.Skip(1).ToList(),
+                    Tier = tier,
+                    Reason =
+                        $"{reason} {allFiles.Count} archives matched; the guide says to apply all of them.",
+                    Candidates = allFiles.Select(a => a.Name).ToList(),
                 };
             }
 
@@ -1845,6 +1917,65 @@ namespace ModSync.Core.Services
         /// "Ignore the txi.rar file" / "Do not download the .tga file" name a file so the
         /// reader will skip it. Those clauses must not select that file.
         /// </summary>
+        [CanBeNull]
+        private static ArchiveResolution ResolveByDownloadOnlyVariant(
+            [CanBeNull] IReadOnlyList<string> extraSignals,
+            [NotNull] IReadOnlyList<FileInfo> candidates,
+            GameMarker targetGame)
+        {
+            if (extraSignals == null || extraSignals.Count == 0)
+            {
+                return null;
+            }
+
+            string prose = string.Join(" ", extraSignals);
+            if (!Regex.IsMatch(
+                    prose,
+                    @"\bdownload\s+(?:only|just)\b",
+                    RegexOptions.IgnoreCase,
+                    TimeSpan.FromSeconds(5)))
+            {
+                return null;
+            }
+
+            List<IGrouping<string, FileInfo>> logical = candidates
+                .Where(a => !IsWrongGame(a.Name, targetGame))
+                .GroupBy(a => LogicalArchiveStem(a.Name), StringComparer.Ordinal)
+                .ToList();
+            if (logical.Count < 2)
+            {
+                return null;
+            }
+
+            List<IGrouping<string, FileInfo>> narrowed = PreferExplicitGuideVariant(logical, extraSignals);
+            if (narrowed.Count != 1)
+            {
+                return null;
+            }
+
+            return new ArchiveResolution
+            {
+                Archive = PreferArchiveFile(narrowed[0]),
+                Tier = ArchiveResolutionTier.GuideDirective,
+                Reason = "Guide download note named a unique archive variant.",
+            };
+        }
+
+        private static bool RequestsApplyAllFiles([CanBeNull] IReadOnlyList<string> signals)
+        {
+            if (signals == null || signals.Count == 0)
+            {
+                return false;
+            }
+
+            string prose = string.Join(" ", signals);
+            return Regex.IsMatch(
+                prose,
+                @"\b(?:download\s+and\s+apply|apply)\s+all\s+files\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5));
+        }
+
         private static bool IsNegativeGuideClause([CanBeNull] string clause)
         {
             if (string.IsNullOrWhiteSpace(clause))
@@ -3000,6 +3131,65 @@ namespace ModSync.Core.Services
         private static FileInfo PreferArchiveFile([NotNull] IGrouping<string, FileInfo> group)
         {
             return group.FirstOrDefault(a => IsRealArchiveName(a.Name)) ?? group.First();
+        }
+
+        /// <summary>
+        /// True when the hit is an extensionless directory, not a .zip/.rar/.7z or loose game file.
+        /// </summary>
+        private static bool IsFolderOnlyHit([CanBeNull] ArchiveResolution result)
+        {
+            return result?.Archive != null
+                && !IsRealArchiveName(result.Archive.Name)
+                && !IsLooseGameFileName(result.Archive.Name);
+        }
+
+        /// <summary>
+        /// Returns true when <paramref name="candidate"/> is a real archive (or loose game file).
+        /// Folder-only hits are stashed in <paramref name="folderFallback"/> and skipped so a
+        /// later tier can still pick the archive sitting beside the leftover extract.
+        /// </summary>
+        private static bool TryTakeArchiveHit(
+            [CanBeNull] ArchiveResolution candidate,
+            [CanBeNull] ref ArchiveResolution folderFallback,
+            [CanBeNull] out ArchiveResolution archiveHit)
+        {
+            archiveHit = null;
+            if (candidate == null)
+            {
+                return false;
+            }
+
+            if (!IsFolderOnlyHit(candidate))
+            {
+                archiveHit = candidate;
+                return true;
+            }
+
+            if (folderFallback == null)
+            {
+                folderFallback = candidate;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// A leftover extract folder named after the guide heading is not a second product
+        /// when a real archive already matched the same tier.
+        /// </summary>
+        [NotNull]
+        private static List<IGrouping<string, FileInfo>> PreferRealArchivesOverHeadingFolders(
+            [NotNull] List<IGrouping<string, FileInfo>> viable)
+        {
+            if (!viable.Any(g => g.Any(f => IsRealArchiveName(f.Name))))
+            {
+                return viable;
+            }
+
+            List<IGrouping<string, FileInfo>> archives = viable
+                .Where(g => g.Any(f => IsRealArchiveName(f.Name) || IsLooseGameFileName(f.Name)))
+                .ToList();
+            return archives.Count > 0 ? archives : viable;
         }
 
         [NotNull]

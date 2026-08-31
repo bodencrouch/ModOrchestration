@@ -12627,4 +12627,732 @@ Function '<module>' at /home/brunner56/modsync-hot/work/tmp/_MEInTzNUJ/utility/t
   askopenfilename = <function askopenfilename at 0x7f716631d510>
   asksaveasfilename = <function asksaveasfilename at 0x7f716631e830>
   Any = typing.Any
+  Path = <class 'utility.system.path.Path'>An unexpected error occurred while testing the config ini reader: Exception 'main thread is not in main loop' of type '<class 'RuntimeError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1087, in task
+  File "pykotor/tslpatcher/reader.py", line 179, in load
+  File "pykotor/tslpatcher/reader.py", line 215, in load_settings
+  File "pykotor/tslpatcher/logger.py", line 57, in add_note
+  File "utility/event.py", line 15, in fire
+  File "__main__.py", line 1310, in write_log
+  File "tkinter/__init__.py", line 1675, in configure
+  File "tkinter/__init__.py", line 1665, in _configure
+RuntimeError: main thread is not in main loop
+
+Stack Trace Variables:
+
+Function 'task' at /tmp/_MEIsiv9Kg/__main__.py:1087:
+  reader = <pykotor.tslpatcher.reader.ConfigReader object at 0x7f4e376fefe0>
+  e = RuntimeError('main thread is not in main loop')
+  ini_file_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\sentinel sneak attack-1710-1-2-0-1757276890\tslpatchdata\mod\changes.ini)
+  self = <__main__.App object .>
+
+Function 'load' at /tmp/_MEIsiv9Kg/pykotor/tslpatcher/reader.pyc:179:
+  self = <pykotor.tslpatcher.reader.ConfigReader object at 0x7f4e376fefe0>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7f4e376fef80>
+
+Function 'load_settings' at /tmp/_MEIsiv9Kg/pykotor/tslpatcher/reader.pyc:215:
+  self = <pykotor.tslpatcher.reader.ConfigReader object at 0x7f4e376fefe0>
+  settings_section = 'Settings'
+
+Function 'add_note' at /tmp/_MEIsiv9Kg/pykotor/tslpatcher/logger.pyc:57:
+  self = <pykotor.tslpatcher.logger.PatchLogger object at 0x7f4e37a6b850>
+  message = 'Loading [Settings] section from ini...'
+  log_obj = <pykotor.tslpatcher.logger.PatchLog object at 0x7f4e376ff040>
+
+Function 'fire' at /tmp/_MEIsiv9Kg/utility/event.pyc:15:
+  self = <utility.event.Observable object at 0x7f4e37a6bd00>
+  message = <pykotor.tslpatcher.logger.PatchLog object at 0x7f4e376ff040>
+  callback = <bound method App.write_log of <__main__.App object .>>
+
+Function 'write_log' at /tmp/_MEIsiv9Kg/__main__.py:1310:
+  self = <__main__.App object .>
+  log = <pykotor.tslpatcher.logger.PatchLog object at 0x7f4e376ff040>
+
+Function 'configure' at /tmp/_MEIsiv9Kg/tkinter/__init__.pyc:1675:
+  self = <tkinter.Text object .!frame2.!text>
+  cnf = None
+  kw = {'state': 'normal'}
+
+Function '_configure' at /tmp/_MEIsiv9Kg/tkinter/__init__.pyc:1665:
+  self = <tkinter.Text object .!frame2.!text>
+  cmd = 'configure'
+  cnf = {'state': 'normal'}
+  kw = {'state': 'normal'}An unexpected error occurred while testing the config ini reader: Exception 'main thread is not in main loop' of type '<class 'RuntimeError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1087, in task
+  File "pykotor/tslpatcher/reader.py", line 179, in load
+  File "pykotor/tslpatcher/reader.py", line 215, in load_settings
+  File "pykotor/tslpatcher/logger.py", line 57, in add_note
+  File "utility/event.py", line 15, in fire
+  File "__main__.py", line 1310, in write_log
+  File "tkinter/__init__.py", line 1675, in configure
+  File "tkinter/__init__.py", line 1665, in _configure
+RuntimeError: main thread is not in main loop
+
+Stack Trace Variables:
+
+Function 'task' at /tmp/_MEImU39KX/__main__.py:1087:
+  reader = <pykotor.tslpatcher.reader.ConfigReader object at 0x7f080da799c0>
+  e = RuntimeError('main thread is not in main loop')
+  ini_file_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\custom selkath animation\custom selkath animation\tslpatchdata\changes.ini)
+  self = <__main__.App object .>
+
+Function 'load' at /tmp/_MEImU39KX/pykotor/tslpatcher/reader.pyc:179:
+  self = <pykotor.tslpatcher.reader.ConfigReader object at 0x7f080da799c0>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7f080da79960>
+
+Function 'load_settings' at /tmp/_MEImU39KX/pykotor/tslpatcher/reader.pyc:215:
+  self = <pykotor.tslpatcher.reader.ConfigReader object at 0x7f080da799c0>
+  settings_section = 'Settings'
+
+Function 'add_note' at /tmp/_MEImU39KX/pykotor/tslpatcher/logger.pyc:57:
+  self = <pykotor.tslpatcher.logger.PatchLogger object at 0x7f080ddc78b0>
+  message = 'Loading [Settings] section from ini...'
+  log_obj = <pykotor.tslpatcher.logger.PatchLog object at 0x7f080da79a20>
+
+Function 'fire' at /tmp/_MEImU39KX/utility/event.pyc:15:
+  self = <utility.event.Observable object at 0x7f080ddc7d60>
+  message = <pykotor.tslpatcher.logger.PatchLog object at 0x7f080da79a20>
+  callback = <bound method App.write_log of <__main__.App object .>>
+
+Function 'write_log' at /tmp/_MEImU39KX/__main__.py:1310:
+  self = <__main__.App object .>
+  log = <pykotor.tslpatcher.logger.PatchLog object at 0x7f080da79a20>
+
+Function 'configure' at /tmp/_MEImU39KX/tkinter/__init__.pyc:1675:
+  self = <tkinter.Text object .!frame2.!text>
+  cnf = None
+  kw = {'state': 'normal'}
+
+Function '_configure' at /tmp/_MEImU39KX/tkinter/__init__.pyc:1665:
+  self = <tkinter.Text object .!frame2.!text>
+  cmd = 'configure'
+  cnf = {'state': 'normal'}
+  kw = {'state': 'normal'}
+Assertion with Exception Trace: Exception 'couldn't connect to display ""' of type '<class '_tkinter.TclError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1353, in <module>
+  File "__main__.py", line 1348, in main
+  File "__main__.py", line 143, in __init__
+  File "tkinter/__init__.py", line 2299, in __init__
+_tkinter.TclError: couldn't connect to display ""
+
+Stack Trace Variables:
+
+Function '<module>' at /home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/__main__.py:1353:
+  __annotations__ = {'CURRENT_VERSION': 'tuple[int, ...]'}
+  _pyi_main_co = <code object <module> at 0x7fb8f63c9840, file "__main__.py", line 1>
+  sys = <module 'sys' (built-in)>
+  pyimod02_importers = <module 'pyimod02_importers' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod02_importers.py'>
+  os = <module 'os' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/base_library.zip/os.pyc'>
+  VIRTENV = 'VIRTUAL_ENV'
+  python_path = ['/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/base_library.zip', '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/lib-dynload', '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b']
+  pth = '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b'
+  encodings = <module 'encodings' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/base_library.zip/encodings/__init__.pyc'>
+  pyimod03_ctypes = <module 'pyimod03_ctypes' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod03_ctypes.py'>
+  entry = '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/tk'
+  annotations = _Feature((3, 7, 0, 'beta', 1), (3, 11, 0, 'alpha', 0), 16777216)
+  base64 = <module 'base64' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/base64.pyc'>
+  contextlib = <module 'contextlib' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/contextlib.pyc'>
+  ctypes = <module 'ctypes' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/ctypes/__init__.pyc'>
+  inspect = <module 'inspect' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/inspect.pyc'>
+  io = <module 'io' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/base_library.zip/io.pyc'>
+  json = <module 'json' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/json/__init__.pyc'>
+  pathlib = <module 'pathlib' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/pathlib.pyc'>
+  subprocess = <module 'subprocess' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/subprocess.pyc'>
+  tempfile = <module 'tempfile' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/tempfile.pyc'>
+  time = <module 'time' (built-in)>
+  tk = <module 'tkinter' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/tkinter/__init__.pyc'>
+  traceback = <module 'traceback' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/base_library.zip/traceback.pyc'>
+  webbrowser = <module 'webbrowser' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/webbrowser.pyc'>
+  ArgumentParser = <class 'argparse.ArgumentParser'>
+  Namespace = <class 'argparse.Namespace'>
+  datetime = <class 'datetime.datetime'>
+  timedelta = <class 'datetime.timedelta'>
+  timezone = <class 'datetime.timezone'>
+  IntEnum = <enum 'IntEnum'>
+  Event = <class 'threading.Event'>
+  Thread = <class 'threading.Thread'>
+  filedialog = <module 'tkinter.filedialog' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/tkinter/filedialog.pyc'>
+  messagebox = <module 'tkinter.messagebox' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/tkinter/messagebox.pyc'>
+  ttk = <module 'tkinter.ttk' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/tkinter/ttk.pyc'>
+  tkfont = <module 'tkinter.font' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/tkinter/font.pyc'>
+  TYPE_CHECKING = False
+  Callable = typing.Callable
+  NoReturn = typing.NoReturn
+  Game = <enum 'Game'>
+  BinaryReader = <class 'pykotor.common.stream.BinaryReader'>
+  ResourceIdentifier = <class 'pykotor.extract.file.ResourceIdentifier'>
+  decode_bytes_with_fallbacks = <function decode_bytes_with_fallbacks at 0x7fb8f5a1b9a0>
+  CaseAwarePath = <class 'pykotor.tools.path.CaseAwarePath'>
+  find_kotor_paths_from_default = <function find_kotor_paths_from_default at 0x7fb8e734ee60>
+  PatchLog = <class 'pykotor.tslpatcher.logger.PatchLog'>
+  PatchLogger = <class 'pykotor.tslpatcher.logger.PatchLogger'>
+  ModInstaller = <class 'pykotor.tslpatcher.patcher.ModInstaller'>
+  ConfigReader = <class 'pykotor.tslpatcher.reader.ConfigReader'>
+  NamespaceReader = <class 'pykotor.tslpatcher.reader.NamespaceReader'>
+  ModUninstaller = <class 'pykotor.tslpatcher.uninstall.ModUninstaller'>
+  format_exception_with_variables = <function format_exception_with_variables at 0x7fb8e79d89d0>
+  universal_simplify_exception = <function universal_simplify_exception at 0x7fb8e79d8790>
+  striprtf = <function striprtf at 0x7fb8f59f5a20>
   Path = <class 'utility.system.path.Path'>
+  ToolTip = <class 'utility.tkinter.tooltip.ToolTip'>
+  CURRENT_VERSION = (1, 5, 1)
+  VERSION_LABEL = 'v1.5.1'
+  ExitCode = <enum 'ExitCode'>
+  HoloPatcherError = <class '__main__.HoloPatcherError'>
+  parse_args = <function parse_args at 0x7fb8f63b7250>
+  App = <class '__main__.App'>
+  onAppCrash = <function onAppCrash at 0x7fb8e70cdc60>
+  is_frozen = <function is_frozen at 0x7fb8e70cfac0>
+  main = <function main at 0x7fb8e70cfb50>
+
+Function 'main' at /home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/__main__.py:1348:
+
+Function '__init__' at /home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/__main__.py:143:
+  self = <__main__.App object .>
+  __class__ = <class '__main__.App'>
+
+Function '__init__' at /home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/tkinter/__init__.pyc:2299:
+  self = <__main__.App object .>
+  screenName = None
+  baseName = 'holopatcher'
+  className = 'Tk'
+  useTk = True
+  sync = False
+  use = None
+  os = <module 'os' from '/home/brunner56/modsync-hot/work/tmp/_MEItRQw5b/base_library.zip/os.pyc'>
+  ext = ''
+  interactive = FalseAn unexpected error occurred while loading the mod info.: Exception 'CaseInsensitiveWrappedStr(InfoName)' of type '<class 'KeyError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 797, in open_mod
+  File "pykotor/tslpatcher/reader.py", line 86, in from_filepath
+  File "pykotor/tslpatcher/reader.py", line 108, in load
+  File "pykotor/common/misc.py", line 639, in __getitem__
+KeyError: CaseInsensitiveWrappedStr(InfoName)
+
+Stack Trace Variables:
+
+Function 'open_mod' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/__main__.py:797:
+  self = <__main__.App object .>
+  default_directory_path_str = "/home/brunner56/modsync-hot/k1_auto_extract/JC's Mandalorian Armor for K1 v2.0.0"
+  directory_path_str = "/home/brunner56/modsync-hot/k1_auto_extract/JC's Mandalorian Armor for K1 v2.0.0"
+  tslpatchdata_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\jc's mandalorian armor for k1 v2.0.0\tslpatchdata)
+  namespace_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\jc's mandalorian armor for k1 v2.0.0\tslpatchdata\namespaces.ini)
+  changes_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\jc's mandalorian armor for k1 v2.0.0\tslpatchdata\changes.ini)
+  e = KeyError(CaseInsensitiveWrappedStr(InfoName))
+
+Function 'from_filepath' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/pykotor/tslpatcher/reader.pyc:86:
+  cls = <class 'pykotor.tslpatcher.reader.NamespaceReader'>
+  path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\jc's mandalorian armor for k1 v2.0.0\tslpatchdata\namespaces.ini)
+  ini = <configparser.ConfigParser object at 0x7f2d8e0cd210>
+
+Function 'load' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/pykotor/tslpatcher/reader.pyc:108:
+  self = <pykotor.tslpatcher.reader.NamespaceReader object at 0x7f2d8e0cdf60>
+  namespaces_section_name = 'Namespaces'
+  namespace_ids = CaseInsensitiveDict.from_dict({CaseInsensitiveWrappedStr(namespace1): 'a_unmasked', CaseInsensitiveWrappedStr(namespace2): 'b_masked', CaseInsensitiveWrappedStr(namespace3): 'extra_textures'})
+  namespaces = []
+  key = CaseInsensitiveWrappedStr(namespace1)
+  namespace_section_key = 'a_unmasked'
+  this_namespace_section = CaseInsensitiveDict.from_dict({CaseInsensitiveWrappedStr(datapath): 'a_unmasked', CaseInsensitiveWrappedStr(name): 'Option A: Unmasked', CaseInsensitiveWrappedStr(description): 'With this option, Class 9 Mandalorian armors are recolored to match their usual ranking system (blue/red/gold).', CaseInsensitiveWrappedStr(ininame): 'changes.ini'})
+  ini_filename = 'changes.ini'
+  namespace_id = 'a_unmasked'
+
+Function '__getitem__' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/pykotor/common/misc.pyc:639:
+  self = CaseInsensitiveDict.from_dict({CaseInsensitiveWrappedStr(datapath): 'a_unmasked', CaseInsensitiveWrappedStr(name): 'Option A: Unmasked', CaseInsensitiveWrappedStr(description): 'With this option, Class 9 Mandalorian armors are recolored to match their usual ranking system (blue/red/gold).', CaseInsensitiveWrappedStr(ininame): 'changes.ini'})
+  key = 'InfoName'
+Assertion with Exception Trace: Exception '' of type '<class 'StopIteration'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1353, in <module>
+  File "__main__.py", line 1348, in main
+  File "__main__.py", line 163, in __init__
+  File "__main__.py", line 375, in handle_commandline
+  File "__main__.py", line 391, in _begin_oneshot
+  File "__main__.py", line 1060, in begin_install_thread
+StopIteration
+
+Stack Trace Variables:
+
+Function '<module>' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/__main__.py:1353:
+  __annotations__ = {'CURRENT_VERSION': 'tuple[int, ...]'}
+  _pyi_main_co = <code object <module> at 0x7f2d9d3e5840, file "__main__.py", line 1>
+  sys = <module 'sys' (built-in)>
+  pyimod02_importers = <module 'pyimod02_importers' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod02_importers.py'>
+  os = <module 'os' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/base_library.zip/os.pyc'>
+  VIRTENV = 'VIRTUAL_ENV'
+  python_path = ['/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/base_library.zip', '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/lib-dynload', '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM']
+  pth = '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM'
+  encodings = <module 'encodings' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/base_library.zip/encodings/__init__.pyc'>
+  pyimod03_ctypes = <module 'pyimod03_ctypes' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod03_ctypes.py'>
+  entry = '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/tk'
+  annotations = _Feature((3, 7, 0, 'beta', 1), (3, 11, 0, 'alpha', 0), 16777216)
+  base64 = <module 'base64' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/base64.pyc'>
+  contextlib = <module 'contextlib' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/contextlib.pyc'>
+  ctypes = <module 'ctypes' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/ctypes/__init__.pyc'>
+  inspect = <module 'inspect' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/inspect.pyc'>
+  io = <module 'io' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/base_library.zip/io.pyc'>
+  json = <module 'json' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/json/__init__.pyc'>
+  pathlib = <module 'pathlib' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/pathlib.pyc'>
+  subprocess = <module 'subprocess' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/subprocess.pyc'>
+  tempfile = <module 'tempfile' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/tempfile.pyc'>
+  time = <module 'time' (built-in)>
+  tk = <module 'tkinter' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/tkinter/__init__.pyc'>
+  traceback = <module 'traceback' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/base_library.zip/traceback.pyc'>
+  webbrowser = <module 'webbrowser' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/webbrowser.pyc'>
+  ArgumentParser = <class 'argparse.ArgumentParser'>
+  Namespace = <class 'argparse.Namespace'>
+  datetime = <class 'datetime.datetime'>
+  timedelta = <class 'datetime.timedelta'>
+  timezone = <class 'datetime.timezone'>
+  IntEnum = <enum 'IntEnum'>
+  Event = <class 'threading.Event'>
+  Thread = <class 'threading.Thread'>
+  filedialog = <module 'tkinter.filedialog' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/tkinter/filedialog.pyc'>
+  messagebox = <module 'tkinter.messagebox' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/tkinter/messagebox.pyc'>
+  ttk = <module 'tkinter.ttk' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/tkinter/ttk.pyc'>
+  tkfont = <module 'tkinter.font' from '/home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/tkinter/font.pyc'>
+  TYPE_CHECKING = False
+  Callable = typing.Callable
+  NoReturn = typing.NoReturn
+  Game = <enum 'Game'>
+  BinaryReader = <class 'pykotor.common.stream.BinaryReader'>
+  ResourceIdentifier = <class 'pykotor.extract.file.ResourceIdentifier'>
+  decode_bytes_with_fallbacks = <function decode_bytes_with_fallbacks at 0x7f2d9ca779a0>
+  CaseAwarePath = <class 'pykotor.tools.path.CaseAwarePath'>
+  find_kotor_paths_from_default = <function find_kotor_paths_from_default at 0x7f2d8e34ae60>
+  PatchLog = <class 'pykotor.tslpatcher.logger.PatchLog'>
+  PatchLogger = <class 'pykotor.tslpatcher.logger.PatchLogger'>
+  ModInstaller = <class 'pykotor.tslpatcher.patcher.ModInstaller'>
+  ConfigReader = <class 'pykotor.tslpatcher.reader.ConfigReader'>
+  NamespaceReader = <class 'pykotor.tslpatcher.reader.NamespaceReader'>
+  ModUninstaller = <class 'pykotor.tslpatcher.uninstall.ModUninstaller'>
+  format_exception_with_variables = <function format_exception_with_variables at 0x7f2d8e9d49d0>
+  universal_simplify_exception = <function universal_simplify_exception at 0x7f2d8e9d4790>
+  striprtf = <function striprtf at 0x7f2d9ca51a20>
+  Path = <class 'utility.system.path.Path'>
+  ToolTip = <class 'utility.tkinter.tooltip.ToolTip'>
+  CURRENT_VERSION = (1, 5, 1)
+  VERSION_LABEL = 'v1.5.1'
+  ExitCode = <enum 'ExitCode'>
+  HoloPatcherError = <class '__main__.HoloPatcherError'>
+  parse_args = <function parse_args at 0x7f2d9d3d3250>
+  App = <class '__main__.App'>
+  onAppCrash = <function onAppCrash at 0x7f2d8e0c9c60>
+  is_frozen = <function is_frozen at 0x7f2d8e0cbac0>
+  main = <function main at 0x7f2d8e0cbb50>
+
+Function 'main' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/__main__.py:1348:
+
+Function '__init__' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/__main__.py:163:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/home/brunner56/modsync-hot/K1_auto', tslpatchdata="/home/brunner56/modsync-hot/k1_auto_extract/JC's Mandalorian Armor for K1 v2.0.0", namespace_option_index=0, console=False, uninstall=False, install=True, validate=False)
+  __class__ = <class '__main__.App'>
+
+Function 'handle_commandline' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/__main__.py:375:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/home/brunner56/modsync-hot/K1_auto', tslpatchdata="/home/brunner56/modsync-hot/k1_auto_extract/JC's Mandalorian Armor for K1 v2.0.0", namespace_option_index=0, console=False, uninstall=False, install=True, validate=False)
+  num_cmdline_actions = 1
+
+Function '_begin_oneshot' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/__main__.py:391:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/home/brunner56/modsync-hot/K1_auto', tslpatchdata="/home/brunner56/modsync-hot/k1_auto_extract/JC's Mandalorian Armor for K1 v2.0.0", namespace_option_index=0, console=False, uninstall=False, install=True, validate=False)
+
+Function 'begin_install_thread' at /home/brunner56/modsync-hot/work/tmp/_MEIviSrZM/__main__.py:1060:
+  should_cancel_thread = <threading.Event object at 0x7f2d8e0cd090>
+  self = <__main__.App object .>
+Assertion with Exception Trace: Exception ''str' object has no attribute 'info'' of type '<class 'AttributeError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "pykotor/tslpatcher/patcher.py", line 372, in install
+  File "pykotor/tslpatcher/mods/nss.py", line 118, in patch_resource
+  File "pykotor/resource/formats/ncs/ncs_auto.py", line 112, in compile_nss
+  File "pykotor/resource/formats/ncs/compiler/parser.py", line 75, in __init__
+  File "ply/yacc.py", line 3317, in yacc
+AttributeError: 'str' object has no attribute 'info'
+
+Stack Trace Variables:
+
+Function 'install' at /home/brunner56/modsync-hot/work/tmp/_MEIqRysG0/pykotor/tslpatcher/patcher.pyc:372:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7ffa9f24d870>
+  should_cancel = <threading.Event object at 0x7ffa9f4d9090>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7ffa9f24d6f0>
+  temp_script_folder = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir)
+  patches_list = [<pykotor.tslpatcher.mods.install.InstallFile object at 0x7ffa9f24ff70>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7ffa9f24ff40>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7ffa9f24ffa0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7ffa9f24ffd0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7ffa9f294130>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7ffa9f294220>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7ffa9f2942b0>, <pykoto...<truncated>
+  memory = PatcherMemory(memory_2da={1: "'135'", 2: "'136'", 3: "'137'", 4: "'138'", 5: "'139'"}, memory_str={1164: '1164', 1166: '1166', 41931: '41931', 41932: '41932', 41933: '41933', 0: '49319', 1: '49320', 2: '49321', 3: '49322', 4: '49323', 5: '49324', 11: '49325', 12: '49326', 13: '49327', 14: '49328'})
+  patch = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7ffa9f2a6500>
+  output_container_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto\override)
+  exists = False
+  capsule = None
+  data_to_patch = b'//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n//////////////////////////////////////////////////////////////////////////////...<truncated>
+  patched_data = bytearray(b'UTI V3.28\x00\x00\x00\x08\x00\x00\x00\x98\x00\x00\x00H\x00\x00\x00\xf8\x03\x00\x00\x19\x00\x00\x00\x88\x05\x00\x00M\x00\x00\x00\xd5\x05\x00\x00 \x01\x00\x00\xf5\x06\x00\x00 \x00\x00\x00\xff\xff\xff\xff\x00\x00\x00\x00\x11\x00\x00\x00\x00\x00\x00\x00D\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00d\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\x84\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\xa4\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\xc0\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\xe0\x00\x00\x00\...<truncated>
+  e = AttributeError("'str' object has no attribute 'info'")
+
+Function 'patch_resource' at /home/brunner56/modsync-hot/work/tmp/_MEIqRysG0/pykotor/tslpatcher/mods/nss.pyc:118:
+  self = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7ffa9f2a6500>
+  nss_source = b'//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n//////////////////////////////////////////////////////////////////////////////...<truncated>
+  memory = PatcherMemory(memory_2da={1: "'135'", 2: "'136'", 3: "'137'", 4: "'138'", 5: "'139'"}, memory_str={1164: '1164', 1166: '1166', 41931: '41931', 41932: '41932', 41933: '41933', 0: '49319', 1: '49320', 2: '49321', 3: '49322', 4: '49323', 5: '49324', 11: '49325', 12: '49326', 13: '49327', 14: '49328'})
+  logger = <pykotor.tslpatcher.logger.PatchLogger object at 0x7ffa9f4a3820>
+  game = <Game.K1: 1>
+  reader = <pykotor.common.stream.BinaryReader object at 0x7ffa9f2a7eb0>
+  nss_bytes = b'//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n//////////////////////////////////////////////////////////////////////////////...<truncated>
+  source = <pykotor.tslpatcher.mods.nss.MutableString object at 0x7ffa9f4d9ba0>
+  temp_script_file = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir\atosht_heart.nss)
+  is_windows = False
+  nwnnsscomp_exists = False
+
+Function 'compile_nss' at /home/brunner56/modsync-hot/work/tmp/_MEIqRysG0/pykotor/resource/formats/ncs/ncs_auto.pyc:112:
+  source = '//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n///////////////////////////////////////////////////////////////////////////////...<truncated>
+  game = <Game.K1: 1>
+  optimizers = [<pykotor.resource.formats.ncs.optimizers.RemoveNopOptimizer object at 0x7ffa9f4d9d20>, <pykotor.resource.formats.ncs.optimizers.RemoveMoveSPEqualsZeroOptimizer object at 0x7ffa9f4d9e40>, <pykotor.resource.formats.ncs.optimizers.RemoveUnusedBlocksOptimizer object at 0x7ffa9f4d97e0>]
+  library_lookup = [CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function '__init__' at /home/brunner56/modsync-hot/work/tmp/_MEIqRysG0/pykotor/resource/formats/ncs/compiler/parser.pyc:75:
+  self = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7ffa9f759750>
+  functions = [ScriptFunction(<DataType.INT: 'int'>, 'Random', [ScriptParam(<DataType.INT: 'int'>, 'nMaxInteger', None)], '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);', '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);'), ScriptFunction(<DataType.VOID: 'void'>, 'PrintString', [ScriptParam(<DataType.STRING: 'string'>, 'sString', None)], '// 1: Output sString to the log file.\r\nvoid PrintStr...<truncated>
+  constants = [ScriptConstant("DataType.INT", "NUM_INVENTORY_SLOTS", "18"), ScriptConstant("DataType.INT", "TRUE", "1"), ScriptConstant("DataType.INT", "FALSE", "0"), ScriptConstant("DataType.FLOAT", "DIRECTION_EAST", "0.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_NORTH", "90.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_WEST", "180.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_SOUTH", "270.0"), ScriptConstant("DataType.FLOAT", "PI", "3.141592"), ScriptConstant("DataType.INT", "ATTITUDE_NEUTRAL", "0"), ScriptC...<truncated>
+  library = {'k_inc_cheat': b'//:: k_inc_cheat\n/*\n    This will be localized area for all\n    Cheat Bot scripting.\n*/\n//:: Created By: Preston Watamaniuk\n//:: Copyright (c) 2002 Bioware Corp.\n#include "k_inc_debug"\n//Takes a PLANET_ Constant\nvoid CH_SetPlanetaryGlobal(int nPlanetConstant);\n//Makes the specified party member available to the PC\nvoid CH_SetPartyMemberAvailable(int nNPC);\n//::///////////////////////////////////////////////\n//:: Set Planet Local\n//:: Copyright (c) 2001 Bioware Corp.\n//::////...<truncated>
+  library_lookup = [CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function 'yacc' at /home/brunner56/modsync-hot/work/tmp/_MEIqRysG0/ply/yacc.pyc:3317:
+  method = 'LALR'
+  debug = False
+  tabmodule = 'pykotor.resource.formats.ncs.compiler.parsetab'
+  start = None
+  check_recursion = True
+  optimize = False
+  write_tables = False
+  debugfile = 'parser.out'
+  outputdir = '/home/brunner56/modsync-hot/work/tmp/_MEIqRysG0/pykotor/resource/formats/ncs/compiler'
+  debuglog = 'yacc_debuglog.txt'
+  errorlog = <ply.yacc.PlyLogger object at 0x7ffa9f294460>
+  picklefile = None
+  _items = [('__annotations__', {'tokens': 'list[str]', 'literals': 'list[str]'}), ('__class__', <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>), ('__delattr__', <method-wrapper '__delattr__' of NssParser object at 0x7ffa9f759750>), ('__dict__', {}), ('__dir__', <built-in method __dir__ of NssParser object at 0x7ffa9f759750>), ('__doc__', None), ('__eq__', <method-wrapper '__eq__' of NssParser object at 0x7ffa9f759750>), ('__format__', <built-in method __format__ of NssParser object at 0x7ffa9f759750...<truncated>
+  pdict = {'__annotations__': {'tokens': 'list[str]', 'literals': 'list[str]'}, '__class__': <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>, '__delattr__': <method-wrapper '__delattr__' of NssParser object at 0x7ffa9f759750>, '__dict__': {}, '__dir__': <built-in method __dir__ of NssParser object at 0x7ffa9f759750>, '__doc__': None, '__eq__': <method-wrapper '__eq__' of NssParser object at 0x7ffa9f759750>, '__format__': <built-in method __format__ of NssParser object at 0x7ffa9f759750>, '__ge__': <m...<truncated>
+  srcfile = '/home/brunner56/modsync-hot/work/tmp/_MEIqRysG0/pykotor/resource/formats/ncs/compiler/parser.pyc'
+  pkg = 'pykotor.resource.formats.ncs.compiler'
+  pinfo = <ply.yacc.ParserReflect object at 0x7ffa9f2944f0>
+  signature = "leftORleftANDleftBITWISE_ORleftBITWISE_XORleftBITWISE_ANDleftEQUALSNOT_EQUALSleftGREATER_THANLESS_THANGREATER_THAN_OR_EQUALSLESS_THAN_OR_EQUALSleftBITWISE_LEFTBITWISE_RIGHTleftADDMINUSleftMULTIPLYDIVIDEMODrightBITWISE_NOTNOTleftINCREMENTDECREMENTACTION_TYPE ADD ADDITION_ASSIGNMENT_OPERATOR AND BITWISE_AND BITWISE_LEFT BITWISE_NOT BITWISE_OR BITWISE_RIGHT BITWISE_XOR BREAK_CONTROL CASE_CONTROL CONTINUE_CONTROL DECREMENT DEFAULT_CONTROL DIVIDE DIVISION_ASSIGNMENT_OPERATOR DO_CONTROL EFFECT_TYPE ELSE_CONTROL ...<truncated>
+  lr = <ply.yacc.LRTable object at 0x7ffa9f2cded0>
+  module = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7ffa9f759750>
+Assertion with Exception Trace: Exception ''str' object has no attribute 'info'' of type '<class 'AttributeError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "pykotor/tslpatcher/patcher.py", line 372, in install
+  File "pykotor/tslpatcher/mods/nss.py", line 118, in patch_resource
+  File "pykotor/resource/formats/ncs/ncs_auto.py", line 112, in compile_nss
+  File "pykotor/resource/formats/ncs/compiler/parser.py", line 75, in __init__
+  File "ply/yacc.py", line 3317, in yacc
+AttributeError: 'str' object has no attribute 'info'
+
+Stack Trace Variables:
+
+Function 'install' at /home/brunner56/modsync-hot/work/tmp/_MEIbqRH6X/pykotor/tslpatcher/patcher.pyc:372:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fbb6e465870>
+  should_cancel = <threading.Event object at 0x7fbb6e7d9090>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7fbb6e4656f0>
+  temp_script_folder = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir)
+  patches_list = [<pykotor.tslpatcher.mods.install.InstallFile object at 0x7fbb6e467f70>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fbb6e467f40>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fbb6e467fa0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fbb6e467fd0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fbb6e4ac130>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fbb6e4ac220>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fbb6e4ac2b0>, <pykoto...<truncated>
+  memory = PatcherMemory(memory_2da={1: "'135'", 2: "'136'", 3: "'137'", 4: "'138'", 5: "'139'"}, memory_str={1164: '1164', 1166: '1166', 41931: '41931', 41932: '41932', 41933: '41933', 0: '49319', 1: '49320', 2: '49321', 3: '49322', 4: '49323', 5: '49324', 11: '49325', 12: '49326', 13: '49327', 14: '49328'})
+  patch = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7fbb6e4be500>
+  output_container_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto\override)
+  exists = False
+  capsule = None
+  data_to_patch = b'//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n//////////////////////////////////////////////////////////////////////////////...<truncated>
+  patched_data = bytearray(b'UTI V3.28\x00\x00\x00\x08\x00\x00\x00\x98\x00\x00\x00H\x00\x00\x00\xf8\x03\x00\x00\x19\x00\x00\x00\x88\x05\x00\x00M\x00\x00\x00\xd5\x05\x00\x00 \x01\x00\x00\xf5\x06\x00\x00 \x00\x00\x00\xff\xff\xff\xff\x00\x00\x00\x00\x11\x00\x00\x00\x00\x00\x00\x00D\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00d\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\x84\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\xa4\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\xc0\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\xe0\x00\x00\x00\...<truncated>
+  e = AttributeError("'str' object has no attribute 'info'")
+
+Function 'patch_resource' at /home/brunner56/modsync-hot/work/tmp/_MEIbqRH6X/pykotor/tslpatcher/mods/nss.pyc:118:
+  self = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7fbb6e4be500>
+  nss_source = b'//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n//////////////////////////////////////////////////////////////////////////////...<truncated>
+  memory = PatcherMemory(memory_2da={1: "'135'", 2: "'136'", 3: "'137'", 4: "'138'", 5: "'139'"}, memory_str={1164: '1164', 1166: '1166', 41931: '41931', 41932: '41932', 41933: '41933', 0: '49319', 1: '49320', 2: '49321', 3: '49322', 4: '49323', 5: '49324', 11: '49325', 12: '49326', 13: '49327', 14: '49328'})
+  logger = <pykotor.tslpatcher.logger.PatchLogger object at 0x7fbb6e7a3820>
+  game = <Game.K1: 1>
+  reader = <pykotor.common.stream.BinaryReader object at 0x7fbb6e7d9f90>
+  nss_bytes = b'//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n//////////////////////////////////////////////////////////////////////////////...<truncated>
+  source = <pykotor.tslpatcher.mods.nss.MutableString object at 0x7fbb6e7d93c0>
+  temp_script_file = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir\atosht_heart.nss)
+  is_windows = False
+  nwnnsscomp_exists = False
+
+Function 'compile_nss' at /home/brunner56/modsync-hot/work/tmp/_MEIbqRH6X/pykotor/resource/formats/ncs/ncs_auto.pyc:112:
+  source = '//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n///////////////////////////////////////////////////////////////////////////////...<truncated>
+  game = <Game.K1: 1>
+  optimizers = [<pykotor.resource.formats.ncs.optimizers.RemoveNopOptimizer object at 0x7fbb6e4bfa00>, <pykotor.resource.formats.ncs.optimizers.RemoveMoveSPEqualsZeroOptimizer object at 0x7fbb6e4bfe20>, <pykotor.resource.formats.ncs.optimizers.RemoveUnusedBlocksOptimizer object at 0x7fbb6e4bf8e0>]
+  library_lookup = [CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function '__init__' at /home/brunner56/modsync-hot/work/tmp/_MEIbqRH6X/pykotor/resource/formats/ncs/compiler/parser.pyc:75:
+  self = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7fbb6e4ac820>
+  functions = [ScriptFunction(<DataType.INT: 'int'>, 'Random', [ScriptParam(<DataType.INT: 'int'>, 'nMaxInteger', None)], '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);', '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);'), ScriptFunction(<DataType.VOID: 'void'>, 'PrintString', [ScriptParam(<DataType.STRING: 'string'>, 'sString', None)], '// 1: Output sString to the log file.\r\nvoid PrintStr...<truncated>
+  constants = [ScriptConstant("DataType.INT", "NUM_INVENTORY_SLOTS", "18"), ScriptConstant("DataType.INT", "TRUE", "1"), ScriptConstant("DataType.INT", "FALSE", "0"), ScriptConstant("DataType.FLOAT", "DIRECTION_EAST", "0.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_NORTH", "90.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_WEST", "180.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_SOUTH", "270.0"), ScriptConstant("DataType.FLOAT", "PI", "3.141592"), ScriptConstant("DataType.INT", "ATTITUDE_NEUTRAL", "0"), ScriptC...<truncated>
+  library = {'k_inc_cheat': b'//:: k_inc_cheat\n/*\n    This will be localized area for all\n    Cheat Bot scripting.\n*/\n//:: Created By: Preston Watamaniuk\n//:: Copyright (c) 2002 Bioware Corp.\n#include "k_inc_debug"\n//Takes a PLANET_ Constant\nvoid CH_SetPlanetaryGlobal(int nPlanetConstant);\n//Makes the specified party member available to the PC\nvoid CH_SetPartyMemberAvailable(int nNPC);\n//::///////////////////////////////////////////////\n//:: Set Planet Local\n//:: Copyright (c) 2001 Bioware Corp.\n//::////...<truncated>
+  library_lookup = [CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function 'yacc' at /home/brunner56/modsync-hot/work/tmp/_MEIbqRH6X/ply/yacc.pyc:3317:
+  method = 'LALR'
+  debug = False
+  tabmodule = 'pykotor.resource.formats.ncs.compiler.parsetab'
+  start = None
+  check_recursion = True
+  optimize = False
+  write_tables = False
+  debugfile = 'parser.out'
+  outputdir = '/home/brunner56/modsync-hot/work/tmp/_MEIbqRH6X/pykotor/resource/formats/ncs/compiler'
+  debuglog = 'yacc_debuglog.txt'
+  errorlog = <ply.yacc.PlyLogger object at 0x7fbb6e4ac580>
+  picklefile = None
+  _items = [('__annotations__', {'tokens': 'list[str]', 'literals': 'list[str]'}), ('__class__', <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>), ('__delattr__', <method-wrapper '__delattr__' of NssParser object at 0x7fbb6e4ac820>), ('__dict__', {}), ('__dir__', <built-in method __dir__ of NssParser object at 0x7fbb6e4ac820>), ('__doc__', None), ('__eq__', <method-wrapper '__eq__' of NssParser object at 0x7fbb6e4ac820>), ('__format__', <built-in method __format__ of NssParser object at 0x7fbb6e4ac820...<truncated>
+  pdict = {'__annotations__': {'tokens': 'list[str]', 'literals': 'list[str]'}, '__class__': <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>, '__delattr__': <method-wrapper '__delattr__' of NssParser object at 0x7fbb6e4ac820>, '__dict__': {}, '__dir__': <built-in method __dir__ of NssParser object at 0x7fbb6e4ac820>, '__doc__': None, '__eq__': <method-wrapper '__eq__' of NssParser object at 0x7fbb6e4ac820>, '__format__': <built-in method __format__ of NssParser object at 0x7fbb6e4ac820>, '__ge__': <m...<truncated>
+  srcfile = '/home/brunner56/modsync-hot/work/tmp/_MEIbqRH6X/pykotor/resource/formats/ncs/compiler/parser.pyc'
+  pkg = 'pykotor.resource.formats.ncs.compiler'
+  pinfo = <ply.yacc.ParserReflect object at 0x7fbb6e4ac7c0>
+  signature = "leftORleftANDleftBITWISE_ORleftBITWISE_XORleftBITWISE_ANDleftEQUALSNOT_EQUALSleftGREATER_THANLESS_THANGREATER_THAN_OR_EQUALSLESS_THAN_OR_EQUALSleftBITWISE_LEFTBITWISE_RIGHTleftADDMINUSleftMULTIPLYDIVIDEMODrightBITWISE_NOTNOTleftINCREMENTDECREMENTACTION_TYPE ADD ADDITION_ASSIGNMENT_OPERATOR AND BITWISE_AND BITWISE_LEFT BITWISE_NOT BITWISE_OR BITWISE_RIGHT BITWISE_XOR BREAK_CONTROL CASE_CONTROL CONTINUE_CONTROL DECREMENT DEFAULT_CONTROL DIVIDE DIVISION_ASSIGNMENT_OPERATOR DO_CONTROL EFFECT_TYPE ELSE_CONTROL ...<truncated>
+  lr = <ply.yacc.LRTable object at 0x7fbb6e4e56f0>
+  module = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7fbb6e4ac820>
+Assertion with Exception Trace: Exception ''str' object has no attribute 'info'' of type '<class 'AttributeError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "pykotor/tslpatcher/patcher.py", line 372, in install
+  File "pykotor/tslpatcher/mods/nss.py", line 118, in patch_resource
+  File "pykotor/resource/formats/ncs/ncs_auto.py", line 112, in compile_nss
+  File "pykotor/resource/formats/ncs/compiler/parser.py", line 75, in __init__
+  File "ply/yacc.py", line 3317, in yacc
+AttributeError: 'str' object has no attribute 'info'
+
+Stack Trace Variables:
+
+Function 'install' at /home/brunner56/modsync-hot/work/tmp/_MEIZ7hGvG/pykotor/tslpatcher/patcher.pyc:372:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7fc74676d870>
+  should_cancel = <threading.Event object at 0x7fc746ad1090>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7fc74676d6f0>
+  temp_script_folder = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir)
+  patches_list = [<pykotor.tslpatcher.mods.install.InstallFile object at 0x7fc74676ff70>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fc74676ff40>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fc74676ffa0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fc74676ffd0>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fc7467b8130>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fc7467b8220>, <pykotor.tslpatcher.mods.install.InstallFile object at 0x7fc7467b82b0>, <pykoto...<truncated>
+  memory = PatcherMemory(memory_2da={1: "'135'", 2: "'136'", 3: "'137'", 4: "'138'", 5: "'139'"}, memory_str={1164: '1164', 1166: '1166', 41931: '41931', 41932: '41932', 41933: '41933', 0: '49319', 1: '49320', 2: '49321', 3: '49322', 4: '49323', 5: '49324', 11: '49325', 12: '49326', 13: '49327', 14: '49328'})
+  patch = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7fc7467c6500>
+  output_container_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto\override)
+  exists = False
+  capsule = None
+  data_to_patch = b'//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n//////////////////////////////////////////////////////////////////////////////...<truncated>
+  patched_data = bytearray(b'UTI V3.28\x00\x00\x00\x08\x00\x00\x00\x98\x00\x00\x00H\x00\x00\x00\xf8\x03\x00\x00\x19\x00\x00\x00\x88\x05\x00\x00M\x00\x00\x00\xd5\x05\x00\x00 \x01\x00\x00\xf5\x06\x00\x00 \x00\x00\x00\xff\xff\xff\xff\x00\x00\x00\x00\x11\x00\x00\x00\x00\x00\x00\x00D\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00d\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\x84\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\xa4\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\xc0\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\xe0\x00\x00\x00\...<truncated>
+  e = AttributeError("'str' object has no attribute 'info'")
+
+Function 'patch_resource' at /home/brunner56/modsync-hot/work/tmp/_MEIZ7hGvG/pykotor/tslpatcher/mods/nss.pyc:118:
+  self = <pykotor.tslpatcher.mods.nss.ModificationsNSS object at 0x7fc7467c6500>
+  nss_source = b'//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n//////////////////////////////////////////////////////////////////////////////...<truncated>
+  memory = PatcherMemory(memory_2da={1: "'135'", 2: "'136'", 3: "'137'", 4: "'138'", 5: "'139'"}, memory_str={1164: '1164', 1166: '1166', 41931: '41931', 41932: '41932', 41933: '41933', 0: '49319', 1: '49320', 2: '49321', 3: '49322', 4: '49323', 5: '49324', 11: '49325', 12: '49326', 13: '49327', 14: '49328'})
+  logger = <pykotor.tslpatcher.logger.PatchLogger object at 0x7fc746a9b820>
+  game = <Game.K1: 1>
+  reader = <pykotor.common.stream.BinaryReader object at 0x7fc7467f3e50>
+  nss_bytes = b'//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n//////////////////////////////////////////////////////////////////////////////...<truncated>
+  source = <pykotor.tslpatcher.mods.nss.MutableString object at 0x7fc7467f2500>
+  temp_script_file = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir\atosht_heart.nss)
+  is_windows = False
+  nwnnsscomp_exists = False
+
+Function 'compile_nss' at /home/brunner56/modsync-hot/work/tmp/_MEIZ7hGvG/pykotor/resource/formats/ncs/ncs_auto.pyc:112:
+  source = '//////////////////////////////////////////////////////////////////////////////////\r\n/*\tMultifire and Autofire\r\n\r\n\tThis is the main heartbeat for Multifire and Autofire\r\n\t\r\n\tIt is fired by k_ai_master on all henchmen\r\n\t\r\n\tIt determines all of the bonuses and penalties when using\r\n\tcertain weapons and feats, and adds them to a unified effect\r\n\t\r\n\tdarthbdaman 2025-09-20\t\t\t\t\t\t\t\t\t\t\t\t\t\t*/\r\n///////////////////////////////////////////////////////////////////////////////...<truncated>
+  game = <Game.K1: 1>
+  optimizers = [<pykotor.resource.formats.ncs.optimizers.RemoveNopOptimizer object at 0x7fc7467f2f80>, <pykotor.resource.formats.ncs.optimizers.RemoveMoveSPEqualsZeroOptimizer object at 0x7fc7467f1b70>, <pykotor.resource.formats.ncs.optimizers.RemoveUnusedBlocksOptimizer object at 0x7fc7467f2230>]
+  library_lookup = [CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function '__init__' at /home/brunner56/modsync-hot/work/tmp/_MEIZ7hGvG/pykotor/resource/formats/ncs/compiler/parser.pyc:75:
+  self = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7fc7467f0040>
+  functions = [ScriptFunction(<DataType.INT: 'int'>, 'Random', [ScriptParam(<DataType.INT: 'int'>, 'nMaxInteger', None)], '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);', '// 0: Get an integer between 0 and nMaxInteger-1.\r\n// Return value on error: 0\r\nint Random(int nMaxInteger);'), ScriptFunction(<DataType.VOID: 'void'>, 'PrintString', [ScriptParam(<DataType.STRING: 'string'>, 'sString', None)], '// 1: Output sString to the log file.\r\nvoid PrintStr...<truncated>
+  constants = [ScriptConstant("DataType.INT", "NUM_INVENTORY_SLOTS", "18"), ScriptConstant("DataType.INT", "TRUE", "1"), ScriptConstant("DataType.INT", "FALSE", "0"), ScriptConstant("DataType.FLOAT", "DIRECTION_EAST", "0.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_NORTH", "90.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_WEST", "180.0"), ScriptConstant("DataType.FLOAT", "DIRECTION_SOUTH", "270.0"), ScriptConstant("DataType.FLOAT", "PI", "3.141592"), ScriptConstant("DataType.INT", "ATTITUDE_NEUTRAL", "0"), ScriptC...<truncated>
+  library = {'k_inc_cheat': b'//:: k_inc_cheat\n/*\n    This will be localized area for all\n    Cheat Bot scripting.\n*/\n//:: Created By: Preston Watamaniuk\n//:: Copyright (c) 2002 Bioware Corp.\n#include "k_inc_debug"\n//Takes a PLANET_ Constant\nvoid CH_SetPlanetaryGlobal(int nPlanetConstant);\n//Makes the specified party member available to the PC\nvoid CH_SetPartyMemberAvailable(int nNPC);\n//::///////////////////////////////////////////////\n//:: Set Planet Local\n//:: Copyright (c) 2001 Bioware Corp.\n//::////...<truncated>
+  library_lookup = [CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\multifire and autofire-1711-1-2-2-1769975013\tslpatchdata\mod1\temp_nss_working_dir)]
+  errorlog = None
+  debug = False
+
+Function 'yacc' at /home/brunner56/modsync-hot/work/tmp/_MEIZ7hGvG/ply/yacc.pyc:3317:
+  method = 'LALR'
+  debug = False
+  tabmodule = 'pykotor.resource.formats.ncs.compiler.parsetab'
+  start = None
+  check_recursion = True
+  optimize = False
+  write_tables = False
+  debugfile = 'parser.out'
+  outputdir = '/home/brunner56/modsync-hot/work/tmp/_MEIZ7hGvG/pykotor/resource/formats/ncs/compiler'
+  debuglog = 'yacc_debuglog.txt'
+  errorlog = <ply.yacc.PlyLogger object at 0x7fc7467f0c70>
+  picklefile = None
+  _items = [('__annotations__', {'tokens': 'list[str]', 'literals': 'list[str]'}), ('__class__', <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>), ('__delattr__', <method-wrapper '__delattr__' of NssParser object at 0x7fc7467f0040>), ('__dict__', {}), ('__dir__', <built-in method __dir__ of NssParser object at 0x7fc7467f0040>), ('__doc__', None), ('__eq__', <method-wrapper '__eq__' of NssParser object at 0x7fc7467f0040>), ('__format__', <built-in method __format__ of NssParser object at 0x7fc7467f0040...<truncated>
+  pdict = {'__annotations__': {'tokens': 'list[str]', 'literals': 'list[str]'}, '__class__': <class 'pykotor.resource.formats.ncs.compiler.parser.NssParser'>, '__delattr__': <method-wrapper '__delattr__' of NssParser object at 0x7fc7467f0040>, '__dict__': {}, '__dir__': <built-in method __dir__ of NssParser object at 0x7fc7467f0040>, '__doc__': None, '__eq__': <method-wrapper '__eq__' of NssParser object at 0x7fc7467f0040>, '__format__': <built-in method __format__ of NssParser object at 0x7fc7467f0040>, '__ge__': <m...<truncated>
+  srcfile = '/home/brunner56/modsync-hot/work/tmp/_MEIZ7hGvG/pykotor/resource/formats/ncs/compiler/parser.pyc'
+  pkg = 'pykotor.resource.formats.ncs.compiler'
+  pinfo = <ply.yacc.ParserReflect object at 0x7fc7467f1000>
+  signature = "leftORleftANDleftBITWISE_ORleftBITWISE_XORleftBITWISE_ANDleftEQUALSNOT_EQUALSleftGREATER_THANLESS_THANGREATER_THAN_OR_EQUALSLESS_THAN_OR_EQUALSleftBITWISE_LEFTBITWISE_RIGHTleftADDMINUSleftMULTIPLYDIVIDEMODrightBITWISE_NOTNOTleftINCREMENTDECREMENTACTION_TYPE ADD ADDITION_ASSIGNMENT_OPERATOR AND BITWISE_AND BITWISE_LEFT BITWISE_NOT BITWISE_OR BITWISE_RIGHT BITWISE_XOR BREAK_CONTROL CASE_CONTROL CONTINUE_CONTROL DECREMENT DEFAULT_CONTROL DIVIDE DIVISION_ASSIGNMENT_OPERATOR DO_CONTROL EFFECT_TYPE ELSE_CONTROL ...<truncated>
+  lr = <ply.yacc.LRTable object at 0x7fc7467f3070>
+  module = <pykotor.resource.formats.ncs.compiler.parser.NssParser object at 0x7fc7467f0040>
+Assertion with Exception Trace: Exception '"The [repeating_blaster] section was not found in the ini, referenced by 'ChangeRow12=repeating_blaster' in [baseitems.2da]"' of type '<class 'KeyError'>' occurred.
+Formatted Traceback:
+Traceback (most recent call last):
+  File "__main__.py", line 1353, in <module>
+  File "__main__.py", line 1348, in main
+  File "__main__.py", line 163, in __init__
+  File "__main__.py", line 375, in handle_commandline
+  File "__main__.py", line 391, in _begin_oneshot
+  File "__main__.py", line 1071, in begin_install_thread
+  File "__main__.py", line 1069, in begin_install_thread
+  File "__main__.py", line 1150, in _execute_mod_install
+  File "pykotor/tslpatcher/patcher.py", line 95, in config
+  File "pykotor/tslpatcher/config.py", line 97, in load
+  File "pykotor/tslpatcher/reader.py", line 182, in load
+  File "pykotor/tslpatcher/reader.py", line 525, in load_2da_list
+KeyError: "The [repeating_blaster] section was not found in the ini, referenced by 'ChangeRow12=repeating_blaster' in [baseitems.2da]"
+
+Stack Trace Variables:
+
+Function '<module>' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/__main__.py:1353:
+  __annotations__ = {'CURRENT_VERSION': 'tuple[int, ...]'}
+  _pyi_main_co = <code object <module> at 0x7f2f94771840, file "__main__.py", line 1>
+  sys = <module 'sys' (built-in)>
+  pyimod02_importers = <module 'pyimod02_importers' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod02_importers.py'>
+  os = <module 'os' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/base_library.zip/os.pyc'>
+  VIRTENV = 'VIRTUAL_ENV'
+  python_path = ['/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/base_library.zip', '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/lib-dynload', '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG']
+  pth = '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG'
+  encodings = <module 'encodings' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/base_library.zip/encodings/__init__.pyc'>
+  pyimod03_ctypes = <module 'pyimod03_ctypes' from '/run/media/brunner56/MyBook/Workspaces/ModSync/PyInstaller/loader/pyimod03_ctypes.py'>
+  entry = '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/tk'
+  annotations = _Feature((3, 7, 0, 'beta', 1), (3, 11, 0, 'alpha', 0), 16777216)
+  base64 = <module 'base64' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/base64.pyc'>
+  contextlib = <module 'contextlib' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/contextlib.pyc'>
+  ctypes = <module 'ctypes' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/ctypes/__init__.pyc'>
+  inspect = <module 'inspect' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/inspect.pyc'>
+  io = <module 'io' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/base_library.zip/io.pyc'>
+  json = <module 'json' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/json/__init__.pyc'>
+  pathlib = <module 'pathlib' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/pathlib.pyc'>
+  subprocess = <module 'subprocess' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/subprocess.pyc'>
+  tempfile = <module 'tempfile' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/tempfile.pyc'>
+  time = <module 'time' (built-in)>
+  tk = <module 'tkinter' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/tkinter/__init__.pyc'>
+  traceback = <module 'traceback' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/base_library.zip/traceback.pyc'>
+  webbrowser = <module 'webbrowser' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/webbrowser.pyc'>
+  ArgumentParser = <class 'argparse.ArgumentParser'>
+  Namespace = <class 'argparse.Namespace'>
+  datetime = <class 'datetime.datetime'>
+  timedelta = <class 'datetime.timedelta'>
+  timezone = <class 'datetime.timezone'>
+  IntEnum = <enum 'IntEnum'>
+  Event = <class 'threading.Event'>
+  Thread = <class 'threading.Thread'>
+  filedialog = <module 'tkinter.filedialog' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/tkinter/filedialog.pyc'>
+  messagebox = <module 'tkinter.messagebox' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/tkinter/messagebox.pyc'>
+  ttk = <module 'tkinter.ttk' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/tkinter/ttk.pyc'>
+  tkfont = <module 'tkinter.font' from '/home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/tkinter/font.pyc'>
+  TYPE_CHECKING = False
+  Callable = typing.Callable
+  NoReturn = typing.NoReturn
+  Game = <enum 'Game'>
+  BinaryReader = <class 'pykotor.common.stream.BinaryReader'>
+  ResourceIdentifier = <class 'pykotor.extract.file.ResourceIdentifier'>
+  decode_bytes_with_fallbacks = <function decode_bytes_with_fallbacks at 0x7f2f93dd7880>
+  CaseAwarePath = <class 'pykotor.tools.path.CaseAwarePath'>
+  find_kotor_paths_from_default = <function find_kotor_paths_from_default at 0x7f2f85752d40>
+  PatchLog = <class 'pykotor.tslpatcher.logger.PatchLog'>
+  PatchLogger = <class 'pykotor.tslpatcher.logger.PatchLogger'>
+  ModInstaller = <class 'pykotor.tslpatcher.patcher.ModInstaller'>
+  ConfigReader = <class 'pykotor.tslpatcher.reader.ConfigReader'>
+  NamespaceReader = <class 'pykotor.tslpatcher.reader.NamespaceReader'>
+  ModUninstaller = <class 'pykotor.tslpatcher.uninstall.ModUninstaller'>
+  format_exception_with_variables = <function format_exception_with_variables at 0x7f2f85ddc8b0>
+  universal_simplify_exception = <function universal_simplify_exception at 0x7f2f85ddc670>
+  striprtf = <function striprtf at 0x7f2f93db1900>
+  Path = <class 'utility.system.path.Path'>
+  ToolTip = <class 'utility.tkinter.tooltip.ToolTip'>
+  CURRENT_VERSION = (1, 5, 1)
+  VERSION_LABEL = 'v1.5.1'
+  ExitCode = <enum 'ExitCode'>
+  HoloPatcherError = <class '__main__.HoloPatcherError'>
+  parse_args = <function parse_args at 0x7f2f94763130>
+  App = <class '__main__.App'>
+  onAppCrash = <function onAppCrash at 0x7f2f854c9b40>
+  is_frozen = <function is_frozen at 0x7f2f854cb9a0>
+  main = <function main at 0x7f2f854cba30>
+
+Function 'main' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/__main__.py:1348:
+
+Function '__init__' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/__main__.py:163:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/home/brunner56/modsync-hot/K1_auto', tslpatchdata='/home/brunner56/modsync-hot/k1_auto_extract/KOTOR1-Blaster-Adjustment_v1.0.0', namespace_option_index=1, console=False, uninstall=False, install=True, validate=False)
+  __class__ = <class '__main__.App'>
+
+Function 'handle_commandline' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/__main__.py:375:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/home/brunner56/modsync-hot/K1_auto', tslpatchdata='/home/brunner56/modsync-hot/k1_auto_extract/KOTOR1-Blaster-Adjustment_v1.0.0', namespace_option_index=1, console=False, uninstall=False, install=True, validate=False)
+  num_cmdline_actions = 1
+
+Function '_begin_oneshot' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/__main__.py:391:
+  self = <__main__.App object .>
+  cmdline_args = Namespace(game_dir='/home/brunner56/modsync-hot/K1_auto', tslpatchdata='/home/brunner56/modsync-hot/k1_auto_extract/KOTOR1-Blaster-Adjustment_v1.0.0', namespace_option_index=1, console=False, uninstall=False, install=True, validate=False)
+
+Function 'begin_install_thread' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/__main__.py:1071:
+  should_cancel_thread = <threading.Event object at 0x7f2f854d5090>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7f2f854d5e70>
+  ini_file_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\kotor1-blaster-adjustment_v1.0.0\tslpatchdata\pistol_rifle.ini)
+  namespace_mod_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\kotor1-blaster-adjustment_v1.0.0\tslpatchdata)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f2f85198c10>
+  self = <__main__.App object .>
+
+Function 'begin_install_thread' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/__main__.py:1069:
+  should_cancel_thread = <threading.Event object at 0x7f2f854d5090>
+  namespace_option = <pykotor.tslpatcher.namespaces.PatcherNamespace object at 0x7f2f854d5e70>
+  ini_file_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\kotor1-blaster-adjustment_v1.0.0\tslpatchdata\pistol_rifle.ini)
+  namespace_mod_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\kotor1-blaster-adjustment_v1.0.0\tslpatchdata)
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f2f85198c10>
+  self = <__main__.App object .>
+
+Function '_execute_mod_install' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/__main__.py:1150:
+  self = <__main__.App object .>
+  installer = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f2f85198c10>
+  should_cancel_thread = <threading.Event object at 0x7f2f854d5090>
+
+Function 'config' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/pykotor/tslpatcher/patcher.pyc:95:
+  self = <pykotor.tslpatcher.patcher.ModInstaller object at 0x7f2f85198c10>
+  ini_file_bytes = b"[Settings]\r\nFileExists=1\r\nConfirmMessage=N/A\nLogLevel=3\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=1\nWindowCaption=JC's Blaster Adjustment for K1\r\n\r\n\r\n[TLKList]\r\n\r\n\r\n[InstallList]\r\n\r\n\r\n[2DAList]\r\nTable0=baseitems.2da\r\n\r\n\r\n[GFFList]\r\n\r\n\r\n[CompileList]\r\n\r\n\r\n[SSFList]\r\n\r\n\r\n; ===================================================================\r\n\r\n[baseitems.2da]\r\n; Blaster Pistol...<truncated>
+  ini_text = "[Settings]\r\nFileExists=1\r\nConfirmMessage=N/A\nLogLevel=3\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=1\nWindowCaption=JC's Blaster Adjustment for K1\r\n\r\n\r\n[TLKList]\r\n\r\n\r\n[InstallList]\r\n\r\n\r\n[2DAList]\r\nTable0=baseitems.2da\r\n\r\n\r\n[GFFList]\r\n\r\n\r\n[CompileList]\r\n\r\n\r\n[SSFList]\r\n\r\n\r\n; ===================================================================\r\n\r\n[baseitems.2da]\r\n; Blaster Pistol\...<truncated>
+
+Function 'load' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/pykotor/tslpatcher/config.pyc:97:
+  self = <pykotor.tslpatcher.config.PatcherConfig object at 0x7f2f85198d60>
+  ini_text = "[Settings]\r\nFileExists=1\r\nConfirmMessage=N/A\nLogLevel=3\r\nInstallerMode=1\r\nBackupFiles=1\r\nPlaintextLog=1\nLookupGameFolder=0\r\nLookupGameNumber=1\r\nSaveProcessedScripts=1\nWindowCaption=JC's Blaster Adjustment for K1\r\n\r\n\r\n[TLKList]\r\n\r\n\r\n[InstallList]\r\n\r\n\r\n[2DAList]\r\nTable0=baseitems.2da\r\n\r\n\r\n[GFFList]\r\n\r\n\r\n[CompileList]\r\n\r\n\r\n[SSFList]\r\n\r\n\r\n; ===================================================================\r\n\r\n[baseitems.2da]\r\n; Blaster Pistol\...<truncated>
+  mod_path = CaseAwarePath(\home\brunner56\modsync-hot\k1_auto_extract\kotor1-blaster-adjustment_v1.0.0\tslpatchdata)
+  logger = <pykotor.tslpatcher.logger.PatchLogger object at 0x7f2f8549f820>
+  ConfigReader = <class 'pykotor.tslpatcher.reader.ConfigReader'>
+  ini = <configparser.ConfigParser object at 0x7f2f85199000>
+
+Function 'load' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/pykotor/tslpatcher/reader.pyc:182:
+  self = <pykotor.tslpatcher.reader.ConfigReader object at 0x7f2f8519a740>
+  config = <pykotor.tslpatcher.config.PatcherConfig object at 0x7f2f85198d60>
+
+Function 'load_2da_list' at /home/brunner56/modsync-hot/work/tmp/_MEIHW3ThG/pykotor/tslpatcher/reader.pyc:525:
+  self = <pykotor.tslpatcher.reader.ConfigReader object at 0x7f2f8519a740>
+  twoda_section_name = '2DAList'
+  twoda_section_dict = CaseInsensitiveDict.from_dict({CaseInsensitiveWrappedStr(Table0): 'baseitems.2da'})
+  default_destination = 'Override'
+  identifier = CaseInsensitiveWrappedStr(Table0)
+  file = 'baseitems.2da'
+  file_section = 'baseitems.2da'
+  modifications = <pykotor.tslpatcher.mods.twoda.Modifications2DA object at 0x7f2f8519a950>
+  file_section_dict = CaseInsensitiveDict.from_dict({CaseInsensitiveWrappedStr(ChangeRow0): 'blaster_pistol', CaseInsensitiveWrappedStr(ChangeRow1): 'disrupter_pistol', CaseInsensitiveWrappedStr(ChangeRow2): 'heavy_blaster', CaseInsensitiveWrappedStr(ChangeRow3): 'hold_out_blaster', CaseInsensitiveWrappedStr(ChangeRow4): 'ion_blaster', CaseInsensitiveWrappedStr(ChangeRow5): 'sonic_pistol', CaseInsensitiveWrappedStr(ChangeRow6): 'blaster_rifle', CaseInsensitiveWrappedStr(ChangeRow7): 'blaster_carbine', CaseInsensitiveWrappedStr(C...<truncated>
+  key = CaseInsensitiveWrappedStr(ChangeRow12)
+  modification_id = 'repeating_blaster'
+  next_section_name = None
+  modification_ids_dict = CaseInsensitiveDict.from_dict({CaseInsensitiveWrappedStr(numdice): '1', CaseInsensitiveWrappedStr(dietoroll): '10', CaseInsensitiveWrappedStr(critthreat): '1', CaseInsensitiveWrappedStr(crithitmult): '2'})
+  manipulation = ChangeRow2DA(identifier='sonic_rifle', target=Target(target_type=TargetType.ROW_INDEX, value=22), cells={CaseInsensitiveWrappedStr(numdice): RowValueConstant(string='1'), CaseInsensitiveWrappedStr(dietoroll): RowValueConstant(string='10'), CaseInsensitiveWrappedStr(critthreat): RowValueConstant(string='1'), CaseInsensitiveWrappedStr(crithitmult): RowValueConstant(string='2')}, store_2da={}, store_tlk={})
