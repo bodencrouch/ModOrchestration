@@ -518,6 +518,26 @@ namespace ModSync.Core
 
             if (!ArchiveHelper.HasArchiveExtension(archivePath))
             {
+                // Some mods ship in the archive store as an already-extracted directory
+                // tree instead of a .zip/.rar/.7z ("K2 Swoops to K1/[K1] Swoop from K2 to
+                // K1/..."). relativePath's first segment restates the directory's own name
+                // (matching how a real archive name anchors the rest of the path), so strip
+                // it and check the remainder against the real filesystem.
+                if (Directory.Exists(archivePath))
+                {
+                    string[] segments = relativePath.Split(
+                        new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                        StringSplitOptions.RemoveEmptyEntries);
+                    if (segments.Length > 1)
+                    {
+                        string candidate = Path.Combine(
+                            new[] { archivePath }.Concat(segments.Skip(1)).ToArray());
+                        return File.Exists(candidate) || Directory.Exists(candidate)
+                            ? ArchivePathCode.FoundSuccessfully
+                            : ArchivePathCode.NotFoundInArchive;
+                    }
+                }
+
                 return ArchivePathCode.NotAnArchive;
             }
 
