@@ -148,9 +148,13 @@ namespace ModSync.Core.Services
             [CanBeNull] IReadOnlyList<string> extraSignals,
             [CanBeNull] string author)
         {
-            return ResolveCore(
-                componentName, componentUrls, archives, targetGame, extraSignals, author,
-                libraryIsPrepared: false);
+            return AttachCompanionLoosePatch(
+                ResolveCore(
+                    componentName, componentUrls, archives, targetGame, extraSignals, author,
+                    libraryIsPrepared: false),
+                componentName,
+                extraSignals,
+                archives);
         }
 
         [NotNull]
@@ -179,14 +183,18 @@ namespace ModSync.Core.Services
                 throw new ArgumentNullException(nameof(library));
             }
 
-            return ResolveCore(
+            return AttachCompanionLoosePatch(
+                ResolveCore(
+                    componentName,
+                    componentUrls,
+                    library.Candidates,
+                    targetGame,
+                    extraSignals,
+                    author,
+                    libraryIsPrepared: true),
                 componentName,
-                componentUrls,
-                library.Candidates,
-                targetGame,
                 extraSignals,
-                author,
-                libraryIsPrepared: true);
+                library.Candidates);
         }
 
         [NotNull]
@@ -1709,7 +1717,10 @@ namespace ModSync.Core.Services
             }
 
             var parsed = groups
-                .Select(g => (Group: g, Title: VersionlessTitle(g.First().Name), Version: ParseTrailingVersion(g.First().Name) ?? new Version(0, 0, 0)))
+                .Select(g => (
+                    Group: g,
+                    Title: VersionCompareKey(g.First().Name),
+                    Version: ParseTrailingVersion(g.First().Name) ?? new Version(0, 0, 0)))
                 .ToList();
             if (parsed.Select(p => p.Title).Distinct(StringComparer.Ordinal).Count() != 1)
             {
@@ -1749,6 +1760,30 @@ namespace ModSync.Core.Services
             string baseName = Path.GetFileNameWithoutExtension(fileName ?? string.Empty);
             return Normalize(Regex.Replace(
                 baseName,
+                @"v\d+(?:[._]\d+)*$",
+                string.Empty,
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)));
+        }
+
+        /// <summary>
+        /// Same-product version compare. Underscore vs space and a dropped English "for"
+        /// ("Droid special weapons fix for TSL v2.0" vs "Droid_special_weapons_fix_TSL_v2.0")
+        /// must not look like two different mods. Sequel markers stay: "Skyboxes II" is
+        /// still distinct from "Skyboxes" because "ii" survives Normalize.
+        /// </summary>
+        [NotNull]
+        private static string VersionCompareKey([CanBeNull] string fileName)
+        {
+            string baseName = Path.GetFileNameWithoutExtension(fileName ?? string.Empty);
+            string withoutStopwords = Regex.Replace(
+                baseName,
+                @"\b(?:for|the|of|a|an)\b",
+                " ",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5));
+            return Normalize(Regex.Replace(
+                withoutStopwords,
                 @"v\d+(?:[._]\d+)*$",
                 string.Empty,
                 RegexOptions.IgnoreCase,
@@ -1860,11 +1895,17 @@ namespace ModSync.Core.Services
                 foreach (IGrouping<string, FileInfo> group in groups)
                 {
                     List<string> candidateTokens = RawTokens(group.First().Name)
-                        .Where(token => token.Length >= 4 || Regex.IsMatch(
-                            token,
-                            @"^\d+k$",
-                            RegexOptions.IgnoreCase,
-                            TimeSpan.FromSeconds(5)))
+                        .Where(token => token.Length >= 4
+                            || Regex.IsMatch(
+                                token,
+                                @"^\d+k$",
+                                RegexOptions.IgnoreCase,
+                                TimeSpan.FromSeconds(5))
+                            || Regex.IsMatch(
+                                token,
+                                @"^v?\d+(?:\.\d+)*$",
+                                RegexOptions.IgnoreCase,
+                                TimeSpan.FromSeconds(5)))
                         .Where(token => !groups.All(other => RawTokens(other.First().Name).Contains(token)))
                         .ToList();
                     int score = candidateTokens.Count(token =>
@@ -1880,6 +1921,17 @@ namespace ModSync.Core.Services
                 if (hits.Count == 1)
                 {
                     return hits;
+                }
+
+                // "Use the V2 version" narrows to every V2-named archive, but two of those
+                // can still be the same release under different separator conventions
+                // ("Droid special weapons fix for TSL v2.0" vs "Droid_special_weapons_fix_
+                // TSL_v2.0"). Collapse a tie down to one when they all share a
+                // VersionCompareKey instead of leaving the directive unresolved.
+                if (hits.Count > 1
+                    && hits.Select(g => VersionCompareKey(g.First().Name)).Distinct(StringComparer.Ordinal).Count() == 1)
+                {
+                    return hits.Take(1).ToList();
                 }
             }
 
@@ -1974,6 +2026,89 @@ namespace ModSync.Core.Services
                 @"\b(?:download\s+and\s+apply|apply)\s+all\s+files\b",
                 RegexOptions.IgnoreCase,
                 TimeSpan.FromSeconds(5));
+        }
+
+        /// <summary>
+        /// "Run the installer, then move the files from the patch to your override."
+        /// The follow-up archive (K1CP Patch.rar) does not share the heading's tokens, so
+        /// UniqueTokenSubset never sees it. Attach it after the main archive resolves.
+        /// </summary>
+        [NotNull]
+        private static ArchiveResolution AttachCompanionLoosePatch(
+            [NotNull] ArchiveResolution resolved,
+            [NotNull] string componentName,
+            [CanBeNull] IReadOnlyList<string> extraSignals,
+            [NotNull] IReadOnlyList<FileInfo> archives)
+        {
+            if (!resolved.IsResolved || resolved.Archive is null || !RequestsMoveFilesFromThePatch(extraSignals))
+            {
+                return resolved;
+            }
+
+            FileInfo companion = FindCompanionLoosePatch(componentName, resolved.Archive, archives);
+            if (companion is null)
+            {
+                return resolved;
+            }
+
+            bool alreadyAttached = resolved.AdditionalArchives.Any(extra =>
+                extra != null
+                && string.Equals(extra.FullName, companion.FullName, StringComparison.OrdinalIgnoreCase));
+            if (alreadyAttached)
+            {
+                return resolved;
+            }
+
+            var extras = resolved.AdditionalArchives.ToList();
+            extras.Add(companion);
+            resolved.AdditionalArchives = extras;
+            resolved.Reason +=
+                $" Also attached companion loose-file patch '{companion.Name}' because the guide "
+                + "says to move the files from the patch.";
+            return resolved;
+        }
+
+        private static bool RequestsMoveFilesFromThePatch([CanBeNull] IReadOnlyList<string> signals)
+        {
+            if (signals == null || signals.Count == 0)
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(
+                string.Join(" ", signals),
+                @"\bmove\s+the\s+files\s+from\s+the\s+patch\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5));
+        }
+
+        [CanBeNull]
+        private static FileInfo FindCompanionLoosePatch(
+            [NotNull] string componentName,
+            [NotNull] FileInfo mainArchive,
+            [NotNull] IReadOnlyList<FileInfo> archives)
+        {
+            if (!Regex.IsMatch(
+                componentName ?? string.Empty,
+                @"\bcommunity\s+patch\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)))
+            {
+                return null;
+            }
+
+            List<FileInfo> hits = archives
+                .Where(archive => archive != null
+                    && !string.Equals(archive.FullName, mainArchive.FullName, StringComparison.OrdinalIgnoreCase)
+                    && IsRealArchiveName(archive.Name)
+                    && !NameLooksLikeCompatibilityPatch(archive.Name)
+                    && Regex.IsMatch(
+                        Path.GetFileNameWithoutExtension(archive.Name),
+                        @"\b[kK][12]?CP\b.*\b[Pp]atch\b|\b[Pp]atch\b.*\b[kK][12]?CP\b",
+                        RegexOptions.None,
+                        TimeSpan.FromSeconds(5)))
+                .ToList();
+            return hits.Count == 1 ? hits[0] : null;
         }
 
         private static bool IsNegativeGuideClause([CanBeNull] string clause)
