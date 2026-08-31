@@ -129,16 +129,32 @@ namespace ModSync.Core.Services.Installation
         public string Fingerprint { get; }
     }
 
+    /// <summary>
+    /// Two-layer install witness. Process success is never this value.
+    /// </summary>
+    public enum WitnessVerdict
+    {
+        None,
+        MidRunSubsetPass,
+        MidRunSubsetFail,
+        PublishedPass,
+        PublishedPassFailed,
+        CompletedUnverified,
+        PassWithPackingDissent,
+    }
+
     public sealed class InstallationPipelineResult
     {
         internal InstallationPipelineResult(
             [NotNull] InstallationPlan plan,
             [CanBeNull] ValidationPipelineResult validationResult,
-            ModComponent.InstallExitCode exitCode)
+            ModComponent.InstallExitCode exitCode,
+            WitnessVerdict witness = WitnessVerdict.None)
         {
             Plan = plan;
             ValidationResult = validationResult;
             ExitCode = exitCode;
+            Witness = witness;
         }
 
         [NotNull]
@@ -149,9 +165,17 @@ namespace ModSync.Core.Services.Installation
 
         public ModComponent.InstallExitCode ExitCode { get; }
 
+        public WitnessVerdict Witness { get; }
+
+        public bool PublishedPassHolds =>
+            Witness == WitnessVerdict.PublishedPass
+            || Witness == WitnessVerdict.PassWithPackingDissent;
+
         public bool Succeeded =>
-            (ValidationResult == null || ValidationResult.IsSuccess)
-            && ExitCode == ModComponent.InstallExitCode.Success;
+            PublishedPassHolds
+            || (Witness == WitnessVerdict.None
+                && (ValidationResult == null || ValidationResult.IsSuccess)
+                && ExitCode == ModComponent.InstallExitCode.Success);
     }
 
     public sealed class InstallationPipelinePolicyException : InvalidOperationException
@@ -272,7 +296,37 @@ namespace ModSync.Core.Services.Installation
                 preserveInputOrder: true,
                 failClosed: request.Mode == InstallationPipelineMode.Reference).ConfigureAwait(false);
 
+            return FinalizeResult(request, plan, validationResult, exitCode);
+        }
+
+        [NotNull]
+        private static InstallationPipelineResult FinalizeResult(
+            [NotNull] InstallationPipelineRequest request,
+            [NotNull] InstallationPlan plan,
+            [CanBeNull] ValidationPipelineResult validationResult,
+            ModComponent.InstallExitCode exitCode)
+        {
+            if (IsUnverifiedFinish(request)
+                && (exitCode == ModComponent.InstallExitCode.Success
+                    || exitCode == ModComponent.InstallExitCode.CompletedWithFailures))
+            {
+                return new InstallationPipelineResult(
+                    plan,
+                    validationResult,
+                    ModComponent.InstallExitCode.CompletedUnverified,
+                    WitnessVerdict.CompletedUnverified);
+            }
+
             return new InstallationPipelineResult(plan, validationResult, exitCode);
+        }
+
+        private static bool IsUnverifiedFinish([NotNull] InstallationPipelineRequest request)
+        {
+            MainConfig config = MainConfig.Instance;
+            return !request.RunValidation
+                || MainConfig.NoCheckpoint
+                || (config != null
+                    && (config.continueInstallOnMissingSources || config.continueInstallOnModFailure));
         }
 
         private static async Task PrepareAsync([NotNull] InstallationPipelineRequest request)

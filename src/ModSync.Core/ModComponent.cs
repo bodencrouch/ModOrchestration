@@ -37,6 +37,8 @@ namespace ModSync.Core
             MissingSourceFiles,
             [Description("One or more mods failed but the batch continued (--continue-on-mod-failure).")]
             CompletedWithFailures,
+            [Description("Work finished without a published install PASS (skip-validation, no-checkpoint, or best-effort).")]
+            CompletedUnverified,
             UnknownError,
         }
         public enum ComponentInstallState

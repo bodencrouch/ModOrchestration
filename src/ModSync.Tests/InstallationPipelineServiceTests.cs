@@ -194,6 +194,99 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public async Task RunAsync_SkipValidation_FinishIsCompletedUnverifiedNotSuccess()
+        {
+            string sourcePath = Path.Combine(_tempRoot, "mods", "payload.txt");
+            File.WriteAllText(sourcePath, "copied");
+
+            ModComponent component = CreateComponent("Skip validation");
+            component.Instructions.Add(new Instruction
+            {
+                Action = Instruction.ActionType.Copy,
+                Source = new List<string> { "<<modDirectory>>/payload.txt" },
+                Destination = "<<kotorDirectory>>/Override",
+            });
+
+            InstallationPipelineResult result = await InstallationPipelineService.RunAsync(
+                new InstallationPipelineRequest(new[] { component })
+                {
+                    RunValidation = false,
+                    Frontend = InstallationFrontend.Cli,
+                    Mode = InstallationPipelineMode.Standard,
+                    PreserveInputOrder = true,
+                });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Succeeded, Is.False);
+                Assert.That(result.ExitCode, Is.EqualTo(ModComponent.InstallExitCode.CompletedUnverified));
+                Assert.That(result.Witness, Is.EqualTo(WitnessVerdict.CompletedUnverified));
+                Assert.That(result.PublishedPassHolds, Is.False);
+                Assert.That(
+                    File.Exists(Path.Combine(_tempRoot, "game", "Override", "payload.txt")),
+                    Is.True,
+                    "Skip flags may finish applying files.");
+            });
+        }
+
+        [Test]
+        public void Result_PublishedPassFailedAfterSuccessShapedBatch_IsNotSucceeded()
+        {
+            InstallationPlan plan = InstallationPipelineService.BuildPlan(
+                new InstallationPipelineRequest(new[] { CreateComponent("Witness") })
+                {
+                    PreserveInputOrder = true,
+                });
+
+            var result = new InstallationPipelineResult(
+                plan,
+                validationResult: null,
+                ModComponent.InstallExitCode.Success,
+                WitnessVerdict.PublishedPassFailed);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Succeeded, Is.False);
+                Assert.That(result.PublishedPassHolds, Is.False);
+                Assert.That(result.Witness, Is.EqualTo(WitnessVerdict.PublishedPassFailed));
+            });
+        }
+
+        [Test]
+        public async Task RunAsync_StandardAndReference_ExposeTheSameWitnessFields()
+        {
+            string sourcePath = Path.Combine(_tempRoot, "mods", "payload.txt");
+            File.WriteAllText(sourcePath, "copied");
+            MainConfig.Instance.noCheckpoint = false;
+
+            ModComponent standardComponent = CreateCopyComponent("Standard");
+            ModComponent referenceComponent = CreateCopyComponent("Reference");
+
+            InstallationPipelineResult standard = await InstallationPipelineService.RunAsync(
+                new InstallationPipelineRequest(new[] { standardComponent })
+                {
+                    RunValidation = false,
+                    Mode = InstallationPipelineMode.Standard,
+                    PreserveInputOrder = true,
+                });
+            InstallationPipelineResult reference = await InstallationPipelineService.RunAsync(
+                new InstallationPipelineRequest(new[] { referenceComponent })
+                {
+                    RunValidation = false,
+                    Mode = InstallationPipelineMode.Standard,
+                    PreserveInputOrder = true,
+                });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(standard.Witness, Is.EqualTo(WitnessVerdict.CompletedUnverified));
+                Assert.That(reference.Witness, Is.EqualTo(WitnessVerdict.CompletedUnverified));
+                Assert.That(standard.Succeeded, Is.False);
+                Assert.That(reference.Succeeded, Is.False);
+            });
+        }
+
+        [Test]
         public async Task FailClosedExecution_RuntimeFailure_RestoresThePreComponentSnapshot()
         {
             MainConfig.Instance.noCheckpoint = false;
@@ -228,6 +321,18 @@ namespace ModSync.Tests
                 Assert.That(File.Exists(destinationPath), Is.False, "Runtime failure must restore the game tree before the failed component.");
                 Assert.That(File.ReadAllText(sourcePath), Is.EqualTo("must be rolled back"));
             });
+        }
+
+        private static ModComponent CreateCopyComponent(string name)
+        {
+            ModComponent component = CreateComponent(name);
+            component.Instructions.Add(new Instruction
+            {
+                Action = Instruction.ActionType.Copy,
+                Source = new List<string> { "<<modDirectory>>/payload.txt" },
+                Destination = "<<kotorDirectory>>/Override",
+            });
+            return component;
         }
 
         private static ModComponent CreateComponent(string name) => new ModComponent
