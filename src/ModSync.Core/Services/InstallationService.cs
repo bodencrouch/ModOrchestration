@@ -1047,7 +1047,21 @@ Exception Type: {ex.GetType().FullName}";
 
                     var validator = new ComponentValidation(component, MainConfig.AllComponents);
                     await Logger.LogVerboseAsync($" == Validating '{component.Name}' == ").ConfigureAwait(false);
-                    individuallyValidated &= validator.Run();
+                    bool componentValid = validator.Run();
+                    if (!componentValid)
+                    {
+                        foreach (string error in validator.GetErrors())
+                        {
+                            await Logger.LogErrorAsync($"Validation failed for '{component.Name}': {error}").ConfigureAwait(false);
+                        }
+
+                        if (validator.GetErrors().Count == 0)
+                        {
+                            await Logger.LogErrorAsync($"Validation failed for '{component.Name}' (no specific error captured).").ConfigureAwait(false);
+                        }
+                    }
+
+                    individuallyValidated &= componentValid;
                 }
 
                 await Logger.LogVerboseAsync("Finished validating all components.").ConfigureAwait(false);
