@@ -1926,10 +1926,14 @@ namespace ModSync.Core.Services
                 // "Use the V2 version" narrows to every V2-named archive, but two of those
                 // can still be the same release under different separator conventions
                 // ("Droid special weapons fix for TSL v2.0" vs "Droid_special_weapons_fix_
-                // TSL_v2.0"). Collapse a tie down to one when they all share a
-                // VersionCompareKey instead of leaving the directive unresolved.
+                // TSL_v2.0"). Collapse a tie down to one ONLY when they are the same product
+                // AND the same declared version - VersionCompareKey alone strips the version
+                // number entirely, so it also matches genuinely different releases (v1.0 vs
+                // v2.0) of the same product and must never be used by itself to break a tie
+                // that a version-directive clause produced.
                 if (hits.Count > 1
-                    && hits.Select(g => VersionCompareKey(g.First().Name)).Distinct(StringComparer.Ordinal).Count() == 1)
+                    && hits.Select(g => VersionCompareKey(g.First().Name)).Distinct(StringComparer.Ordinal).Count() == 1
+                    && hits.Select(g => ParseTrailingVersion(g.First().Name) ?? new Version(0, 0, 0)).Distinct().Count() == 1)
                 {
                     return hits.Take(1).ToList();
                 }
