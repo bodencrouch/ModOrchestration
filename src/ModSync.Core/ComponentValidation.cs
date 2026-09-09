@@ -41,7 +41,8 @@ namespace ModSync.Core
         }
         public bool Run() =>
             VerifyExtractPaths()
-            && ParseDestinationWithAction();
+            && ParseDestinationWithAction()
+            && VerifyChooseSelections();
         private void AddError([NotNull] string message, [NotNull] Instruction instruction) =>
             _validationResults.Add(new ValidationResult(this, instruction, message, isError: true));
         private void AddWarning([NotNull] string message, [NotNull] Instruction instruction) =>
@@ -329,6 +330,21 @@ namespace ModSync.Core
                                 instruction
                             );
                         }
+                        // 'Rename' Destination is contractually a bare filename that is never
+                        // resolved through ReplaceCustomVariables (see Instruction.RenameFile).
+                        // A literal placeholder token surviving to this point means an earlier
+                        // guide-parsing/rebind step (AutoInstructionGenerator.BindBareCopyAsInstructions)
+                        // failed to ground it, and it would otherwise be written to disk verbatim.
+                        else if (instruction.Destination.IndexOf("<<", StringComparison.Ordinal) >= 0)
+                        {
+                            success = false;
+                            AddError(
+                                "Unresolved placeholder in 'Destination'."
+                                + $" Got '{instruction.Destination}',"
+                                + " expected a bare filename with no '<<...>>' placeholder token.",
+                                instruction
+                            );
+                        }
                         break;
                     case Instruction.ActionType.Run:
                     case Instruction.ActionType.Execute:
@@ -399,6 +415,53 @@ namespace ModSync.Core
                 }
             }
             return success;
+        }
+
+        /// <summary>
+        /// Warns (never blocks) when a 'Choose' instruction defines one or more branch
+        /// options but none of them are currently selected. That instruction would execute
+        /// as a silent no-op that still reports Success, so the component can be
+        /// checkmarked "installed" despite zero files ever being written. Some guide flows
+        /// legitimately leave every branch ineligible (e.g. all siblings incompatible with
+        /// the current build), so this is surfaced as a warning, not a validation failure.
+        /// </summary>
+        private bool VerifyChooseSelections()
+        {
+            var instructions = ComponentToValidate.Instructions?.ToList() ?? new List<Instruction>();
+            foreach (Option thisOption in ComponentToValidate.Options ?? Enumerable.Empty<Option>())
+            {
+                if (thisOption?.Instructions != null)
+                {
+                    instructions.AddRange(thisOption.Instructions);
+                }
+            }
+
+            foreach (Instruction instruction in instructions)
+            {
+                if (instruction is null
+                    || instruction.Action != Instruction.ActionType.Choose
+                    || instruction.Source is null
+                    || instruction.Source.Count == 0)
+                {
+                    continue;
+                }
+
+                bool anySelected = ComponentToValidate.Options != null
+                    && ComponentToValidate.Options.Any(o =>
+                        o != null
+                        && o.IsSelected
+                        && instruction.Source.Contains(o.Guid.ToString(), StringComparer.OrdinalIgnoreCase));
+                if (!anySelected)
+                {
+                    AddWarning(
+                        $"This 'Choose' instruction defines {instruction.Source.Count} branch option(s),"
+                        + " but none are currently selected; it will install nothing.",
+                        instruction
+                    );
+                }
+            }
+
+            return true;
         }
         [NotNull]
         private static string GetErrorDescription(ArchivePathCode code)

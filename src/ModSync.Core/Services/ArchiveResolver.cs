@@ -148,13 +148,13 @@ namespace ModSync.Core.Services
             [CanBeNull] IReadOnlyList<string> extraSignals,
             [CanBeNull] string author)
         {
-            return AttachCompanionLoosePatch(
+            return AttachUniqueArchivesNamedByUrls(
                 ResolveCore(
                     componentName, componentUrls, archives, targetGame, extraSignals, author,
                     libraryIsPrepared: false),
-                componentName,
-                extraSignals,
-                archives);
+                componentUrls,
+                archives,
+                componentName);
         }
 
         [NotNull]
@@ -183,7 +183,7 @@ namespace ModSync.Core.Services
                 throw new ArgumentNullException(nameof(library));
             }
 
-            return AttachCompanionLoosePatch(
+            return AttachUniqueArchivesNamedByUrls(
                 ResolveCore(
                     componentName,
                     componentUrls,
@@ -192,9 +192,9 @@ namespace ModSync.Core.Services
                     extraSignals,
                     author,
                     libraryIsPrepared: true),
-                componentName,
-                extraSignals,
-                library.Candidates);
+                componentUrls,
+                library.Candidates,
+                componentName);
         }
 
         [NotNull]
@@ -582,16 +582,31 @@ namespace ModSync.Core.Services
         }
 
         private static Dictionary<string, List<string>> s_resourceIndexCache;
+        private static Dictionary<string, List<string>> s_resourceIndexByUrl;
 
         [NotNull]
         private static Dictionary<string, List<string>> LoadResourceIndex()
         {
-            if (s_resourceIndexCache != null)
+            EnsureResourceIndexLoaded();
+            return s_resourceIndexCache;
+        }
+
+        [NotNull]
+        private static Dictionary<string, List<string>> LoadResourceIndexByUrl()
+        {
+            EnsureResourceIndexLoaded();
+            return s_resourceIndexByUrl;
+        }
+
+        private static void EnsureResourceIndexLoaded()
+        {
+            if (s_resourceIndexCache != null && s_resourceIndexByUrl != null)
             {
-                return s_resourceIndexCache;
+                return;
             }
 
-            var map = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            var byHash = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            var byUrl = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
             try
             {
@@ -616,9 +631,17 @@ namespace ModSync.Core.Services
                                     && !n.Equals("download", StringComparison.OrdinalIgnoreCase))
                                 .ToList();
 
-                            if (names.Count > 0)
+                            if (names.Count == 0)
                             {
-                                map[entry.Key] = names;
+                                continue;
+                            }
+
+                            byHash[entry.Key] = names;
+
+                            string primaryUrl = entry.Value["HandlerMetadata"]?["PrimaryUrl"]?.ToString();
+                            if (!string.IsNullOrWhiteSpace(primaryUrl))
+                            {
+                                byUrl[UrlNormalizer.Normalize(primaryUrl)] = names;
                             }
                         }
                     }
@@ -629,8 +652,8 @@ namespace ModSync.Core.Services
                 Logger.LogWarning($"[ArchiveResolver] Could not read the download index: {ex.Message}");
             }
 
-            s_resourceIndexCache = map;
-            return map;
+            s_resourceIndexCache = byHash;
+            s_resourceIndexByUrl = byUrl;
         }
 
         [CanBeNull]
@@ -1891,7 +1914,7 @@ namespace ModSync.Core.Services
             foreach (string clause in directiveClauses)
             {
                 string normalizedClause = Normalize(clause);
-                var scored = new List<(IGrouping<string, FileInfo> Group, int Score)>();
+                var scored = new List<(IGrouping<string, FileInfo> Group, int Score, int TokenCount)>();
                 foreach (IGrouping<string, FileInfo> group in groups)
                 {
                     List<string> candidateTokens = RawTokens(group.First().Name)
@@ -1910,12 +1933,32 @@ namespace ModSync.Core.Services
                         .ToList();
                     int score = candidateTokens.Count(token =>
                         normalizedClause.Contains(token, StringComparison.Ordinal));
-                    scored.Add((group, score));
+                    scored.Add((group, score, candidateTokens.Count));
                 }
 
-                int bestScore = scored.Max(candidate => candidate.Score);
-                List<IGrouping<string, FileInfo>> hits = scored
-                    .Where(candidate => candidate.Score == bestScore && bestScore > 0)
+                // A single generic word ("version", "texture") shared by coincidence with an
+                // unrelated archive elsewhere in a large, un-narrowed library must not read as an
+                // explicit guide directive. Require the match to explain a MAJORITY of that
+                // archive's own distinctive tokens, not just a couple of them out of a dozen -
+                // measured on the K1 "HD Canderous Ordo" guide note ("Download only the version
+                // marked 'new clothes' ... body textures") which scored 2 of 9 distinctive tokens
+                // against an unrelated 960-file "Ultimate High Resolution Texture Pack" archive
+                // (the correct, small "Canderous Ordo.rar" scored 0) and silently bound the
+                // component to it. Archives that are already narrowed to one product's own
+                // variants (SingleOrAmbiguous's call site) keep only a couple of distinctive
+                // tokens each, so this stays lenient there while rejecting whole-library noise.
+                List<(IGrouping<string, FileInfo> Group, int Score)> eligible = scored
+                    .Where(candidate => candidate.Score > 0 && candidate.Score * 2 >= candidate.TokenCount)
+                    .Select(candidate => (candidate.Group, candidate.Score))
+                    .ToList();
+                if (eligible.Count == 0)
+                {
+                    continue;
+                }
+
+                int bestScore = eligible.Max(candidate => candidate.Score);
+                List<IGrouping<string, FileInfo>> hits = eligible
+                    .Where(candidate => candidate.Score == bestScore)
                     .Select(candidate => candidate.Group)
                     .ToList();
                 if (hits.Count == 1)
@@ -2033,86 +2076,411 @@ namespace ModSync.Core.Services
         }
 
         /// <summary>
-        /// "Run the installer, then move the files from the patch to your override."
-        /// The follow-up archive (K1CP Patch.rar) does not share the heading's tokens, so
-        /// UniqueTokenSubset never sees it. Attach it after the main archive resolves.
+        /// Each guide URL that the download index maps to a single on-disk payload is
+        /// acquired: a Patch mega link, a loose .tga, or the only archive left after
+        /// extra-product / Nexus-id filters. A page that still hosts several real
+        /// archives (main + translations) stays untouched.
         /// </summary>
         [NotNull]
-        private static ArchiveResolution AttachCompanionLoosePatch(
+        private static ArchiveResolution AttachUniqueArchivesNamedByUrls(
             [NotNull] ArchiveResolution resolved,
-            [NotNull] string componentName,
-            [CanBeNull] IReadOnlyList<string> extraSignals,
-            [NotNull] IReadOnlyList<FileInfo> archives)
+            [NotNull] IReadOnlyList<string> componentUrls,
+            [NotNull] IReadOnlyList<FileInfo> archives,
+            [CanBeNull] string componentName)
         {
-            if (!resolved.IsResolved || resolved.Archive is null || !RequestsMoveFilesFromThePatch(extraSignals))
+            return AttachUrlMappedPayloads(
+                resolved,
+                componentUrls,
+                archives,
+                LoadResourceIndexByUrl(),
+                componentName);
+        }
+
+        [NotNull]
+        internal static ArchiveResolution AttachUrlMappedPayloads(
+            [NotNull] ArchiveResolution resolved,
+            [NotNull] IReadOnlyList<string> componentUrls,
+            [NotNull] IReadOnlyList<FileInfo> archives,
+            [NotNull] IReadOnlyDictionary<string, List<string>> filenamesByNormalizedUrl,
+            [CanBeNull] string componentName = null)
+        {
+            if (resolved is null || componentUrls is null)
             {
                 return resolved;
             }
 
-            FileInfo companion = FindCompanionLoosePatch(componentName, resolved.Archive, archives);
-            if (companion is null)
+            List<FileInfo> payloads = PayloadsForUrls(
+                componentUrls,
+                archives,
+                filenamesByNormalizedUrl,
+                componentName);
+            if (payloads.Count == 0)
             {
                 return resolved;
             }
 
-            bool alreadyAttached = resolved.AdditionalArchives.Any(extra =>
-                extra != null
-                && string.Equals(extra.FullName, companion.FullName, StringComparison.OrdinalIgnoreCase));
-            if (alreadyAttached)
+            if (!resolved.IsResolved || resolved.Archive is null)
             {
-                return resolved;
+                resolved.Archive = payloads[0];
+                resolved.Tier = ArchiveResolutionTier.ResourceIndex;
+                resolved.Reason =
+                    $"Component URL maps to on-disk payload '{payloads[0].Name}'.";
+                payloads = payloads.Skip(1).ToList();
+            }
+            else if (ShouldPreferUrlArchiveOverHeadingHit(
+                resolved.Archive,
+                resolved.Tier,
+                payloads,
+                componentUrls,
+                filenamesByNormalizedUrl))
+            {
+                FileInfo upgrade = payloads.First(payload => IsRealArchiveName(payload.Name));
+                resolved.Reason +=
+                    $" URL-mapped archive '{upgrade.Name}' replaced heading hit '{resolved.Archive.Name}'.";
+                resolved.Archive = upgrade;
+                resolved.Tier = ArchiveResolutionTier.ResourceIndex;
             }
 
-            var extras = resolved.AdditionalArchives.ToList();
-            extras.Add(companion);
+            List<FileInfo> extras = resolved.AdditionalArchives != null
+                ? resolved.AdditionalArchives.ToList()
+                : new List<FileInfo>();
+            foreach (FileInfo extra in payloads)
+            {
+                if (string.Equals(extra.FullName, resolved.Archive.FullName, StringComparison.OrdinalIgnoreCase)
+                    || extras.Any(existing =>
+                        existing != null
+                        && string.Equals(existing.FullName, extra.FullName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                extras.Add(extra);
+                resolved.Reason +=
+                    $" Also attached '{extra.Name}' from a component URL that maps to exactly one archive.";
+            }
+
             resolved.AdditionalArchives = extras;
-            resolved.Reason +=
-                $" Also attached companion loose-file patch '{companion.Name}' because the guide "
-                + "says to move the files from the patch.";
             return resolved;
         }
 
-        private static bool RequestsMoveFilesFromThePatch([CanBeNull] IReadOnlyList<string> signals)
+        private static bool ShouldPreferUrlArchiveOverHeadingHit(
+            [NotNull] FileInfo current,
+            ArchiveResolutionTier currentTier,
+            [NotNull] IReadOnlyList<FileInfo> payloads,
+            [NotNull] IReadOnlyList<string> componentUrls,
+            [NotNull] IReadOnlyDictionary<string, List<string>> filenamesByNormalizedUrl)
         {
-            if (signals == null || signals.Count == 0)
+            if (!payloads.Any(payload => IsRealArchiveName(payload.Name)))
             {
                 return false;
             }
 
-            return Regex.IsMatch(
-                string.Join(" ", signals),
-                @"\bmove\s+the\s+files\s+from\s+the\s+patch\b",
-                RegexOptions.IgnoreCase,
-                TimeSpan.FromSeconds(5));
+            if (IsFolderOnlyHit(new ArchiveResolution { Archive = current }) || IsLooseGameFileName(current.Name))
+            {
+                return true;
+            }
+
+            // A fuzzy name-similarity guess (UniqueContainment or a weaker tier) that the component's
+            // own URLs actively CONTRADICT must yield to an archive one of those URLs DOES name,
+            // instead of being kept alongside it as an "additional" archive.
+            // Confirmed case: component "HD Astromech Droids"'s own (sole) deadlystream URL names
+            // "DrdAstro HD.rar"; SignificantTokens (line ~1137) drops "HD" for being under the
+            // 4-character floor, so UniqueTokenSubset separately (mis)matched an unrelated,
+            // never-URL-named "SH_Refurbished Astromech Droids.7z" on the generic leftover tokens
+            // "astromech"/"droids" alone. Because every one of the component's URLs is present in the
+            // index and none of them names the guess, it is discarded rather than unioned with the
+            // correct URL-named archive - stronger, non-fuzzy tiers (ResourceIndex, NexusModId,
+            // GuideDirective, ExactName) are left untouched, since a legitimate main archive that a
+            // URL DOES name, plus a companion patch archive named by a second URL, must still union
+            // (AddsPatchFollowUpBesideResolvedMain).
+            //
+            // Contradiction requires FULL index coverage of the component's URLs, not just silence on
+            // one of them: the download index is keyed two different ways (a hash-keyed lookup that
+            // runs earlier in ResolveCore and this URL-keyed one), and per-URL coverage between them
+            // routinely disagrees - that disagreement is exactly why ResolveByName ran at all for this
+            // component. A component whose MAIN url has no index entry (so the archive was correctly
+            // resolved by name similarity) but whose separate PATCH url does have one must still union
+            // the patch in, not have its main archive silently discarded and replaced by the patch.
+            if ((int)currentTier <= (int)ArchiveResolutionTier.ExactName)
+            {
+                return false;
+            }
+
+            return AllComponentUrlsHaveIndexCoverage(componentUrls, filenamesByNormalizedUrl)
+                && !ArchiveIsNamedByAnyComponentUrl(current.Name, componentUrls, filenamesByNormalizedUrl);
+        }
+
+        /// <summary>
+        /// True only when every one of the component's non-blank URLs has an entry in the download
+        /// index. A missing entry means the index is silent about that URL (no contradiction can be
+        /// drawn), not that the URL disagrees with the current archive; superseding on silence risks
+        /// discarding a correctly name-resolved main archive because an unrelated second URL (e.g. a
+        /// patch link) happens to be indexed and the main URL happens not to be.
+        /// </summary>
+        private static bool AllComponentUrlsHaveIndexCoverage(
+            [NotNull] IReadOnlyList<string> componentUrls,
+            [NotNull] IReadOnlyDictionary<string, List<string>> filenamesByNormalizedUrl)
+        {
+            bool sawUrl = false;
+            foreach (string url in componentUrls)
+            {
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    continue;
+                }
+
+                sawUrl = true;
+                if (!filenamesByNormalizedUrl.TryGetValue(UrlNormalizer.Normalize(url), out List<string> names)
+                    || names == null
+                    || names.Count == 0)
+                {
+                    return false;
+                }
+            }
+
+            return sawUrl;
+        }
+
+        /// <summary>
+        /// True when at least one of the component's own URLs maps (in the download index) to an
+        /// archive with this exact name, independent of whether <see cref="PayloadForUrl"/> collapsed
+        /// that URL to a unique payload. A URL can legitimately name an archive and still contribute
+        /// nothing to <c>payloads</c> (e.g. it maps to two same-priority real archives, such as a main
+        /// file plus its translation twin) - that must still count as "confirmed", not as "unnamed".
+        /// </summary>
+        private static bool ArchiveIsNamedByAnyComponentUrl(
+            [NotNull] string archiveName,
+            [NotNull] IReadOnlyList<string> componentUrls,
+            [NotNull] IReadOnlyDictionary<string, List<string>> filenamesByNormalizedUrl)
+        {
+            foreach (string url in componentUrls)
+            {
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    continue;
+                }
+
+                if (filenamesByNormalizedUrl.TryGetValue(UrlNormalizer.Normalize(url), out List<string> names)
+                    && names != null
+                    && names.Any(name => string.Equals(name, archiveName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        [NotNull]
+        [ItemNotNull]
+        internal static List<FileInfo> PayloadsForUrls(
+            [NotNull] IReadOnlyList<string> urls,
+            [NotNull] IReadOnlyList<FileInfo> archives,
+            [NotNull] IReadOnlyDictionary<string, List<string>> filenamesByNormalizedUrl,
+            [CanBeNull] string componentName)
+        {
+            var hits = new List<FileInfo>();
+            if (urls == null || archives == null || filenamesByNormalizedUrl == null)
+            {
+                return hits;
+            }
+
+            foreach (string url in urls)
+            {
+                FileInfo payload = PayloadForUrl(
+                    url,
+                    archives,
+                    filenamesByNormalizedUrl,
+                    componentName);
+                if (payload == null)
+                {
+                    continue;
+                }
+
+                if (!hits.Any(existing =>
+                    string.Equals(existing.FullName, payload.FullName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    hits.Add(payload);
+                }
+            }
+
+            return hits;
         }
 
         [CanBeNull]
-        private static FileInfo FindCompanionLoosePatch(
-            [NotNull] string componentName,
-            [NotNull] FileInfo mainArchive,
-            [NotNull] IReadOnlyList<FileInfo> archives)
+        private static FileInfo PayloadForUrl(
+            [CanBeNull] string url,
+            [NotNull] IReadOnlyList<FileInfo> archives,
+            [NotNull] IReadOnlyDictionary<string, List<string>> filenamesByNormalizedUrl,
+            [CanBeNull] string componentName)
         {
-            if (!Regex.IsMatch(
-                componentName ?? string.Empty,
-                @"\bcommunity\s+patch\b",
-                RegexOptions.IgnoreCase,
-                TimeSpan.FromSeconds(5)))
+            if (string.IsNullOrWhiteSpace(url))
             {
                 return null;
             }
 
-            List<FileInfo> hits = archives
-                .Where(archive => archive != null
-                    && !string.Equals(archive.FullName, mainArchive.FullName, StringComparison.OrdinalIgnoreCase)
-                    && IsRealArchiveName(archive.Name)
-                    && !NameLooksLikeCompatibilityPatch(archive.Name)
-                    && Regex.IsMatch(
-                        Path.GetFileNameWithoutExtension(archive.Name),
-                        @"\b[kK][12]?CP\b.*\b[Pp]atch\b|\b[Pp]atch\b.*\b[kK][12]?CP\b",
-                        RegexOptions.None,
-                        TimeSpan.FromSeconds(5)))
+            if (!filenamesByNormalizedUrl.TryGetValue(UrlNormalizer.Normalize(url), out List<string> names)
+                || names == null)
+            {
+                return null;
+            }
+
+            string urlNexusId = NexusModId(url);
+            List<FileInfo> onDisk = names
+                .Select(name => archives.FirstOrDefault(archive =>
+                    archive != null
+                    && IsResolvablePayloadName(archive.Name)
+                    && FilenameMatchesNexusUrl(archive.Name, urlNexusId)
+                    && string.Equals(archive.Name, name, StringComparison.OrdinalIgnoreCase)))
+                .Where(archive => archive != null)
+                .Distinct()
                 .ToList();
-            return hits.Count == 1 ? hits[0] : null;
+            if (onDisk.Count == 0)
+            {
+                return null;
+            }
+
+            if (onDisk.Count == 1)
+            {
+                return onDisk[0];
+            }
+
+            List<FileInfo> real = onDisk.Where(a => IsRealArchiveName(a.Name)).ToList();
+            real = DiscardExtraProductFiles(real, componentName);
+            if (real.Count == 1)
+            {
+                return real[0];
+            }
+
+            List<FileInfo> loose = onDisk.Where(a => IsLooseGameFileName(a.Name)).ToList();
+            return real.Count == 0 && loose.Count == 1 ? loose[0] : null;
+        }
+
+        [NotNull]
+        private static List<FileInfo> DiscardExtraProductFiles(
+            [NotNull] List<FileInfo> files,
+            [CanBeNull] string componentName)
+        {
+            if (files.Count == 0 || string.IsNullOrEmpty(componentName))
+            {
+                return files;
+            }
+
+            string componentNorm = Normalize(componentName);
+            string[] extras = { "vurt", "visualresurgence", "lightsaber", "romance", "newclothes", "ultimate", "duncan" };
+            return files
+                .Where(file =>
+                {
+                    string key = Normalize(file.Name);
+                    foreach (string extra in extras)
+                    {
+                        if (key.IndexOf(extra, StringComparison.Ordinal) >= 0
+                            && componentNorm.IndexOf(extra, StringComparison.Ordinal) < 0)
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                })
+                .ToList();
+        }
+
+        private static bool IsResolvablePayloadName([CanBeNull] string name)
+        {
+            return IsRealArchiveName(name) || IsLooseGameFileName(name);
+        }
+
+        private static bool FilenameMatchesNexusUrl([CanBeNull] string fileName, [CanBeNull] string urlModId)
+        {
+            if (string.IsNullOrEmpty(urlModId) || string.IsNullOrEmpty(fileName))
+            {
+                return true;
+            }
+
+            string fileModId = NexusModIdFromFileName(fileName);
+            return fileModId == null
+                || fileModId.Equals(urlModId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [CanBeNull]
+        private static string NexusModIdFromFileName([CanBeNull] string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+            {
+                return null;
+            }
+
+            string baseName = Path.GetFileNameWithoutExtension(fileName);
+            foreach (string field in baseName.Split('-'))
+            {
+                if (field.Length == 0 || !field.All(char.IsDigit))
+                {
+                    continue;
+                }
+
+                if (NexusIdIsDelimitedField(baseName, field))
+                {
+                    return field;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// One on-disk archive per URL. Zero or many files for a URL is not unique, so it
+        /// contributes nothing.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        internal static List<FileInfo> UniqueOnDiskArchivesPerUrl(
+            [NotNull] IReadOnlyList<string> urls,
+            [NotNull] IReadOnlyList<FileInfo> archives,
+            [NotNull] IReadOnlyDictionary<string, List<string>> filenamesByNormalizedUrl)
+        {
+            var hits = new List<FileInfo>();
+            if (urls == null || archives == null || filenamesByNormalizedUrl == null)
+            {
+                return hits;
+            }
+
+            foreach (string url in urls)
+            {
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    continue;
+                }
+
+                if (!filenamesByNormalizedUrl.TryGetValue(UrlNormalizer.Normalize(url), out List<string> names)
+                    || names == null)
+                {
+                    continue;
+                }
+
+                string urlNexusId = NexusModId(url);
+                List<FileInfo> onDisk = names
+                    .Select(name => archives.FirstOrDefault(archive =>
+                        archive != null
+                        && IsResolvablePayloadName(archive.Name)
+                        && FilenameMatchesNexusUrl(archive.Name, urlNexusId)
+                        && string.Equals(archive.Name, name, StringComparison.OrdinalIgnoreCase)))
+                    .Where(archive => archive != null)
+                    .Distinct()
+                    .ToList();
+                if (onDisk.Count != 1)
+                {
+                    continue;
+                }
+
+                if (!hits.Any(existing =>
+                    string.Equals(existing.FullName, onDisk[0].FullName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    hits.Add(onDisk[0]);
+                }
+            }
+
+            return hits;
         }
 
         private static bool IsNegativeGuideClause([CanBeNull] string clause)
@@ -2134,6 +2502,27 @@ namespace ModSync.Core.Services
                     TimeSpan.FromSeconds(5));
         }
 
+        /// <summary>
+        /// A filename named only in a later/widescreen/optional-download sentence is not
+        /// the component's primary archive. Galaxy Map Fix Pack names HR Menu Patch.zip
+        /// that way; the base zip is the DeadlyStream file.
+        /// </summary>
+        private static bool IsDeferredNamedFileClause([CanBeNull] string clause)
+        {
+            if (string.IsNullOrWhiteSpace(clause))
+            {
+                return false;
+            }
+
+            string pattern = GuideInterpretationPolicyStore.Current.TryGetPattern("named_file_is_deferred")
+                ?? @"\b(?:if\s+(?:intending\s+to\s+play\s+)?(?:in\s+)?widescreen|if\s+using\s+widescreen|optional\s+download|after\s+completing\s+the\s+rest|when\s+coming\s+back)\b";
+            return Regex.IsMatch(
+                clause,
+                pattern,
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5));
+        }
+
         private static bool ProseRejectsNamedFile([CanBeNull] string prose, [CanBeNull] string fileName)
         {
             if (string.IsNullOrWhiteSpace(prose) || string.IsNullOrWhiteSpace(fileName))
@@ -2152,7 +2541,7 @@ namespace ModSync.Core.Services
                     continue;
                 }
 
-                if (IsNegativeGuideClause(clause))
+                if (IsNegativeGuideClause(clause) || IsDeferredNamedFileClause(clause))
                 {
                     return true;
                 }

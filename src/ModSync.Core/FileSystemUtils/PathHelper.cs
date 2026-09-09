@@ -817,7 +817,11 @@ namespace ModSync.Core.FileSystemUtils
             patternInput = patternInput.Replace(oldValue: @"\*", newValue: ".*")
                 .Replace(oldValue: @"\?", newValue: ".");
 
-            return Regex.IsMatch(input, $"^{patternInput}$", RegexOptions.None, TimeSpan.FromSeconds(10));
+            // Case-insensitive: KOTOR's own engine resolves file names case-insensitively,
+            // and mod archives routinely mix filename case (e.g. "PFBBL01.tpc" alongside
+            // "pfbbl.mdl"/"pfbbl.mdx"). A case-sensitive wildcard match would silently
+            // under-match on case-sensitive filesystems (Linux/macOS).
+            return Regex.IsMatch(input, $"^{patternInput}$", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(10));
         }
 
         [NotNull]
@@ -1021,6 +1025,14 @@ namespace ModSync.Core.FileSystemUtils
             foreach (DirectoryInfo subDirectory in dirInfo.EnumerateDirectoriesSafely())
             {
                 if (!subDirectory.Exists)
+                {
+                    continue;
+                }
+
+                // Install metadata is not game content. Scanning it flags checkpoint
+                // working-tree case pairs that Linux can store and Windows never would.
+                if (string.Equals(subDirectory.Name, ".modsync", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(subDirectory.Name, ".git", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }

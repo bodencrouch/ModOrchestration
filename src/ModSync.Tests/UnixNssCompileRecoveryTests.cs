@@ -54,6 +54,100 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public void StageIncludeChainForTests_ResolvesTransitiveIncludesRecursively()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "modsync-nss-" + Path.GetRandomFileName());
+            string searchRoot = Path.Combine(root, "tslpatchdata");
+            string workDir = Path.Combine(root, "wine-workdir");
+            Directory.CreateDirectory(searchRoot);
+            Directory.CreateDirectory(workDir);
+
+            // a.nss #includes b.nss, which itself #includes c.nss. Only a.nss is staged
+            // directly; b.nss and c.nss must be pulled in transitively.
+            File.WriteAllText(Path.Combine(searchRoot, "a.nss"), "#include \"b\"\nvoid main() {}\n");
+            File.WriteAllText(Path.Combine(searchRoot, "b.nss"), "#include \"c\"\nint GetB() { return 1; }\n");
+            File.WriteAllText(Path.Combine(searchRoot, "c.nss"), "int GetC() { return 2; }\n");
+
+            try
+            {
+                File.Copy(Path.Combine(searchRoot, "a.nss"), Path.Combine(workDir, "a.nss"));
+
+                UnixNssCompileRecovery.StageIncludeChainForTests(workDir, searchRoot, "a.nss");
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(File.Exists(Path.Combine(workDir, "b.nss")), Is.True, "b.nss (direct include) should be staged.");
+                    Assert.That(File.Exists(Path.Combine(workDir, "c.nss")), Is.True, "c.nss (transitive include) should be staged.");
+                });
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+
+        [Test]
+        public void StageIncludeChainForTests_DoesNotInfiniteLoopOnCircularIncludes()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "modsync-nss-" + Path.GetRandomFileName());
+            string searchRoot = Path.Combine(root, "tslpatchdata");
+            string workDir = Path.Combine(root, "wine-workdir");
+            Directory.CreateDirectory(searchRoot);
+            Directory.CreateDirectory(workDir);
+
+            // x.nss #includes y.nss, and y.nss #includes x.nss right back.
+            File.WriteAllText(Path.Combine(searchRoot, "x.nss"), "#include \"y\"\nvoid main() {}\n");
+            File.WriteAllText(Path.Combine(searchRoot, "y.nss"), "#include \"x\"\nint GetY() { return 1; }\n");
+
+            try
+            {
+                File.Copy(Path.Combine(searchRoot, "x.nss"), Path.Combine(workDir, "x.nss"));
+
+                Assert.DoesNotThrow(() =>
+                    UnixNssCompileRecovery.StageIncludeChainForTests(workDir, searchRoot, "x.nss"));
+
+                Assert.That(File.Exists(Path.Combine(workDir, "y.nss")), Is.True);
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+
+        [Test]
+        public void EnsureNwscriptInPatcherTree_StagesTransitiveIncludeOfNwscript()
+        {
+            // Regression test for the production K2 CLI halt (component "For Mandalore!",
+            // script m_def_henchmand.nss): staging nwscript.nss must also pull in whatever
+            // nwscript.nss itself #includes, not just nwscript.nss verbatim.
+            string root = Path.Combine(Path.GetTempPath(), "modsync-nss-" + Path.GetRandomFileName());
+            string tslpatchdata = Path.Combine(root, "tslpatchdata");
+            Directory.CreateDirectory(tslpatchdata);
+
+            File.WriteAllText(
+                Path.Combine(tslpatchdata, "nwscript.nss"),
+                "#include \"k_inc_foo\"\n// core engine declarations\n");
+            File.WriteAllText(
+                Path.Combine(tslpatchdata, "k_inc_foo.nss"),
+                "int GetFoo() { return 1; }\n");
+
+            try
+            {
+                UnixNssCompileRecovery.EnsureNwscriptInPatcherTree(new DirectoryInfo(root));
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(File.Exists(Path.Combine(root, "nwscript.nss")), Is.True, "nwscript.nss itself should be staged at the patcher root.");
+                    Assert.That(File.Exists(Path.Combine(root, "k_inc_foo.nss")), Is.True, "nwscript.nss's own #include should also be staged at the patcher root.");
+                });
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+
+        [Test]
         public void FindNwnnsscomp_UsesSiblingExtractWhenModArchiveOmitsCompiler()
         {
             string root = Path.Combine(Path.GetTempPath(), "modsync-nss-" + Path.GetRandomFileName());

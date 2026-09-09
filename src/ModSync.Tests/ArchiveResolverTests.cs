@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 
 using ModSync.Core.Services;
+using ModSync.Core.Utility;
 
 using NUnit.Framework;
 
@@ -216,6 +217,41 @@ namespace ModSync.Tests
 
             Assert.That(result.IsResolved, Is.True, result.Reason);
             Assert.That(result.Archive.Name, Is.EqualTo("Damaged Version For Malachor.7z"));
+        }
+
+        /// <summary>
+        /// Measured on the 2026-09-07 K1 full run. The guide's download note for "HD Canderous
+        /// Ordo" shares no tokens with the small, correct 'Canderous Ordo.rar' archive, but two of
+        /// its generic words ("version", "textures") happen to also appear in the name of a much
+        /// larger, completely unrelated archive elsewhere in the reference library. Scoring that
+        /// coincidental 2-of-9-token overlap as a "unique" guide-directive hit silently bound the
+        /// component to the wrong, unrelated archive and moved its entire (960-file) payload into
+        /// the game's Override folder.
+        /// </summary>
+        [Test]
+        public void DownloadOnlyDirective_DoesNotBindToAnUnrelatedLargeArchiveOnCoincidentalWordOverlap()
+        {
+            IReadOnlyList<FileInfo> library = Library(
+                "Canderous Ordo.rar",
+                "Ultimate High Resolution Texture Pack - TPC Version-1100-1-1-1670426755.rar");
+
+            ArchiveResolution result = ArchiveResolver.Resolve(
+                "HD Canderous Ordo",
+                new[] { "https://deadlystream.com/files/file/1123-hd-canderous-ordo/" },
+                library,
+                ArchiveResolver.GameMarker.Kotor1,
+                new[]
+                {
+                    "Download only the version marked 'new clothes,' which includes both clothing "
+                    + "and body textures. We get our head texture from the below mod. Remember to "
+                    + "also download the patch.",
+                });
+
+            Assert.That(
+                result.Archive?.Name,
+                Is.Not.EqualTo("Ultimate High Resolution Texture Pack - TPC Version-1100-1-1-1670426755.rar"),
+                result.Reason);
+            Assert.That(result.Tier, Is.Not.EqualTo(ArchiveResolutionTier.GuideDirective), result.Reason);
         }
 
         [Test]
@@ -1569,6 +1605,296 @@ namespace ModSync.Tests
                     archive.SaveTo(stream, new SharpCompress.Writers.Zip.ZipWriterOptions(CompressionType.None));
                 }
             }
+        }
+
+        /// <summary>
+        /// A component URL that the download index maps to exactly one on-disk archive is
+        /// a second payload. A page that lists several files is not unique and is ignored.
+        /// </summary>
+        [Test]
+        public void UniqueOnDiskArchivesPerUrl_AttachesOnlySingletonUrlHits()
+        {
+            IReadOnlyList<FileInfo> library = Library(
+                "MainMod.zip",
+                "FollowUp.rar",
+                "MainMod-Translation.zip");
+
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [UrlNormalizer.Normalize("https://example.com/files/file/main/")] =
+                    new List<string> { "MainMod.zip", "MainMod-Translation.zip" },
+                [UrlNormalizer.Normalize("https://mega.example/file/abc#key")] =
+                    new List<string> { "FollowUp.rar" },
+            };
+
+            List<FileInfo> hits = ArchiveResolver.UniqueOnDiskArchivesPerUrl(
+                new List<string>
+                {
+                    "https://example.com/files/file/main/",
+                    "https://mega.example/file/abc#key",
+                },
+                library,
+                index);
+
+            Assert.That(hits.Select(a => a.Name), Is.EquivalentTo(new[] { "FollowUp.rar" }));
+        }
+
+        [Test]
+        public void UniqueOnDiskArchivesPerUrl_IncludesLooseGameFileFromSingletonUrl()
+        {
+            IReadOnlyList<FileInfo> library = Library("N_SomeLoose01.tga");
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [UrlNormalizer.Normalize("https://deadlystream.example/files/file/2787-loose-retexture/")] =
+                    new List<string> { "N_SomeLoose01.tga" },
+            };
+
+            List<FileInfo> hits = ArchiveResolver.UniqueOnDiskArchivesPerUrl(
+                new List<string> { "https://deadlystream.example/files/file/2787-loose-retexture/" },
+                library,
+                index);
+
+            Assert.That(hits.Select(a => a.Name), Is.EquivalentTo(new[] { "N_SomeLoose01.tga" }));
+        }
+
+        [Test]
+        public void UniqueOnDiskArchivesPerUrl_RejectsNexusIdMismatch()
+        {
+            IReadOnlyList<FileInfo> library = Library(
+                "Ultimate Korriban High Resolution - TPC Version-1367-1-2-1668960810.rar",
+                "Taris_Reskin-10-1-0.zip");
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [UrlNormalizer.Normalize("http://www.nexusmods.com/kotor/mods/10/")] =
+                    new List<string>
+                    {
+                        "Ultimate Korriban High Resolution - TPC Version-1367-1-2-1668960810.rar",
+                    },
+            };
+
+            List<FileInfo> hits = ArchiveResolver.UniqueOnDiskArchivesPerUrl(
+                new List<string> { "http://www.nexusmods.com/kotor/mods/10/" },
+                library,
+                index);
+
+            Assert.That(hits, Is.Empty);
+        }
+
+        [Test]
+        public void AttachUrlMappedPayloads_AddsPatchFollowUpBesideResolvedMain()
+        {
+            IReadOnlyList<FileInfo> library = Library("K1_Community_Main.zip", "Heading Patch.rar");
+            ArchiveResolution resolved = new ArchiveResolution
+            {
+                Archive = library[0],
+                Tier = ArchiveResolutionTier.UniqueTokenSubset,
+                Reason = "main",
+            };
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [UrlNormalizer.Normalize("https://deadlystream.example/files/file/1258-main/")] =
+                    new List<string> { "K1_Community_Main.zip", "K1_Community_Main-FR.zip" },
+                [UrlNormalizer.Normalize("https://mega.example/file/patch#key")] =
+                    new List<string> { "Heading Patch.rar" },
+            };
+
+            ArchiveResolution attached = ArchiveResolver.AttachUrlMappedPayloads(
+                resolved,
+                new List<string>
+                {
+                    "https://deadlystream.example/files/file/1258-main/",
+                    "https://mega.example/file/patch#key",
+                },
+                library,
+                index);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(attached.IsResolved, Is.True);
+                Assert.That(attached.Archive.Name, Is.EqualTo("K1_Community_Main.zip"));
+                Assert.That(
+                    attached.AdditionalArchives.Select(a => a.Name),
+                    Is.EquivalentTo(new[] { "Heading Patch.rar" }));
+            });
+        }
+
+        [Test]
+        public void AttachUrlMappedPayloads_PromotesSingletonUrlWhenUnresolved()
+        {
+            IReadOnlyList<FileInfo> library = Library("N_SomeLoose01.tga", "Unrelated.zip");
+            ArchiveResolution unresolved = new ArchiveResolution
+            {
+                Tier = ArchiveResolutionTier.Unresolved,
+                Reason = "No tier produced a unique match.",
+            };
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [UrlNormalizer.Normalize("https://deadlystream.example/files/file/2787-loose/")] =
+                    new List<string> { "N_SomeLoose01.tga" },
+            };
+
+            ArchiveResolution attached = ArchiveResolver.AttachUrlMappedPayloads(
+                unresolved,
+                new List<string> { "https://deadlystream.example/files/file/2787-loose/" },
+                library,
+                index);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(attached.IsResolved, Is.True, attached.Reason);
+                Assert.That(attached.Archive.Name, Is.EqualTo("N_SomeLoose01.tga"));
+            });
+        }
+
+        [Test]
+        public void AttachUrlMappedPayloads_PrefersUrlArchiveOverHeadingFolder()
+        {
+            IReadOnlyList<FileInfo> library = Library("K2 Swoops to K1", "[K1] Swoop from K2 to K1.rar");
+            ArchiveResolution folderHit = new ArchiveResolution
+            {
+                Archive = library[0],
+                Tier = ArchiveResolutionTier.ExactName,
+                Reason = "folder",
+            };
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [UrlNormalizer.Normalize("https://deadlystream.example/files/file/swoops/")] =
+                    new List<string> { "[K1] Swoop from K2 to K1.rar" },
+            };
+
+            ArchiveResolution attached = ArchiveResolver.AttachUrlMappedPayloads(
+                folderHit,
+                new List<string> { "https://deadlystream.example/files/file/swoops/" },
+                library,
+                index);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(attached.IsResolved, Is.True);
+                Assert.That(attached.Archive.Name, Is.EqualTo("[K1] Swoop from K2 to K1.rar"));
+            });
+        }
+
+        [Test]
+        public void AttachUrlMappedPayloads_PrefersUrlArchiveOverLooseFileFromSameUrl()
+        {
+            IReadOnlyList<FileInfo> library = Library(
+                "Malak.rar",
+                "N_DarthMalak01.tga",
+                "N_DarthMalak01  (Vurt's KotOR Visual Resurgence) 2026.rar.rar");
+            ArchiveResolution looseHit = new ArchiveResolution
+            {
+                Archive = library[1],
+                Tier = ArchiveResolutionTier.UniqueTokenSubset,
+                Reason = "loose",
+            };
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [UrlNormalizer.Normalize("https://deadlystream.example/files/file/980-hd-malak/")] =
+                    new List<string>
+                    {
+                        "Malak.rar",
+                        "N_DarthMalak01.tga",
+                        "N_DarthMalak01  (Vurt's KotOR Visual Resurgence) 2026.rar.rar",
+                    },
+            };
+
+            ArchiveResolution attached = ArchiveResolver.AttachUrlMappedPayloads(
+                looseHit,
+                new List<string> { "https://deadlystream.example/files/file/980-hd-malak/" },
+                library,
+                index,
+                "HD Darth Malak");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(attached.IsResolved, Is.True);
+                Assert.That(attached.Archive.Name, Is.EqualTo("Malak.rar"), attached.Reason);
+            });
+        }
+
+        [Test]
+        public void AttachUrlMappedPayloads_DiscardsUnnamedFuzzyGuessInFavorOfUrlNamedArchive()
+        {
+            // "HD Astromech Droids": SignificantTokens drops the 2-character "HD" token, so
+            // UniqueTokenSubset (mis)matches the generic leftover tokens "astromech"/"droids"
+            // against an entirely unrelated archive that the guide never names anywhere. The
+            // component's own deadlystream URL names the correct archive instead. The wrong guess
+            // must be discarded, not attached alongside the correct archive as an "additional" one.
+            IReadOnlyList<FileInfo> library = Library(
+                "SH_Refurbished Astromech Droids.7z",
+                "DrdAstro HD.rar");
+            ArchiveResolution wrongFuzzyGuess = new ArchiveResolution
+            {
+                Archive = library[0],
+                Tier = ArchiveResolutionTier.UniqueTokenSubset,
+                Reason = "Archive name contains every word of 'HD Astromech Droids'.",
+            };
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [UrlNormalizer.Normalize("https://deadlystream.example/files/file/1600-drdastro-hd/")] =
+                    new List<string> { "DrdAstro HD.rar" },
+            };
+
+            ArchiveResolution attached = ArchiveResolver.AttachUrlMappedPayloads(
+                wrongFuzzyGuess,
+                new List<string> { "https://deadlystream.example/files/file/1600-drdastro-hd/" },
+                library,
+                index,
+                "HD Astromech Droids");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(attached.IsResolved, Is.True, attached.Reason);
+                Assert.That(attached.Archive.Name, Is.EqualTo("DrdAstro HD.rar"), attached.Reason);
+                Assert.That(attached.Tier, Is.EqualTo(ArchiveResolutionTier.ResourceIndex));
+                Assert.That(attached.AdditionalArchives, Is.Empty, attached.Reason);
+            });
+        }
+
+        [Test]
+        public void AttachUrlMappedPayloads_KeepsCorrectlyNamedMatchWhenOnlyASecondUrlHasIndexCoverage()
+        {
+            // The two lookups the download index is built from (hash-keyed, checked earlier in
+            // ResolveCore, and URL-keyed, checked here) routinely disagree on per-URL coverage - that
+            // is why ResolveByName ran at all for a component whose main URL has no index entry. A
+            // correctly name-resolved main archive must not be discarded just because a SEPARATE
+            // patch URL happens to be indexed while the main URL happens not to be.
+            IReadOnlyList<FileInfo> library = Library("Correct Main Mod.zip", "Correct Main Mod Patch.rar");
+            ArchiveResolution correctlyResolvedMain = new ArchiveResolution
+            {
+                Archive = library[0],
+                Tier = ArchiveResolutionTier.UniqueTokenSubset,
+                Reason = "Archive name contains every word of 'Correct Main Mod'.",
+            };
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                // Only the patch URL is indexed; the main URL is absent (no entry at all).
+                [UrlNormalizer.Normalize("https://mega.example/file/patch#key")] =
+                    new List<string> { "Correct Main Mod Patch.rar" },
+            };
+
+            ArchiveResolution attached = ArchiveResolver.AttachUrlMappedPayloads(
+                correctlyResolvedMain,
+                new List<string>
+                {
+                    "https://deadlystream.example/files/file/9001-main/",
+                    "https://mega.example/file/patch#key",
+                },
+                library,
+                index,
+                "Correct Main Mod");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(attached.IsResolved, Is.True, attached.Reason);
+                Assert.That(attached.Archive.Name, Is.EqualTo("Correct Main Mod.zip"), attached.Reason);
+                Assert.That(attached.Tier, Is.EqualTo(ArchiveResolutionTier.UniqueTokenSubset), attached.Reason);
+                Assert.That(
+                    attached.AdditionalArchives.Select(a => a.Name),
+                    Is.EquivalentTo(new[] { "Correct Main Mod Patch.rar" }),
+                    attached.Reason);
+            });
         }
 
         private static void TryDelete(string directory)

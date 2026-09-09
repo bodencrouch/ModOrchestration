@@ -438,9 +438,17 @@ namespace ModSync.Core.Parsing
             ["file_list"] = new Regex(@"(?<files>(?:[\w\-_.]+\.[\w]+(?:\s+&\s+\.[\w]+)?(?:,\s*|\s+and\s+|\s+&\s+))+[\w\-_.]+\.[\w]+)", RegexOptions.IgnoreCase),
             // Single file with extension
             ["single_file"] = new Regex(@"[""']?(?<file>[\w\-_]+\.[\w]{2,4})[""']?", RegexOptions.IgnoreCase),
-            // Folder references
-            ["folder_from"] = new Regex(@"from\s+(?:the\s+)?(?:both\s+the\s+)?(?<folder>[\w\s\-_&/\\]+?)\s+(?:and\s+(?<folder2>[\w\s\-_/\\]+?)\s+)?(?:folder|directory)", RegexOptions.IgnoreCase),
+            // Folder references. The possessive group ("the mod's Player Clothing folder") mirrors
+            // the possessive handling already used for "extract redrob's mod" above so a folder
+            // name immediately after "the mod's"/"redrob's" resolves without the apostrophe blocking
+            // the match (apostrophe is deliberately absent from the <folder> character class so a
+            // stray one can't be swallowed as an opening quote elsewhere, e.g. in folder_name).
+            ["folder_from"] = new Regex(@"from\s+(?:the\s+)?(?:both\s+the\s+)?(?:[\w\-]+(?:'s|’s)\s+)?(?<folder>[\w\s\-_&/\\]+?)\s+(?:and\s+(?<folder2>[\w\s\-_/\\]+?)\s+)?(?:folder|directory)", RegexOptions.IgnoreCase),
             ["folder_name"] = new Regex(@"(?:the\s+)?[""']?(?<folder>[\w\s\-_/\\]+?)[""']?\s+folder", RegexOptions.IgnoreCase),
+            // Prefix-filtered file selection: "move all files beginning "X" and "Y" from ...".
+            // Narrows a folder-wide sweep to only the files whose names start with the named
+            // prefixes, instead of a blanket wildcard over the whole folder.
+            ["prefix_filter"] = new Regex(@"(?:beginning|starting)(?:\s+with)?\s+(?<prefixes>(?:[""']?[\w\-]+[""']?(?:,\s*|\s+and\s+|\s+&\s+))+[""']?[\w\-]+[""']?)", RegexOptions.IgnoreCase),
             // Destination patterns
             ["override_dest"] = new Regex(@"(?:to\s+)?(?:your\s+)?(?:game'?s?\s+)?override(?:\s+(?:folder|directory))?", RegexOptions.IgnoreCase),
             ["main_dir_dest"] = new Regex(@"(?:to\s+)?(?:the\s+)?main\s+(?:game\s+)?(?:directory|folder)", RegexOptions.IgnoreCase),
@@ -987,6 +995,13 @@ namespace ModSync.Core.Parsing
                 return instructions;
             }
 
+            // "Repeat this process with X, creating N copies and naming them A and B" names several
+            // new files in one clause - the single-Destination copy-as patterns below can't express that.
+            if (TryHandleRepeatCopyPattern(unit, parentComponent, instructions))
+            {
+                return instructions;
+            }
+
             // Try each instruction pattern
             foreach (InstructionPattern pattern in ActiveInstructionPatterns())
             {
@@ -1121,6 +1136,84 @@ namespace ModSync.Core.Parsing
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Matches a "repeat the copy-as step for another source, but name the new copies A and B"
+        /// clause: "Repeat this process with the file N_Duros03.tga, creating two copies and naming
+        /// them N_Duros05.tga and N_Duros06.tga." Deliberately generic on source filename, copy count
+        /// (word before "cop(y|ies)" is never parsed as a number), and how many new names follow -
+        /// the number of names in the "naming them ..." list determines how many copies are drafted.
+        /// </summary>
+        private static readonly Regex s_repeatCopyPattern = new Regex(
+            @"repeat\s+(?:this|the)\s+(?:process|step)\s+with\s+(?:the\s+)?(?:file\s+)?"
+            + @"[""']?(?<source>[\w\-.]+?)[""']?\s*,?\s+creating\s+[\w\-]+\s+cop(?:y|ies)\s+and\s+"
+            + @"nam(?:e|ing)\s+(?:it|them)\s+(?<names>.+)",
+            RegexOptions.IgnoreCase);
+
+        /// <summary>Extracts individual bare filenames out of a "A.tga and B.tga" style list.</summary>
+        private static readonly Regex s_repeatCopyNameListPattern = new Regex(
+            @"[""']?(?<name>[\w\-]+\.[\w]+)[""']?", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Guide prose sometimes performs one copy-as clause, then repeats the same operation against
+        /// a second source file while naming multiple new copies at once ("Duros HD": copy N_Duros02
+        /// to N_Duros04, then "repeat this process" with N_Duros03, creating N_Duros05 and N_Duros06).
+        /// The single-Destination copy-as patterns above can name only one new file per instruction, so
+        /// this drafts one non-destructive <see cref="Instruction.ActionType.Copy"/> per named target -
+        /// never <see cref="Instruction.ActionType.Rename"/>, since the guide's "repeat this process"
+        /// wording means the original source file must still exist afterward (it survives, untouched,
+        /// alongside every new copy).
+        /// </summary>
+        /// <returns>true when the unit matched and the caller must not fall through to the generic pattern list.</returns>
+        private static bool TryHandleRepeatCopyPattern(
+            [NotNull] string unit,
+            [NotNull] ModComponent parentComponent,
+            [NotNull] List<Instruction> instructions)
+        {
+            if (unit.IndexOf("repeat", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            Match match = s_repeatCopyPattern.Match(unit);
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            string source = match.Groups["source"].Value.Trim().Trim('"', '\'');
+            if (string.IsNullOrEmpty(source) || !Path.HasExtension(source))
+            {
+                return false;
+            }
+
+            List<string> names = s_repeatCopyNameListPattern.Matches(match.Groups["names"].Value)
+                .Cast<Match>()
+                .Select(nameMatch => nameMatch.Groups["name"].Value.Trim())
+                .Where(name => !string.IsNullOrEmpty(name)
+                    && !string.Equals(name, source, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (names.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (string name in names)
+            {
+                var instruction = new Instruction
+                {
+                    Action = Instruction.ActionType.Copy,
+                    Source = new List<string> { source },
+                    Destination = name,
+                };
+                instruction.SetParentComponent(parentComponent);
+                instructions.Add(instruction);
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -1398,6 +1491,53 @@ namespace ModSync.Core.Parsing
                 return rangeSources;
             }
 
+            // === Check for prefix-filtered file selection ("beginning 'X' and 'Y'") ===
+            // Guide prose sometimes narrows a folder-wide move/copy to only the files whose names
+            // start with specific prefixes, e.g. Republic Soldier Fix's "move all files beginning
+            // "PFBBL" and "PMBBL" from the mod's Player Clothing folder to your override." Checked
+            // before the generic folder/wildcard fallbacks below so the prefix clause and the folder
+            // name aren't both swallowed into one garbled folder string bound to a blanket "\*"
+            // wildcard - which over-matches every file in the folder instead of only the named
+            // prefixes. Must run against the raw sourceText (not a derived substring) so it still
+            // finds the clause even when an earlier "only X" rewrite has folded unrelated prose
+            // ahead of it into the same text.
+            Match prefixFilterMatch = ActiveEntityPatterns()["prefix_filter"].Match(sourceText);
+            if (prefixFilterMatch.Success)
+            {
+                List<string> prefixes = ParsePrefixList(prefixFilterMatch.Groups["prefixes"].Value);
+                if (prefixes.Count > 0)
+                {
+                    // sourceText itself won't carry the trailing "folder" word when the outer
+                    // instruction pattern already consumed it (e.g. "...to (?:folder)?\s+to..."),
+                    // so fall back to the untouched fullUnit - which still has it - the same way
+                    // the file_range/numeric_range checks above prefer fullUnit. Search fullUnit
+                    // starting at the prefix clause's own position (not position 0) so an unrelated
+                    // earlier "from X folder" clause in the same multi-clause unit - e.g. "Delete Y
+                    // from the Patch folder before moving all files beginning A and B from the
+                    // Textures folder to override" - doesn't get bound to this prefix list instead
+                    // of its own folder.
+                    Match prefixFolderMatch = ActiveEntityPatterns()["folder_from"].Match(sourceText);
+                    if (!prefixFolderMatch.Success)
+                    {
+                        Match prefixClauseInFullUnit = ActiveEntityPatterns()["prefix_filter"].Match(fullUnit);
+                        int searchStart = prefixClauseInFullUnit.Success ? prefixClauseInFullUnit.Index : 0;
+                        prefixFolderMatch = ActiveEntityPatterns()["folder_from"].Match(fullUnit, searchStart);
+                    }
+                    string prefixFolder = prefixFolderMatch.Success
+                        ? prefixFolderMatch.Groups["folder"].Value.Trim().Trim('"', '\'', ' ')
+                        : null;
+
+                    foreach (string prefix in prefixes)
+                    {
+                        sources.Add(string.IsNullOrEmpty(prefixFolder)
+                            ? $"<<modDirectory>>\\{prefix}*"
+                            : $"<<modDirectory>>\\{prefixFolder}\\{prefix}*");
+                    }
+
+                    return sources;
+                }
+            }
+
             // === Check for folder references ===
             Match folderMatch = ActiveEntityPatterns()["folder_from"].Match(sourceText);
             if (!folderMatch.Success)
@@ -1562,6 +1702,33 @@ namespace ModSync.Core.Parsing
             }
 
             return files;
+        }
+
+        /// <summary>
+        /// Parses a "beginning 'X' and 'Y'" prefix list into individual prefix tokens. Mirrors
+        /// <see cref="ParseFileList"/>'s comma/and/&amp; splitting, but (unlike that method) does not
+        /// require an extension - a bare name-prefix like "PFBBL" has none.
+        /// </summary>
+        [NotNull]
+        private static List<string> ParsePrefixList([NotNull] string text)
+        {
+            var prefixes = new List<string>();
+
+            string[] parts = Regex.Split(text, @"\s*(?:,|;|\s+and\s+|\s+&\s+)\s*", RegexOptions.IgnoreCase);
+
+            foreach (string part in parts)
+            {
+                string cleaned = part.Trim().Trim('"', '\'', ' ');
+
+                if (cleaned.Length > 0
+                    && !cleaned.Equals("and", StringComparison.OrdinalIgnoreCase)
+                    && !cleaned.Equals("the", StringComparison.OrdinalIgnoreCase))
+                {
+                    prefixes.Add(cleaned);
+                }
+            }
+
+            return prefixes;
         }
 
         /// <summary>

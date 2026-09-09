@@ -125,6 +125,51 @@ namespace ModSync.Tests
                 "Copy-as must retain the quoted source stem, not a bare modDirectory wildcard.");
         }
 
+        /// <summary>
+        /// Republic Soldier Fix's guide note (k1 full.md) narrows a folder-wide move to only the
+        /// files whose names begin with two named prefixes: "move all files beginning "PFBBL" and
+        /// "PMBBL" from the mod's Player Clothing folder to your override." Before the prefix-filter
+        /// clause parsing gap was closed, the whole "beginning ... and ..." clause (plus the folder
+        /// name) fell through to the generic folder fallback and got bound as a single garbled folder
+        /// name with a blanket "Player Clothing\*" wildcard - pulling in all 18 size-variant files
+        /// (PFBBL/PFBBM/PFBBS/PMBBL/PMBBM/PMBBS) instead of only the 6 matching the 2 named prefixes,
+        /// per the manual install ledger's recorded file list for this step. Uses the full two-sentence
+        /// note body (not just the isolated second sentence) because an earlier "only install ..."
+        /// clause in the first sentence rewrites Source from the whole remaining unit text, and the
+        /// fix must still find the prefix clause and its folder inside that rewritten text.
+        /// </summary>
+        [Test]
+        public void RepublicSoldierFixProse_PrefixFilterNarrowsToNamedPrefixesNotBlanketWildcard()
+        {
+            const string fullNote =
+                "Move the files from the mod's Override folder to your game's override folder. " +
+                "For compatibility, you will need to only install the player clothing texture " +
+                "replacement for Soldier-class characters: move all files beginning \"PFBBL\" and " +
+                "\"PMBBL\" from the mod's Player Clothing folder to your override.";
+
+            ObservableCollection<Instruction> instructions = Parse(fullNote);
+
+            System.Collections.Generic.List<string> playerClothingSources = instructions
+                .Where(i => i.Action == Instruction.ActionType.Move)
+                .SelectMany(i => i.Source ?? new System.Collections.Generic.List<string>())
+                .Where(s => s.IndexOf("Player Clothing", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+
+            string dump = string.Join("; ", instructions.Select(i =>
+                $"{i.Action}:[{string.Join(",", i.Source ?? new System.Collections.Generic.List<string>())}]->{i.Destination}"));
+
+            // Exactly the 2 named prefixes, scoped under Player Clothing - not a superset that would
+            // still pass with the blanket wildcard's extra size variants mixed in alongside them.
+            Assert.That(
+                playerClothingSources,
+                Is.EquivalentTo(new[]
+                {
+                    @"<<modDirectory>>\Player Clothing\PFBBL*",
+                    @"<<modDirectory>>\Player Clothing\PMBBL*",
+                }),
+                $"Expected exactly the PFBBL/PMBBL-prefixed sources under Player Clothing, nothing else. Got: {dump}");
+        }
+
         private static ObservableCollection<Instruction> Parse(string prose)
         {
             var parser = new NaturalLanguageInstructionParser();

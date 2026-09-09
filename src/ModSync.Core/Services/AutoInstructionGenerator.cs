@@ -855,8 +855,21 @@ namespace ModSync.Core.Services
             }
 
             bool generated = GenerateFromArchiveOrExtractedFolder(component, resolution.Archive);
+            bool patcherOnly = GuideIsPatcherOnly(
+                component,
+                ComponentGuideProse(component),
+                ComponentEmitsAction(component, Instruction.ActionType.Patcher)
+                    || ComponentEmitsAction(component, Instruction.ActionType.Choose));
             foreach (FileInfo extra in resolution.AdditionalArchives)
             {
+                if (patcherOnly)
+                {
+                    Logger.LogVerbose(
+                        $"[AutoInstructionGenerator] Skipping additional archive '{extra.Name}' "
+                        + $"for '{component.Name}' (guide is installer-only)");
+                    continue;
+                }
+
                 generated = GenerateFromArchiveOrExtractedFolder(component, extra) || generated;
             }
 
@@ -1947,6 +1960,11 @@ namespace ModSync.Core.Services
             foreach (string path in fileList)
             {
                 string normalizedPath = path.Replace('\\', '/');
+                if (IsInstallerRuntimeArtifact(normalizedPath))
+                {
+                    continue;
+                }
+
                 string[] pathParts = normalizedPath.Split('/');
 
                 if (normalizedPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
@@ -1961,8 +1979,24 @@ namespace ModSync.Core.Services
                     string fileName = Path.GetFileName(normalizedPath);
                     if (fileName.Equals("namespaces.ini", StringComparison.OrdinalIgnoreCase))
                     {
+                        // An archive can contain more than one independent tslpatchdata tree (e.g. a
+                        // "Main Install" mod plus an unrelated "Patch - <OtherMod>" compat-patch
+                        // subtree, each with its own namespaces.ini). Keep the FIRST one found, not
+                        // the last: ReadNamespacesIni()/IniHelper.TraverseDirectories() also stops at
+                        // the first namespaces.ini it encounters (same entry-order traversal) to build
+                        // the namespace option list in AddNamespacesChooseInstructions, so this field
+                        // must agree with that same directory or the generated Patcher instruction
+                        // points at a tslpatchdata tree whose namespaces.ini never defined the selected
+                        // option. Gate on HasNamespacesIni (not string.IsNullOrEmpty(TslPatcherPath)):
+                        // a changes.ini found earlier in a *different* tree must not block the first
+                        // namespaces.ini from claiming this path - namespaces.ini always outranks a
+                        // changes.ini-derived path, exactly once, on first sight.
+                        if (!analysis.HasNamespacesIni)
+                        {
+                            analysis.TslPatcherPath = GetTslPatcherPath(normalizedPath);
+                        }
+
                         analysis.HasNamespacesIni = true;
-                        analysis.TslPatcherPath = GetTslPatcherPath(normalizedPath);
                     }
                     else if (fileName.Equals("changes.ini", StringComparison.OrdinalIgnoreCase))
                     {
@@ -1990,7 +2024,8 @@ namespace ModSync.Core.Services
                     else if (pathParts.Length >= 2)
                     {
                         string topLevelFolder = pathParts[0];
-                        if (!analysis.FoldersWithFiles.Contains(topLevelFolder, StringComparer.Ordinal))
+                        if (!IsNonGamePayloadFolder(topLevelFolder)
+                            && !analysis.FoldersWithFiles.Contains(topLevelFolder, StringComparer.Ordinal))
                         {
                             analysis.FoldersWithFiles.Add(topLevelFolder);
                         }
@@ -2048,6 +2083,525 @@ namespace ModSync.Core.Services
         /// displaced originals into Override - the exact opposite of what the mod intends. Archives
         /// never contain them, so this only ever filters install residue.
         /// </summary>
+        private static bool IsNonGamePayloadFolder([CanBeNull] string folder)
+        {
+            if (string.IsNullOrWhiteSpace(folder))
+            {
+                return false;
+            }
+
+            return folder.Equals("__MACOSX", StringComparison.OrdinalIgnoreCase)
+                || folder.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase)
+                || folder.StartsWith("._", StringComparison.Ordinal);
+        }
+
+        private static bool GuideTreatsFolderAsOptional(
+            [NotNull] string folder,
+            [CanBeNull] string prose)
+        {
+            if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(prose))
+            {
+                return false;
+            }
+
+            string template = Policy.TryGetPattern("optional_folder_near_token")
+                ?? @"\b(?:if\s+you(?:'d|\s+would)\s+like|optionally)\b[\s\S]{0,120}\b{token}\b";
+            string pattern = template.Replace("{token}", Regex.Escape(folder), StringComparison.Ordinal);
+            return Regex.IsMatch(
+                prose,
+                pattern,
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5));
+        }
+
+        /// <summary>
+        /// Guide says skip / do not install this archive folder (or "skip it" after
+        /// naming the folder). "Bugfix folder" matches archive folder "Bug Fixes".
+        /// </summary>
+        private static bool GuideTreatsFolderAsSkipped(
+            [NotNull] string folder,
+            [CanBeNull] string prose)
+        {
+            if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(prose))
+            {
+                return false;
+            }
+
+            string skipVerb = Policy.TryGetPattern("skip_folder_verb")
+                ?? @"(?:you\s+can\s+also\s+skip|skip(?:\s+it)?|do\s+not\s+(?:install|move|use)|don't\s+(?:install|move|use)|not\s+including)";
+
+            foreach (Match skip in Regex.Matches(
+                prose,
+                skipVerb,
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)))
+            {
+                int start = Math.Max(0, skip.Index - 160);
+                int end = Math.Min(prose.Length, skip.Index + skip.Length + 80);
+                string window = prose.Substring(start, end - start);
+                foreach (Match word in Regex.Matches(
+                    window,
+                    @"[A-Za-z][A-Za-z0-9'%-]{3,}",
+                    RegexOptions.None,
+                    TimeSpan.FromSeconds(5)))
+                {
+                    if (FolderNameMatchesGuideToken(folder, word.Value))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool FolderNameMatchesGuideToken(
+            [NotNull] string folder,
+            [CanBeNull] string token)
+        {
+            string folderKey = AlnumKey(folder);
+            string tokenKey = AlnumKey(token);
+            if (folderKey.Length < 5 || tokenKey.Length < 5)
+            {
+                return false;
+            }
+
+            if (folderKey.Equals(tokenKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            string shorter = folderKey.Length <= tokenKey.Length ? folderKey : tokenKey;
+            string longer = folderKey.Length <= tokenKey.Length ? tokenKey : folderKey;
+            if (longer.StartsWith(shorter, StringComparison.OrdinalIgnoreCase)
+                && longer.Length - shorter.Length <= 2)
+            {
+                return true;
+            }
+
+            // "Transparent" names archive folder "Transparent Skins".
+            if (folderKey.StartsWith(tokenKey, StringComparison.OrdinalIgnoreCase)
+                && tokenKey.Length >= 8)
+            {
+                string rest = folderKey.Substring(tokenKey.Length);
+                return s_guideFolderNameSuffixes.Any(suffix =>
+                    suffix.Equals(rest, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return false;
+        }
+
+        private static readonly string[] s_guideFolderNameSuffixes =
+        {
+            "skins", "textures", "folder", "files", "appearance", "heads", "pack", "mod",
+        };
+
+        [NotNull]
+        private static string AlnumKey([CanBeNull] string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            var chars = value.Where(char.IsLetterOrDigit).ToArray();
+            return new string(chars).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Filenames listed after EXCEPT / excluding in guide prose.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> GuideExceptedFilenames([CanBeNull] string prose)
+        {
+            var names = new List<string>();
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return names;
+            }
+
+            foreach (Match clause in Regex.Matches(
+                prose,
+                Policy.TryGetPattern("except_or_excluding_clause")
+                    ?? @"\b(?:except|excluding|but\s+not|not\s+including)\b[\s\S]{0,500}",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)))
+            {
+                foreach (Match file in Regex.Matches(
+                    clause.Value,
+                    Policy.TryGetPattern("guide_filename_token")
+                        ?? @"\b([\w.-]+\.[A-Za-z0-9]{2,4})\b",
+                    RegexOptions.IgnoreCase,
+                    TimeSpan.FromSeconds(5)))
+                {
+                    string name = Path.GetFileName(file.Groups[1].Value);
+                    if (string.IsNullOrWhiteSpace(name) || !IsGameFile(Path.GetExtension(name)))
+                    {
+                        continue;
+                    }
+
+                    if (!names.Exists(n => n.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        names.Add(name);
+                    }
+                }
+            }
+
+            return names;
+        }
+
+        /// <summary>
+        /// Filenames the guide says to remove from the payload before the Override copy.
+        /// "Delete X before moving to override" is not an Override cleanup.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> GuideDeletedBeforeMoveFilenames([CanBeNull] string prose)
+        {
+            var names = new List<string>();
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return names;
+            }
+
+            foreach (Match clause in Regex.Matches(
+                prose,
+                Policy.TryGetPattern("delete_before_move_clause")
+                    ?? @"\bdelete\b[\s\S]{0,500}?\b(?:before\s+)?mov(?:e|ing)\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)))
+            {
+                foreach (Match file in Regex.Matches(
+                    clause.Value,
+                    Policy.TryGetPattern("guide_filename_token")
+                        ?? @"\b([\w.-]+\.[A-Za-z0-9]{2,4})\b",
+                    RegexOptions.IgnoreCase,
+                    TimeSpan.FromSeconds(5)))
+                {
+                    string name = Path.GetFileName(file.Groups[1].Value);
+                    if (string.IsNullOrWhiteSpace(name) || !IsGameFile(Path.GetExtension(name)))
+                    {
+                        continue;
+                    }
+
+                    if (!names.Exists(n => n.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        names.Add(name);
+                    }
+                }
+            }
+
+            return names;
+        }
+
+        /// <summary>
+        /// Filenames the guide says to ignore / skip as payload ("you can ignore X unless").
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> GuideIgnoredFilenames([CanBeNull] string prose)
+        {
+            var names = new List<string>();
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return names;
+            }
+
+            foreach (Match file in Regex.Matches(
+                prose,
+                Policy.TryGetPattern("ignore_named_file_clause")
+                    ?? @"(?:you\s+can\s+)?ignore\s+([\w.-]+\.[A-Za-z0-9]{2,4})",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)))
+            {
+                string name = Path.GetFileName(file.Groups[1].Value);
+                if (string.IsNullOrWhiteSpace(name) || !IsGameFile(Path.GetExtension(name)))
+                {
+                    continue;
+                }
+
+                if (!names.Exists(n => n.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    names.Add(name);
+                }
+            }
+
+            return names;
+        }
+
+        /// <summary>
+        /// Folders the guide names as the install payload ("ONLY look at X", "enter the X folder").
+        /// Empty means the archive walk is unrestricted.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> GuideNamedInstallFolders([CanBeNull] string prose)
+        {
+            var names = new List<string>();
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return names;
+            }
+
+            void AddPieces(string raw)
+            {
+                foreach (string piece in Regex.Split(
+                    raw,
+                    Policy.TryGetPattern("folder_name_split")
+                        ?? @"\s*(?:/|\\|,|\band\b|\bor\b)\s*",
+                    RegexOptions.IgnoreCase,
+                    TimeSpan.FromSeconds(2)))
+                {
+                    string cleaned = Regex.Replace(
+                            piece.Trim().Trim('"', '\'', '`'),
+                            Policy.TryGetPattern("strip_trailing_folders") ?? @"\s+folders?$",
+                            string.Empty,
+                            RegexOptions.IgnoreCase,
+                            TimeSpan.FromSeconds(1))
+                        .Trim();
+                    if (cleaned.Length < 3
+                        || names.Exists(n => n.Equals(cleaned, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    names.Add(cleaned);
+                }
+            }
+
+            foreach (Match match in Regex.Matches(
+                prose,
+                Policy.TryGetPattern("only_look_at_folders")
+                    ?? @"only\s+look\s+at\s+the\s+([^.;]+?)(?:\s+folders?|\s+folder)\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)))
+            {
+                AddPieces(match.Groups[1].Value);
+            }
+
+            foreach (Match match in Regex.Matches(
+                prose,
+                Policy.TryGetPattern("enter_the_folder")
+                    ?? @"enter\s+the\s+([^.;]+?)\s+folder\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)))
+            {
+                AddPieces(match.Groups[1].Value);
+            }
+
+            foreach (Match match in Regex.Matches(
+                prose,
+                Policy.TryGetPattern("only_move_from_folder")
+                    ?? @"only\s+move\s+(?:the\s+)?files\s+from\s+[""']?([^""'.]+)[""']?",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(5)))
+            {
+                AddPieces(match.Groups[1].Value);
+            }
+
+            if (GuidePicksOneOfNamedFolders(prose))
+            {
+                foreach (Match match in Regex.Matches(
+                    prose,
+                    Policy.TryGetPattern("from_the_named_folders")
+                        ?? @"from\s+the\s+([^.;]+?)\s+folders\b",
+                    RegexOptions.IgnoreCase,
+                    TimeSpan.FromSeconds(5)))
+                {
+                    AddPieces(match.Groups[1].Value);
+                }
+            }
+
+            return names;
+        }
+
+        private static bool GuidePicksOneOfNamedFolders([CanBeNull] string prose)
+        {
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(
+                prose,
+                Policy.TryGetPattern("picks_one_of_folders")
+                    ?? @"\b(?:from\s+one\s+of|your\s+preferred)\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(2));
+        }
+
+        private static bool GuideForbidsRootLooseFiles([CanBeNull] string prose)
+        {
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(
+                prose,
+                Policy.TryGetPattern("forbids_root_loose_files")
+                    ?? @"do\s+not\s+move\s+(?:any\s+of\s+the\s+)?files\s+in\s+the\s+main",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(2));
+        }
+
+        private static bool GuideRequestsLooseFileInstall([CanBeNull] string prose)
+        {
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(
+                prose,
+                Policy.TryGetPattern("requests_loose_file_install")
+                    ?? @"\b(?:enter\s+the|only\s+look\s+at|mov(?:e|ing)\b|copy\b[\s\S]{0,80}override|loose\s+files)",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(2));
+        }
+
+        private static bool GuideIsPatcherOnly(
+            [NotNull] ModComponent component,
+            [CanBeNull] string prose,
+            bool hasTslPatchData)
+        {
+            if (string.IsNullOrWhiteSpace(prose) || GuideRequestsLooseFileInstall(prose))
+            {
+                return false;
+            }
+
+            string method = component.InstallationMethod ?? string.Empty;
+            bool markedPatcher = method.IndexOf("holopatcher", StringComparison.OrdinalIgnoreCase) >= 0
+                || method.IndexOf("tslpatcher", StringComparison.OrdinalIgnoreCase) >= 0;
+            return hasTslPatchData || markedPatcher;
+        }
+
+        private static bool FolderMatchesGuideNames(
+            [NotNull] string folder,
+            [NotNull] IReadOnlyList<string> names)
+        {
+            if (names.Count == 0)
+            {
+                return true;
+            }
+
+            string leaf = folder.Replace('\\', '/').Split('/').LastOrDefault() ?? folder;
+            return names.Any(name =>
+                leaf.Equals(name, StringComparison.OrdinalIgnoreCase)
+                || folder.Equals(name, StringComparison.OrdinalIgnoreCase)
+                || FolderNameMatchesGuideToken(leaf, name));
+        }
+
+        /// <summary>
+        /// Guide-named folders may sit under the archive's own wrapper
+        /// (<c>ModName/NPC Replacement/…</c>). Top-level <see cref="ArchiveAnalysis.FoldersWithFiles"/>
+        /// only sees the wrapper, so the allowlist must walk every path segment.
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> ResolveAllowlistedFolderPaths(
+            [NotNull] IReadOnlyList<string> fileList,
+            [NotNull] IReadOnlyList<string> allowlist)
+        {
+            var resolved = new List<string>();
+            if (allowlist.Count == 0)
+            {
+                return resolved;
+            }
+
+            foreach (string entry in fileList)
+            {
+                string[] parts = entry.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+                for (int i = 0; i < parts.Length - 1; i++)
+                {
+                    if (!FolderMatchesGuideNames(parts[i], allowlist))
+                    {
+                        continue;
+                    }
+
+                    string path = string.Join("/", parts.Take(i + 1));
+                    if (!resolved.Exists(existing =>
+                            existing.Equals(path, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        resolved.Add(path);
+                    }
+                }
+            }
+
+            return resolved;
+        }
+
+        private static bool ComponentEmitsAction(
+            [NotNull] ModComponent component,
+            Instruction.ActionType action)
+        {
+            if (component.Instructions.Any(instruction => instruction.Action == action))
+            {
+                return true;
+            }
+
+            return component.Options != null
+                && component.Options.Any(option =>
+                    option.Instructions.Any(instruction => instruction.Action == action));
+        }
+
+        private static bool IsPatcherInputFolder([CanBeNull] string folder)
+        {
+            if (string.IsNullOrWhiteSpace(folder))
+            {
+                return false;
+            }
+
+            return folder.Equals("source", StringComparison.OrdinalIgnoreCase)
+                || AlnumKey(folder).Equals("sourcescripts", StringComparison.OrdinalIgnoreCase);
+        }
+
+        [NotNull]
+        private static string ComponentGuideProse([NotNull] ModComponent component)
+        {
+            return StripGuideMarkup(
+                (component.Directions ?? string.Empty) + " "
+                + (component.DownloadInstructions ?? string.Empty));
+        }
+
+        /// <summary>
+        /// full.md wraps emphasis around guide verbs (`**before** moving`). Patterns
+        /// match the spoken sentence, not the markdown.
+        /// </summary>
+        [NotNull]
+        private static string StripGuideMarkup([CanBeNull] string prose)
+        {
+            if (string.IsNullOrEmpty(prose))
+            {
+                return string.Empty;
+            }
+
+            return prose.Replace("**", string.Empty, StringComparison.Ordinal)
+                .Replace("__", string.Empty, StringComparison.Ordinal);
+        }
+
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> MergeFilenameLists(
+            [NotNull] IEnumerable<string> first,
+            [NotNull] IEnumerable<string> second)
+        {
+            var names = new List<string>();
+            foreach (string name in first.Concat(second))
+            {
+                if (string.IsNullOrWhiteSpace(name)
+                    || names.Exists(n => n.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                names.Add(name);
+            }
+
+            return names;
+        }
+
         private static bool IsInstallerRuntimeArtifact([NotNull] string relativePath)
         {
             string[] parts = relativePath.Split('/');
@@ -2156,6 +2710,10 @@ namespace ModSync.Core.Services
             // In directory mode the layout is read from the extracted folder, but the archive beside it
             // (when there is one) must still be extracted so the install reproduces on a machine where
             // the folder does not yet exist. Folder-only mods have no archive and so emit no Extract.
+            fileList = fileList
+                .Where(entry => !IsInstallerRuntimeArtifact(entry.Replace('\\', '/')))
+                .ToList();
+
             bool directoryMode = extractedPathOverride != null;
             string archiveFileName = directoryMode
                 ? extractArchiveFileName
@@ -2208,6 +2766,32 @@ namespace ModSync.Core.Services
 
             if (analysis.HasSimpleOverrideFiles)
             {
+                string folderProse = ComponentGuideProse(component);
+                List<string> exceptedFiles = MergeFilenameLists(
+                    MergeFilenameLists(
+                        GuideExceptedFilenames(folderProse),
+                        GuideDeletedBeforeMoveFilenames(folderProse)),
+                    GuideIgnoredFilenames(folderProse));
+                List<string> allowlist = GuideNamedInstallFolders(folderProse);
+                if (GuidePicksOneOfNamedFolders(folderProse) && allowlist.Count >= 2)
+                {
+                    string firstExisting = allowlist.FirstOrDefault(name =>
+                        ResolveAllowlistedFolderPaths(fileList, new[] { name }).Count > 0
+                        || analysis.FoldersWithFiles.Any(folder =>
+                            FolderMatchesGuideNames(folder, new[] { name })));
+                    if (!string.IsNullOrEmpty(firstExisting))
+                    {
+                        allowlist = new List<string> { firstExisting };
+                    }
+                }
+
+                List<string> excludedFolders = CollectGuideExcludedFolders(fileList, folderProse);
+                if (analysis.HasTslPatchData)
+                {
+                    excludedFolders.Add("source");
+                    excludedFolders.Add("Source Scripts");
+                }
+
                 if (TryBindGameRootDialogTlk(component, fileList, extractedPath))
                 {
                     // Guide: chosen dialog.tlk goes in the game root, not Override.
@@ -2215,48 +2799,138 @@ namespace ModSync.Core.Services
                 }
                 else if (analysis.HasTslPatchData)
                 {
-                    // A conventional archive root often contains both tslpatchdata and OPTIONAL/
-                    // below the same outer folder. Filtering by top-level folder classified the
-                    // entire outer folder as patcher data, then labelled the component Hybrid while
-                    // emitting no Move. Walk the actual game-file parents and exclude only the exact
-                    // tslpatchdata subtree.
-                    AddSimpleMoveInstruction(
-                        component,
-                        fileList,
-                        extractedPath,
-                        folderName: null,
-                        excludedSubtree: string.IsNullOrEmpty(analysis.TslPatcherPath)
-                            ? "tslpatchdata"
-                            : analysis.TslPatcherPath.TrimEnd('/', '\\') + "/tslpatchdata");
+                    if (GuideIsPatcherOnly(component, folderProse, analysis.HasTslPatchData))
+                    {
+                        Logger.LogVerbose(
+                            $"[AutoInstructionGenerator] Skipping loose Moves for '{component.Name}' "
+                            + "(guide is installer-only; leftover source/ files stay with the patcher)");
+                    }
+                    else
+                    {
+                        // A conventional archive root often contains both tslpatchdata and OPTIONAL/
+                        // below the same outer folder. Filtering by top-level folder classified the
+                        // entire outer folder as patcher data, then labelled the component Hybrid while
+                        // emitting no Move. Walk the actual game-file parents and exclude only the exact
+                        // tslpatchdata subtree.
+                        AddSimpleMoveInstruction(
+                            component,
+                            fileList,
+                            extractedPath,
+                            folderName: null,
+                            excludedSubtree: string.IsNullOrEmpty(analysis.TslPatcherPath)
+                                ? "tslpatchdata"
+                                : analysis.TslPatcherPath.TrimEnd('/', '\\') + "/tslpatchdata",
+                            excludedFileNames: exceptedFiles,
+                            excludedFolderNames: excludedFolders);
+                    }
                 }
                 else
                 {
-                    var overrideFolders = analysis.FoldersWithFiles.ToList();
-                    if (overrideFolders.Count >= 1)
+                    // Root loose files and subfolders are independent payloads. HD Pazaak
+                    // Cards ships lbl_*.tga at the zip root plus optional green/ and
+                    // packaging debris in __MACOSX/. Walking only FoldersWithFiles dropped
+                    // the real cards and installed AppleDouble stubs.
+                    bool skipRoot = allowlist.Count > 0 || GuideForbidsRootLooseFiles(folderProse);
+                    if (analysis.HasFlatFiles && !skipRoot)
                     {
-                        foreach (string folder in overrideFolders)
-                        {
-                            AddSimpleMoveInstruction(component, fileList, extractedPath, folder);
-                        }
+                        AddSimpleMoveInstruction(
+                            component,
+                            fileList,
+                            extractedPath,
+                            folderName: null,
+                            excludedFileNames: exceptedFiles,
+                            excludedFolderNames: excludedFolders);
                     }
-                    else if (analysis.HasFlatFiles)
+                    else if (analysis.HasFlatFiles && skipRoot)
                     {
-                        AddSimpleMoveInstruction(component, fileList, extractedPath, folderName: null);
+                        Logger.LogVerbose(
+                            $"[AutoInstructionGenerator] Skipping archive-root files "
+                            + "(guide names specific folders / forbids the main folder)");
+                    }
+
+                    IReadOnlyList<string> foldersToWalk = allowlist.Count > 0
+                        ? ResolveAllowlistedFolderPaths(fileList, allowlist)
+                        : analysis.FoldersWithFiles;
+                    if (allowlist.Count > 0 && foldersToWalk.Count == 0)
+                    {
+                        Logger.LogVerbose(
+                            "[AutoInstructionGenerator] Guide named install folders "
+                            + $"({string.Join(", ", allowlist)}) but none appear in the archive");
+                    }
+
+                    foreach (string folder in foldersToWalk)
+                    {
+                        if (IsNonGamePayloadFolder(folder))
+                        {
+                            Logger.LogVerbose(
+                                $"[AutoInstructionGenerator] Skipping packaging folder '{folder}'");
+                            continue;
+                        }
+
+                        if (IsPatcherInputFolder(Path.GetFileName(folder.Replace('/', Path.DirectorySeparatorChar))))
+                        {
+                            Logger.LogVerbose(
+                                $"[AutoInstructionGenerator] Skipping patcher-input folder '{folder}'");
+                            continue;
+                        }
+
+                        if (GuideTreatsFolderAsOptional(
+                                Path.GetFileName(folder.Replace('/', Path.DirectorySeparatorChar)),
+                                folderProse))
+                        {
+                            Logger.LogVerbose(
+                                $"[AutoInstructionGenerator] Skipping optional folder '{folder}' "
+                                + "(guide says if you'd like / optionally)");
+                            continue;
+                        }
+
+                        if (GuideTreatsFolderAsSkipped(
+                                Path.GetFileName(folder.Replace('/', Path.DirectorySeparatorChar)),
+                                folderProse))
+                        {
+                            Logger.LogVerbose(
+                                $"[AutoInstructionGenerator] Skipping folder '{folder}' "
+                                + "(guide says skip / do not install)");
+                            continue;
+                        }
+
+                        AddSimpleMoveInstruction(
+                            component,
+                            fileList,
+                            extractedPath,
+                            folder,
+                            excludedFileNames: exceptedFiles,
+                            excludedFolderNames: excludedFolders);
                     }
                 }
             }
 
-            if (analysis.HasTslPatchData && analysis.HasSimpleOverrideFiles)
+            // Method is a guide contract (preflight keys off "patcher" / "loose").
+            // Leftover source/ files next to tslpatchdata do not make a patcher-only
+            // guide into Hybrid — that forced Moves the guide never asked for.
+            bool emittedPatcher = ComponentEmitsAction(component, Instruction.ActionType.Patcher)
+                || ComponentEmitsAction(component, Instruction.ActionType.Choose);
+            bool emittedLoose = ComponentEmitsAction(component, Instruction.ActionType.Move)
+                || ComponentEmitsAction(component, Instruction.ActionType.Copy);
+            string existingMethod = component.InstallationMethod ?? string.Empty;
+            if (emittedPatcher && emittedLoose)
             {
                 component.InstallationMethod = "Hybrid (TSLPatcher + Loose Files)";
             }
-            else if (analysis.HasTslPatchData)
+            else if (emittedPatcher)
             {
-                component.InstallationMethod = "TSLPatcher";
+                if (existingMethod.IndexOf("patcher", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    component.InstallationMethod = "TSLPatcher";
+                }
             }
-            else if (analysis.HasSimpleOverrideFiles)
+            else if (emittedLoose)
             {
-                component.InstallationMethod = "Loose-File Mod";
+                if (existingMethod.IndexOf("loose", StringComparison.OrdinalIgnoreCase) < 0
+                    && existingMethod.IndexOf("patcher", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    component.InstallationMethod = "Loose-File Mod";
+                }
             }
 
             int consolidatedCount = ConsolidateDuplicateOptions(component);
@@ -2768,7 +3442,10 @@ namespace ModSync.Core.Services
 
             var instruction = new Instruction
             {
-                Action = isArchive ? Instruction.ActionType.Extract : Instruction.ActionType.Move,
+                // Loose files live on the shared archive store. Move would consume
+                // them (CineMalak's N_DarthMalak01.tga vanished after v39). Copy
+                // still installs to Override; the store copy stays for the next run.
+                Action = isArchive ? Instruction.ActionType.Extract : Instruction.ActionType.Copy,
                 Source = new List<string> { $@"<<modDirectory>>\{fileName}" },
                 Destination = isArchive ? string.Empty : @"<<gameDirectory>>\Override",
                 Overwrite = true,
@@ -2992,7 +3669,7 @@ namespace ModSync.Core.Services
 
                 if (IsPrimaryNamespaceOption(option))
                 {
-                    option.IsSelected = !GuideExcludesNamespace(prose, option);
+                    option.IsSelected = !GuideExcludesNamespace(prose, option, component.Name);
                 }
             }
 
@@ -3013,7 +3690,7 @@ namespace ModSync.Core.Services
                     continue;
                 }
 
-                if (GuideExcludesNamespace(prose, option))
+                if (GuideExcludesNamespace(prose, option, component.Name))
                 {
                     continue;
                 }
@@ -3034,13 +3711,42 @@ namespace ModSync.Core.Services
 
             foreach (Option option in component.Options)
             {
-                if (option != null && GuideExcludesNamespace(prose, option))
+                if (option != null && GuideExcludesNamespace(prose, option, component.Name))
                 {
                     option.IsSelected = false;
                 }
             }
 
+            List<string> usingList = ExtractNamedOptionsWeWillBeUsing(prose.ToLowerInvariant());
+            if (usingList.Count > 0)
+            {
+                foreach (Option option in component.Options)
+                {
+                    if (option != null
+                        && option.IsSelected
+                        && !OptionMatchesNamedUsingList(option, usingList))
+                    {
+                        option.IsSelected = false;
+                    }
+                }
+            }
+
             ArbitrateMutuallyExclusiveNamespaces(component, prose);
+            ApplyCompatPresenceConstraints(component, build);
+            Option otherwiseDefault = FindOtherwiseSimplyInstallOption(
+                prose,
+                component.Options.Where(o => o != null).ToList());
+            if (otherwiseDefault != null)
+            {
+                foreach (Option option in component.Options)
+                {
+                    if (option != null)
+                    {
+                        option.IsSelected = ReferenceEquals(option, otherwiseDefault);
+                    }
+                }
+            }
+
             ApplyConfiguredExceptions(component);
 
             Logger.LogVerbose(
@@ -3073,6 +3779,107 @@ namespace ModSync.Core.Services
         }
 
         /// <summary>
+        /// Drop namespaces whose own description says they apply only when a named
+        /// companion is absent/present, using the rest of the build as the signal.
+        /// </summary>
+        private static void ApplyCompatPresenceConstraints(
+            [NotNull] ModComponent component,
+            [NotNull] IReadOnlyList<ModComponent> build)
+        {
+            if (component.Options == null || component.Options.Count == 0)
+            {
+                return;
+            }
+
+            Regex absent = Policy.CompileOrFallback(
+                "compat_absent_option",
+                @"\bonly\s+if\s+you\s+do\s+not\s+have\s+(?<compat>.+?)\s+installed\b",
+                RegexOptions.IgnoreCase);
+
+            foreach (Option option in component.Options)
+            {
+                if (option == null || !option.IsSelected)
+                {
+                    continue;
+                }
+
+                string blob = ((option.Name ?? string.Empty) + " " + (option.Description ?? string.Empty)).Trim();
+                if (blob.Length == 0)
+                {
+                    continue;
+                }
+
+                Match noCompat = absent.Match(blob);
+                if (noCompat.Success && BuildHasNamedCompat(build, noCompat.Groups["compat"].Value))
+                {
+                    option.IsSelected = false;
+                }
+            }
+
+            if (component.Options.Any(o => o != null && o.IsSelected))
+            {
+                return;
+            }
+
+            foreach (Option option in component.Options)
+            {
+                if (option == null)
+                {
+                    continue;
+                }
+
+                string blob = ((option.Name ?? string.Empty) + " " + (option.Description ?? string.Empty)).Trim();
+                Match noCompat = absent.Match(blob);
+                if (noCompat.Success && BuildHasNamedCompat(build, noCompat.Groups["compat"].Value))
+                {
+                    continue;
+                }
+
+                option.IsSelected = true;
+                return;
+            }
+        }
+
+        private static bool BuildHasNamedCompat(
+            [NotNull] IReadOnlyList<ModComponent> build,
+            [CanBeNull] string compatPhrase)
+        {
+            if (build == null || string.IsNullOrWhiteSpace(compatPhrase))
+            {
+                return false;
+            }
+
+            string canonCompat = CanonicalizePhrase(compatPhrase);
+            if (canonCompat.Length < 3)
+            {
+                return false;
+            }
+
+            foreach (ModComponent other in build)
+            {
+                if (other == null || string.IsNullOrWhiteSpace(other.Name))
+                {
+                    continue;
+                }
+
+                string canonName = CanonicalizePhrase(other.Name);
+                if (canonName.Length == 0)
+                {
+                    continue;
+                }
+
+                if (canonName.Contains(canonCompat, StringComparison.Ordinal)
+                    || (canonCompat.Contains(canonName, StringComparison.Ordinal)
+                        && canonName.Length >= Policy.Matching.MinComponentNameLength))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Alternative namespaces are mutually exclusive: a mod offering "100% Brown",
         /// "Brown-Red-Blue" and "Brown-Red-Blue Alternative" expects exactly ONE to be installed.
         /// Token-overlap matching selects all of them ("brown" hits inside every sibling), which
@@ -3100,6 +3907,22 @@ namespace ModSync.Core.Services
                 RegexOptions.IgnoreCase);
             if (additive.IsMatch(prose))
             {
+                return;
+            }
+
+            // "The installer will need to be run 6 times, once to install each of the options
+            // we'll be using: A, B, C." Those named options are sequential runs, not a pick-one
+            // variant. Mutex scoring otherwise keeps the single highest hit (measured: TSLRCM
+            // Tweak Pack kept only Saedhe's Head).
+            Regex runEach = Policy.CompileOrFallback(
+                "run_each_named_namespace",
+                @"\b(?:run\s+\d+\s+times|once\s+to\s+install\s+each|once\s+for\s+each\s+of)\b",
+                RegexOptions.IgnoreCase);
+            if (runEach.IsMatch(prose))
+            {
+                Logger.LogVerbose(
+                    $"[AutoInstructionGenerator] '{component.Name}': guide runs the installer "
+                    + "once per named option — not mutually exclusive.");
                 return;
             }
 
@@ -3147,6 +3970,50 @@ namespace ModSync.Core.Services
                 Logger.LogVerbose(
                     $"[AutoInstructionGenerator] '{component.Name}': guide personally recommends "
                     + $"'{recommended.Name}'; dropping {alternatives.Count - 1} sibling namespace(s).");
+            }
+
+            // Optional namespaces are excluded from the primary mutex so a named
+            // main install does not drop "then apply the X option". Arbitrate
+            // those separately when the guide names one.
+            List<Option> optionalAlts = component.Options
+                .Where(o => o != null && o.IsSelected && IsOptionalNamespaceOption(o))
+                .ToList();
+            if (optionalAlts.Count >= 2)
+            {
+                Option applied = FindPersonallyRecommendedOption(prose, optionalAlts);
+                if (applied != null)
+                {
+                    foreach (Option other in optionalAlts.Where(o => !ReferenceEquals(o, applied)))
+                    {
+                        other.IsSelected = false;
+                    }
+
+                    Logger.LogVerbose(
+                        $"[AutoInstructionGenerator] '{component.Name}': guide names optional "
+                        + $"'{applied.Name}'; dropping {optionalAlts.Count - 1} sibling option namespace(s).");
+                }
+            }
+
+            if (recommended != null)
+            {
+                return;
+            }
+
+            // "If you would like X, install X. Otherwise, simply install Standard."
+            // The otherwise-clause is the default. Scoring otherwise picks the longer
+            // optional name because it also appears in the "if you would like" sentence
+            // (measured: Thematic KOTOR 2 Companions → Standard + Sith Assassin Visas).
+            Option otherwiseDefault = FindOtherwiseSimplyInstallOption(prose, alternatives);
+            if (otherwiseDefault != null)
+            {
+                foreach (Option other in alternatives.Where(o => !ReferenceEquals(o, otherwiseDefault)))
+                {
+                    other.IsSelected = false;
+                }
+
+                Logger.LogVerbose(
+                    $"[AutoInstructionGenerator] '{component.Name}': guide says otherwise simply "
+                    + $"install '{otherwiseDefault.Name}'.");
                 return;
             }
 
@@ -3173,6 +4040,42 @@ namespace ModSync.Core.Services
         }
 
         /// <summary>
+        /// "If you would like X, install X. Otherwise, simply install Standard."
+        /// </summary>
+        [CanBeNull]
+        internal static Option FindOtherwiseSimplyInstallOption(
+            [CanBeNull] string prose,
+            [NotNull] IList<Option> alternatives)
+        {
+            if (string.IsNullOrWhiteSpace(prose) || alternatives == null || alternatives.Count == 0)
+            {
+                return null;
+            }
+
+            Match named = Policy.CompileOrFallback(
+                "otherwise_simply_install",
+                @"\botherwise,?\s+simply\s+install\s+[""“']?(?<name>[^""”'\n.]{3,60}?)[""”']?(?=\s*[.]|$)",
+                RegexOptions.IgnoreCase).Match(prose);
+            if (!named.Success)
+            {
+                return null;
+            }
+
+            string phrase = named.Groups["name"].Value.Trim().Trim('"', '“', '”', '\'');
+            foreach (Option option in alternatives)
+            {
+                if (option != null
+                    && !string.IsNullOrWhiteSpace(option.Name)
+                    && string.Equals(option.Name.Trim(), phrase, StringComparison.OrdinalIgnoreCase))
+                {
+                    return option;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// "I personally recommend the \"Senni Vek's Ambush\" install" / "I personally recommend X".
         /// Picks the alternative whose name is inside the recommended phrase.
         /// </summary>
@@ -3193,24 +4096,46 @@ namespace ModSync.Core.Services
                 return null;
             }
 
-            Match named = Policy.CompileOrFallback(
-                "personally_recommend_named_install",
-                @"\b(?:I\s+)?personally\s+recommend(?:\s+the)?\s+[""“]?(?<name>[^""”\n,.]{3,60}?)[""”]?\s+install\b",
-                RegexOptions.IgnoreCase).Match(prose);
-            if (!named.Success)
+            var patterns = new[]
             {
-                named = Policy.CompileOrFallback(
-                    "default_install_named",
-                    @"\bthe\s+default\s+install\s*,\s*[""“]?(?<name>[^""”\n,.]{3,60}?)[""”]?(?=\s|,|\.|$)",
-                    RegexOptions.IgnoreCase).Match(prose);
+                ("personally_recommend_named_install",
+                    @"\b(?:I\s+)?personally\s+recommend(?:\s+the)?\s+[""“]?(?<name>[^""”\n,.]{3,60}?)[""”]?\s+install\b"),
+                ("recommend_named_option",
+                    @"\b(?:I\s+)?(?:strongly\s+)?recommend\s+(?:the\s+)?[""“]?(?<name>[^""”\n,.]{3,80}?)[""”]?\s+option\b"),
+                ("recommend_using_named",
+                    @"\b(?:I\s+)?(?:strongly\s+)?recommend\s+using\s+(?:the\s+)?[""“]?(?<name>[^""”\n,.]{3,80}?)[""”]?(?=\s+for\b|\s+option\b|[.,;]|$)"),
+                ("default_install_named",
+                    @"\bthe\s+default\s+install\s*,\s*[""“]?(?<name>[^""”\n,.]{3,60}?)[""”]?(?=\s|,|\.|$)"),
+                ("install_the_named_main_option",
+                    @"\binstall\s+the\s+[""“]?(?<name>[^""”\n,.]{2,40}?)[""”]?\s+main\s+install\s+option\b"),
+                ("apply_the_named_option",
+                    @"\bapply\s+the\s+[""“]?(?<name>[^""”\n,.]{3,80}?)[""”]?\s+option\b"),
+            };
+
+            foreach ((string key, string fallback) in patterns)
+            {
+                Match named = Policy.CompileOrFallback(key, fallback, RegexOptions.IgnoreCase).Match(prose);
+                if (!named.Success)
+                {
+                    continue;
+                }
+
+                string phrase = named.Groups["name"].Value.Trim().Trim('"', '“', '”');
+                Option best = FindOptionMatchingPhrase(alternatives, phrase);
+                if (best != null)
+                {
+                    return best;
+                }
             }
 
-            if (!named.Success)
-            {
-                return null;
-            }
+            return null;
+        }
 
-            string phrase = named.Groups["name"].Value.Trim().Trim('"', '“', '”');
+        [CanBeNull]
+        private static Option FindOptionMatchingPhrase(
+            [NotNull] IList<Option> alternatives,
+            [NotNull] string phrase)
+        {
             Option best = null;
             int bestLen = 0;
             foreach (Option option in alternatives)
@@ -3255,7 +4180,9 @@ namespace ModSync.Core.Services
                 @"[^a-z0-9]+",
                 RegexOptions.None);
             return splitter.Replace(
-                (value ?? string.Empty).ToLowerInvariant().Replace("&", " and ", StringComparison.Ordinal),
+                (value ?? string.Empty).ToLowerInvariant()
+                    .Replace("&", " and ", StringComparison.Ordinal)
+                    .Replace("retexture", "reskin", StringComparison.Ordinal),
                 " ").Trim();
         }
 
@@ -3322,7 +4249,10 @@ namespace ModSync.Core.Services
             return Policy.ContainsAny(blob, Policy.Tokens.OptionalNamespace);
         }
 
-        private static bool GuideExcludesNamespace([CanBeNull] string prose, [NotNull] Option option)
+        private static bool GuideExcludesNamespace(
+            [CanBeNull] string prose,
+            [NotNull] Option option,
+            [CanBeNull] string componentName = null)
         {
             if (string.IsNullOrWhiteSpace(prose))
             {
@@ -3332,12 +4262,35 @@ namespace ModSync.Core.Services
             string lower = prose.ToLowerInvariant();
             string template = Policy.TryGetPattern("guide_excludes_namespace")
                 ?? @"\b(?:skip|ignore|do\s+not\s+install|don't\s+install|recommend\s+against|recommend\s+not)\b[^\n.]{0,80}\b{token}\b";
+            string incompatible = Policy.TryGetPattern("guide_excludes_incompatible_namespace")
+                ?? @"\b(?:exception\s+is|incompatible)\b[^\n.]{0,80}\b{token}\b|\b{token}\b[^\n.]{0,80}\b(?:incompatible|exception)\b";
+
+            // Tokens that also appear in the parent component's own name aren't
+            // discriminating: sibling namespace options are almost always variants of
+            // that same base name, so a generic word shared with the component name
+            // ("Alignment Affects Force Powers") will match an unrelated sentence that
+            // happens to mention a different mod sharing those same generic words
+            // ("...unless using K2 Force Powers for K1..."), false-positive excluding
+            // every namespace option and zeroing out the whole Choose.
+            HashSet<string> nameTokens = ComponentNameTokenSet(componentName);
             foreach (string token in SignificantOptionTokens(option))
             {
-                string pattern = template.Replace("{token}", Regex.Escape(token), StringComparison.Ordinal);
+                if (nameTokens.Contains(token))
+                {
+                    continue;
+                }
+
+                string escaped = Regex.Escape(token);
+                string pattern = template.Replace("{token}", escaped, StringComparison.Ordinal);
+                string incompatiblePattern = incompatible.Replace("{token}", escaped, StringComparison.Ordinal);
                 if (Regex.IsMatch(
                         lower,
                         pattern,
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                        TimeSpan.FromSeconds(1))
+                    || Regex.IsMatch(
+                        lower,
+                        incompatiblePattern,
                         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
                         TimeSpan.FromSeconds(1)))
                 {
@@ -3348,6 +4301,89 @@ namespace ModSync.Core.Services
             return false;
         }
 
+        /// <summary>
+        /// "…once to install each of the options we'll be using: A, B, and C."
+        /// When that allow-list is present, a shared word (Mandalore) must not pull in
+        /// an unlisted sibling (Ravager Mandalore Changes).
+        /// </summary>
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> ExtractNamedOptionsWeWillBeUsing([CanBeNull] string lowerProse)
+        {
+            var names = new List<string>();
+            if (string.IsNullOrWhiteSpace(lowerProse))
+            {
+                return names;
+            }
+
+            Match list = Regex.Match(
+                lowerProse,
+                @"options\s+we'll\s+be\s+using:\s*(.+?)(?:\.|most of the other)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1));
+            if (!list.Success)
+            {
+                return names;
+            }
+
+            foreach (string part in Regex.Split(list.Groups[1].Value, @"\s*(?:,|,\s*and\s+|\s+and\s+)\s*"))
+            {
+                string trimmed = part.Trim().TrimEnd('.');
+                if (trimmed.Length >= 4)
+                {
+                    names.Add(trimmed);
+                }
+            }
+
+            return names;
+        }
+
+        private static bool OptionMatchesNamedUsingList(
+            [NotNull] Option option,
+            [NotNull] IReadOnlyList<string> usingList)
+        {
+            string subject = FirstSubjectToken(option.Name);
+            if (string.IsNullOrEmpty(subject))
+            {
+                return false;
+            }
+
+            foreach (string item in usingList)
+            {
+                if (item.IndexOf(subject, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        [CanBeNull]
+        private static string FirstSubjectToken([CanBeNull] string optionName)
+        {
+            if (string.IsNullOrWhiteSpace(optionName))
+            {
+                return null;
+            }
+
+            string stripped = Regex.Replace(
+                optionName,
+                @"^(?:\d+\s*-\s*|extras\s*-\s*\d+\s*-\s*)",
+                string.Empty,
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(1));
+            foreach (string word in Regex.Split(stripped, @"[^A-Za-z0-9']+"))
+            {
+                if (word.Length >= 4)
+                {
+                    return word.ToLowerInvariant();
+                }
+            }
+
+            return null;
+        }
+
         private static bool GuideRequestsNamespace([CanBeNull] string prose, [NotNull] Option option)
         {
             if (string.IsNullOrWhiteSpace(prose))
@@ -3356,6 +4392,12 @@ namespace ModSync.Core.Services
             }
 
             string lower = prose.ToLowerInvariant();
+            List<string> usingList = ExtractNamedOptionsWeWillBeUsing(lower);
+            if (usingList.Count > 0)
+            {
+                return OptionMatchesNamedUsingList(option, usingList);
+            }
+
             List<string> tokens = SignificantOptionTokens(option);
             if (tokens.Count == 0 && !IsOptionalNamespaceOption(option))
             {
@@ -3671,6 +4713,30 @@ namespace ModSync.Core.Services
                 .ToList();
         }
 
+        /// <summary>
+        /// Tokens of the parent component's own name, canonicalized the same way as
+        /// <see cref="SignificantOptionTokens"/>. Used to strip generic words a namespace
+        /// option's name inherits from its component ("Alignment Affects Force Powers")
+        /// before using those words to detect guide exclusions, since such words are
+        /// shared by every sibling option and can't discriminate one from another.
+        /// </summary>
+        [NotNull]
+        private static HashSet<string> ComponentNameTokenSet([CanBeNull] string componentName)
+        {
+            if (string.IsNullOrWhiteSpace(componentName))
+            {
+                return new HashSet<string>(StringComparer.Ordinal);
+            }
+
+            Regex splitter = Policy.CompileOrFallback(
+                "canonicalize_non_alnum",
+                @"[^a-z0-9]+",
+                RegexOptions.None);
+            return new HashSet<string>(
+                splitter.Split(componentName.ToLowerInvariant()).Where(t => t.Length > 0),
+                StringComparer.Ordinal);
+        }
+
         private static void ApplyConfiguredExceptions([NotNull] ModComponent component)
         {
             IReadOnlyList<GuideInterpretationPolicy.InterpretationException> exceptions = Policy.Exceptions;
@@ -3790,6 +4856,10 @@ namespace ModSync.Core.Services
                 string chosen = ChooseCopyAsSource(fileList, hinted, destLeaf);
                 if (string.IsNullOrEmpty(chosen))
                 {
+                    Logger.LogWarning(
+                        $"[AutoInstructionGenerator] Could not rebind bare copy-as/rename instruction for component "
+                        + $"'{component.Name}': no matching source found for '{destLeaf}'. Leaving Destination "
+                        + $"unresolved: '{instruction.Destination}'.");
                     continue;
                 }
 
@@ -3929,6 +4999,27 @@ namespace ModSync.Core.Services
                 {
                     return hintedHits[0];
                 }
+
+                // Same stem can hit more than one archive entry (e.g. a texture plus its sidecar
+                // "N_Duros02.tga" + "N_Duros02.txi"). The rename target's own extension picks the
+                // right one when the stem match alone is ambiguous.
+                if (hintedHits.Count > 1)
+                {
+                    string destExtension = Path.GetExtension(destLeaf);
+                    if (!string.IsNullOrEmpty(destExtension))
+                    {
+                        List<string> extensionHits = hintedHits
+                            .Where(path => string.Equals(
+                                Path.GetExtension(path),
+                                destExtension,
+                                StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        if (extensionHits.Count == 1)
+                        {
+                            return extensionHits[0];
+                        }
+                    }
+                }
             }
 
             List<string> game = files
@@ -4033,7 +5124,7 @@ namespace ModSync.Core.Services
                 return;
             }
 
-            string directions = (component.Directions ?? string.Empty) + "\n" + (component.Description ?? string.Empty);
+            string directions = ComponentGuideProse(component);
             IReadOnlyList<string> listing = fileList ?? Array.Empty<string>();
 
             foreach (Instruction instruction in component.Instructions)
@@ -4079,6 +5170,19 @@ namespace ModSync.Core.Services
                 return source;
             }
 
+            if (GuideDeleteIsBeforeMove(directions, leaf))
+            {
+                string listed = fileList.FirstOrDefault(entry =>
+                    Path.GetFileName(entry.Replace('/', Path.DirectorySeparatorChar))
+                        .Equals(leaf, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(listed))
+                {
+                    string bound = $@"<<modDirectory>>\{extractedPath}\{listed.Replace('/', '\\')}";
+                    Logger.LogVerbose($"[AutoInstructionGenerator] Bound delete-before-move '{leaf}' to '{bound}'");
+                    return bound;
+                }
+            }
+
             int nameAt = directions.IndexOf(leaf, StringComparison.OrdinalIgnoreCase);
             int tslAt = directions.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase);
             int overrideAt = directions.IndexOf("override", StringComparison.OrdinalIgnoreCase);
@@ -4106,6 +5210,12 @@ namespace ModSync.Core.Services
             }
 
             return source;
+        }
+
+        private static bool GuideDeleteIsBeforeMove([NotNull] string directions, [NotNull] string leaf)
+        {
+            return GuideDeletedBeforeMoveFilenames(directions)
+                .Exists(name => name.Equals(leaf, StringComparison.OrdinalIgnoreCase));
         }
 
         [NotNull]
@@ -4508,12 +5618,106 @@ namespace ModSync.Core.Services
             }
         }
 
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> CollectGuideExcludedFolders(
+            [NotNull] IReadOnlyList<string> fileList,
+            [CanBeNull] string prose)
+        {
+            var names = new List<string>();
+            if (string.IsNullOrWhiteSpace(prose))
+            {
+                return names;
+            }
+
+            foreach (string path in fileList)
+            {
+                string[] parts = path.Replace('\\', '/').Split('/');
+                for (int i = 0; i < parts.Length - 1; i++)
+                {
+                    string part = parts[i];
+                    if (string.IsNullOrWhiteSpace(part)
+                        || names.Exists(n => n.Equals(part, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    if (GuideTreatsFolderAsSkipped(part, prose) || GuideTreatsFolderAsOptional(part, prose))
+                    {
+                        names.Add(part);
+                    }
+                }
+            }
+
+            return names;
+        }
+
+        private static bool ParentFolderIsExcluded(
+            [CanBeNull] string parent,
+            [CanBeNull] IReadOnlyList<string> excludedFolderNames)
+        {
+            if (string.IsNullOrWhiteSpace(parent)
+                || excludedFolderNames == null
+                || excludedFolderNames.Count == 0)
+            {
+                return false;
+            }
+
+            return parent.Replace('\\', '/').Split('/').Any(part =>
+                excludedFolderNames.Any(name =>
+                    part.Equals(name, StringComparison.OrdinalIgnoreCase)
+                    || FolderNameMatchesGuideToken(part, name)));
+        }
+
+        private static bool HasExcludedDescendantFolder(
+            [NotNull] IReadOnlyList<string> fileList,
+            [CanBeNull] string parent,
+            [CanBeNull] IReadOnlyList<string> excludedFolderNames)
+        {
+            if (excludedFolderNames == null || excludedFolderNames.Count == 0)
+            {
+                return false;
+            }
+
+            string prefix = string.IsNullOrEmpty(parent)
+                ? string.Empty
+                : parent.Replace('\\', '/').TrimEnd('/') + "/";
+
+            foreach (string path in fileList)
+            {
+                string entry = path.Replace('\\', '/');
+                if (prefix.Length > 0 && !entry.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string relative = prefix.Length == 0 ? entry : entry.Substring(prefix.Length);
+                int slash = relative.IndexOf('/');
+                if (slash <= 0)
+                {
+                    continue;
+                }
+
+                string childFolder = relative.Substring(0, slash);
+                if (excludedFolderNames.Any(name =>
+                        childFolder.Equals(name, StringComparison.OrdinalIgnoreCase)
+                        || FolderNameMatchesGuideToken(childFolder, name)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static void AddSimpleMoveInstruction(
             ModComponent component,
             IReadOnlyList<string> fileList,
             string extractedPath,
             string folderName,
-            string excludedSubtree = null
+            string excludedSubtree = null,
+            IReadOnlyList<string> excludedFileNames = null,
+            IReadOnlyList<string> excludedFolderNames = null
         )
         {
             string folderPathInArchive = string.IsNullOrEmpty(folderName) ? null : folderName;
@@ -4552,6 +5756,42 @@ namespace ModSync.Core.Services
                     continue;
                 }
 
+                if (ParentFolderIsExcluded(normalizedParent, excludedFolderNames))
+                {
+                    Logger.LogVerbose(
+                        $"[AutoInstructionGenerator] Skipping Move for '{parent}' - guide excluded this folder");
+                    continue;
+                }
+
+                List<string> filesInParent = GameFilesInParent(fileList, parent);
+                List<string> remaining = filesInParent;
+                if (excludedFileNames != null && excludedFileNames.Count > 0)
+                {
+                    remaining = filesInParent
+                        .Where(f => !excludedFileNames.Any(ex =>
+                            Path.GetFileName(f).Equals(ex, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                }
+
+                if (remaining.Count == 0)
+                {
+                    Logger.LogVerbose(
+                        $"[AutoInstructionGenerator] Skipping Move for '{parent}' - all game files are EXCEPT-listed");
+                    continue;
+                }
+
+                bool emitPerFile = remaining.Count < filesInParent.Count
+                    || HasExcludedDescendantFolder(fileList, parent, excludedFolderNames);
+                if (emitPerFile)
+                {
+                    foreach (string entry in remaining)
+                    {
+                        AddSingleFileMove(component, extractedPath, entry);
+                    }
+
+                    continue;
+                }
+
                 string sourcePath = string.IsNullOrEmpty(parent)
                     ? $@"<<modDirectory>>\{extractedPath}\*"
                     : $@"<<modDirectory>>\{extractedPath}\{parent.Replace('/', '\\')}\*";
@@ -4580,6 +5820,64 @@ namespace ModSync.Core.Services
             }
         }
 
+        [NotNull]
+        [ItemNotNull]
+        private static List<string> GameFilesInParent(
+            [NotNull] IReadOnlyList<string> fileList,
+            [CanBeNull] string parent)
+        {
+            string normalizedParent = (parent ?? string.Empty).Replace('\\', '/').Trim('/');
+            var files = new List<string>();
+            foreach (string filePath in fileList)
+            {
+                string entryPath = filePath.Replace('\\', '/');
+                if (entryPath.Split('/').Any(IsNonGamePayloadFolder) || !IsGameFile(Path.GetExtension(entryPath)))
+                {
+                    continue;
+                }
+
+                int lastSlash = entryPath.LastIndexOf('/');
+                string entryParent = lastSlash < 0 ? string.Empty : entryPath.Substring(0, lastSlash);
+                if (!entryParent.Equals(normalizedParent, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                files.Add(entryPath);
+            }
+
+            return files;
+        }
+
+        private static void AddSingleFileMove(
+            [NotNull] ModComponent component,
+            [NotNull] string extractedPath,
+            [NotNull] string entryPath)
+        {
+            string relative = entryPath.Replace('/', '\\');
+            string sourcePath = $@"<<modDirectory>>\{extractedPath}\{relative}";
+            if (IsFolderAlreadyCoveredByInstructions(component, sourcePath))
+            {
+                return;
+            }
+
+            var moveInstruction = new Instruction
+            {
+                Action = Instruction.ActionType.Move,
+                Source = new List<string> { sourcePath },
+                Destination = @"<<gameDirectory>>\Override",
+                Overwrite = true,
+                ExcludeNonGameContent = true,
+            };
+            moveInstruction.SetParentComponent(component);
+
+            if (!InstructionAlreadyExists(component, moveInstruction))
+            {
+                component.Instructions.Add(moveInstruction);
+                Logger.LogVerbose($"[AutoInstructionGenerator] Added Move instruction for '{sourcePath}'");
+            }
+        }
+
         /// <summary>
         /// Parent directories of game files under <paramref name="folderPath"/>, relative to the
         /// archive root. Flat files yield an empty string (the extraction folder itself).
@@ -4599,6 +5897,11 @@ namespace ModSync.Core.Services
             foreach (string filePath in fileList)
             {
                 string entryPath = filePath.Replace('\\', '/');
+                if (entryPath.Split('/').Any(IsNonGamePayloadFolder))
+                {
+                    continue;
+                }
+
                 if (!IsGameFile(Path.GetExtension(entryPath)))
                 {
                     continue;
@@ -4648,6 +5951,11 @@ namespace ModSync.Core.Services
                     }
 
                     string path = entry.Key.Replace('\\', '/');
+                    if (IsInstallerRuntimeArtifact(path))
+                    {
+                        continue;
+                    }
+
                     entryPaths.Add(path);
                     string[] pathParts = path.Split('/');
 
@@ -4663,8 +5971,21 @@ namespace ModSync.Core.Services
                         string fileName = Path.GetFileName(path);
                         if (fileName.Equals("namespaces.ini", StringComparison.OrdinalIgnoreCase))
                         {
+                            // See the matching comment in AnalyzeArchiveFromFileList: keep the FIRST
+                            // tslpatchdata tree's namespaces.ini, not the last, so this stays consistent
+                            // with ReadNamespacesIni()/IniHelper.TraverseDirectories() (which also stops
+                            // at the first namespaces.ini found) when an archive has multiple independent
+                            // tslpatchdata trees. Gate on HasNamespacesIni (not
+                            // string.IsNullOrEmpty(TslPatcherPath)): a changes.ini found earlier in a
+                            // different tree must not block the first namespaces.ini from claiming this
+                            // path - namespaces.ini always outranks a changes.ini-derived path, exactly
+                            // once, on first sight.
+                            if (!analysis.HasNamespacesIni)
+                            {
+                                analysis.TslPatcherPath = GetTslPatcherPath(path);
+                            }
+
                             analysis.HasNamespacesIni = true;
-                            analysis.TslPatcherPath = GetTslPatcherPath(path);
                         }
                         else if (fileName.Equals("changes.ini", StringComparison.OrdinalIgnoreCase))
                         {
@@ -4695,7 +6016,8 @@ namespace ModSync.Core.Services
                         {
 
                             string topLevelFolder = pathParts[0];
-                            if (!analysis.FoldersWithFiles.Contains(topLevelFolder, StringComparer.Ordinal))
+                            if (!IsNonGamePayloadFolder(topLevelFolder)
+                                && !analysis.FoldersWithFiles.Contains(topLevelFolder, StringComparer.Ordinal))
                             {
                                 analysis.FoldersWithFiles.Add(topLevelFolder);
                             }

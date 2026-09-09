@@ -327,15 +327,21 @@ namespace ModSync.Tests
         }
 
         [Test]
-        public async Task DeleteDuplicateFile_DuplicateFilesInSubdirectories_NoFilesDeleted()
+        public async Task DeleteDuplicateFile_DuplicateFilesInSubdirectories_DedupesWithinEachSubdirectory()
         {
-
+            // DelDuplicate now recurses into subdirectories (Override subfolders can contain
+            // duplicate .tga/.tpc/.dds pairs too), so a duplicate pair *within* a subdirectory must
+            // be detected and purged, just like at the top level. Detection stays scoped per
+            // directory though: a same-named file in the root and a same-named file in a
+            // subdirectory are not duplicates of one another (see the sibling test below).
             string subdirectory = Path.Combine(_sourceDir, "Subdirectory");
             Directory.CreateDirectory(subdirectory);
-            string file1 = Path.Combine(_sourceDir, "file.txt");
-            string file2 = Path.Combine(subdirectory, "file.png");
-            await NetFrameworkCompatibility.WriteAllTextAsync(file1, "Content 1");
-            await NetFrameworkCompatibility.WriteAllTextAsync(file2, "Content 2");
+            string rootOnlyFile = Path.Combine(_sourceDir, "root_only.txt");
+            string subDuplicateTxt = Path.Combine(subdirectory, "file.txt");
+            string subDuplicatePng = Path.Combine(subdirectory, "file.png");
+            await NetFrameworkCompatibility.WriteAllTextAsync(rootOnlyFile, "Content 1");
+            await NetFrameworkCompatibility.WriteAllTextAsync(subDuplicateTxt, "Content 2");
+            await NetFrameworkCompatibility.WriteAllTextAsync(subDuplicatePng, "Content 3");
 
             var instructions = new List<Instruction>
             {
@@ -349,14 +355,64 @@ namespace ModSync.Tests
 
             (VirtualFileSystemProvider virtualProvider, string realSource, string realDest) = await RunBothProviders(instructions, _sourceDir, _destinationDir);
 
+            string realRootOnlyFile = Path.Combine(realSource, "root_only.txt");
+            string realSubDuplicateTxt = Path.Combine(realSource, "Subdirectory", "file.txt");
+            string realSubDuplicatePng = Path.Combine(realSource, "Subdirectory", "file.png");
+
             Assert.Multiple(() =>
             {
                 Assert.That(virtualProvider, Is.Not.Null, "Virtual file system provider should not be null");
                 Assert.That(virtualProvider.GetValidationIssues(), Is.Not.Null, "Validation issues list should not be null");
                 Assert.That(virtualProvider.GetValidationIssues(), Is.Empty, "Delete duplicate operation should not produce errors");
-                Assert.That(File.Exists(file1), Is.True, "File in root directory should remain (duplicates only checked in same directory)");
-                Assert.That(File.Exists(file2), Is.True, "File in subdirectory should remain (duplicates only checked in same directory)");
-                Assert.That(Directory.Exists(subdirectory), Is.True, "Subdirectory should still exist");
+                Assert.That(File.Exists(realRootOnlyFile), Is.True,
+                    "Root-only file has no duplicate anywhere and must remain");
+                Assert.That(File.Exists(realSubDuplicateTxt), Is.False,
+                    "Duplicate .txt within the subdirectory should be deleted");
+                Assert.That(File.Exists(realSubDuplicatePng), Is.True,
+                    "Duplicate .png within the subdirectory should remain");
+                Assert.That(Directory.Exists(Path.Combine(realSource, "Subdirectory")), Is.True, "Subdirectory should still exist");
+            });
+        }
+
+        [Test]
+        public async Task DeleteDuplicateFile_SameBasenameInDifferentDirectories_NotTreatedAsDuplicates()
+        {
+            // Two same-named, differently-extensioned files that live in *different* directories
+            // are not duplicates of one another -- only same-named files within the same directory
+            // are. Recursing into subdirectories (for 5a) must not turn unrelated same-named files
+            // in sibling folders into false-positive duplicate pairs.
+            string subdirectory = Path.Combine(_sourceDir, "Subdirectory");
+            Directory.CreateDirectory(subdirectory);
+            string rootFile = Path.Combine(_sourceDir, "file.txt");
+            string subFile = Path.Combine(subdirectory, "file.png");
+            await NetFrameworkCompatibility.WriteAllTextAsync(rootFile, "Content 1");
+            await NetFrameworkCompatibility.WriteAllTextAsync(subFile, "Content 2");
+
+            var instructions = new List<Instruction>
+            {
+            new Instruction {
+                Action = Instruction.ActionType.DelDuplicate,
+                    Destination = "<<modDirectory>>",
+                    Arguments = ".txt",
+                    Source = new List<string> { ".txt", ".png" },
+                },
+            };
+
+            (VirtualFileSystemProvider virtualProvider, string realSource, string realDest) = await RunBothProviders(instructions, _sourceDir, _destinationDir);
+
+            string realRootFile = Path.Combine(realSource, "file.txt");
+            string realSubFile = Path.Combine(realSource, "Subdirectory", "file.png");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(virtualProvider, Is.Not.Null, "Virtual file system provider should not be null");
+                Assert.That(virtualProvider.GetValidationIssues(), Is.Not.Null, "Validation issues list should not be null");
+                Assert.That(virtualProvider.GetValidationIssues(), Is.Empty, "Delete duplicate operation should not produce errors");
+                Assert.That(File.Exists(realRootFile), Is.True,
+                    "File in root directory should remain (duplicates are only checked within the same directory)");
+                Assert.That(File.Exists(realSubFile), Is.True,
+                    "File in subdirectory should remain (duplicates are only checked within the same directory)");
+                Assert.That(Directory.Exists(Path.Combine(realSource, "Subdirectory")), Is.True, "Subdirectory should still exist");
             });
         }
 

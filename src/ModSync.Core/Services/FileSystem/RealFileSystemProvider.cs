@@ -251,16 +251,53 @@ namespace ModSync.Core.Services.FileSystem
                                     IArchiveEntry localEntry = entry;
                                     await Task.Run(() =>
                                     {
-                                        using (Stream sourceStream = localEntry.OpenEntryStream())
-                                        using (FileStream destinationStream = new FileStream(destinationItemPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                                        // Must not open destinationItemPath directly with FileMode.Create: if it
+                                        // already exists and happens to be hardlinked elsewhere (e.g. a checkpoint
+                                        // snapshot or another install tree sharing the inode), truncating it in
+                                        // place zeroes every hardlinked copy simultaneously. Same hazard class
+                                        // already fixed in GitCheckpointService.CopyFileOverwriteWithRetry ("K1
+                                        // appearance.2da at [18]") -- write to a fresh temp file first, then
+                                        // atomically replace the destination so an existing hardlink is unlinked,
+                                        // never truncated.
+                                        string tempPath = destinationItemPath + ".modsync-extracttmp";
+                                        try
                                         {
-                                            sourceStream.CopyTo(destinationStream);
-                                        }
+                                            using (Stream sourceStream = localEntry.OpenEntryStream())
+                                            using (FileStream destinationStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                                            {
+                                                sourceStream.CopyTo(destinationStream);
+                                            }
 
-                                        DateTime? lastModifiedTime = localEntry.LastModifiedTime;
-                                        if (lastModifiedTime.HasValue && lastModifiedTime.Value != default(DateTime))
+                                            DateTime? lastModifiedTime = localEntry.LastModifiedTime;
+                                            if (lastModifiedTime.HasValue && lastModifiedTime.Value != default(DateTime))
+                                            {
+                                                File.SetLastWriteTime(tempPath, lastModifiedTime.Value);
+                                            }
+
+                                            if (Directory.Exists(destinationItemPath))
+                                            {
+                                                // Matches the previous direct-write behavior: a directory sitting
+                                                // where a file must be written is a write failure, not something
+                                                // to silently skip.
+                                                throw new UnauthorizedAccessException(
+                                                    $"A directory already exists at '{destinationItemPath}'.");
+                                            }
+
+                                            if (File.Exists(destinationItemPath))
+                                            {
+                                                File.Delete(destinationItemPath);
+                                            }
+
+                                            File.Move(tempPath, destinationItemPath);
+                                        }
+                                        catch
                                         {
-                                            File.SetLastWriteTime(destinationItemPath, lastModifiedTime.Value);
+                                            if (File.Exists(tempPath))
+                                            {
+                                                File.Delete(tempPath);
+                                            }
+
+                                            throw;
                                         }
                                     }, token).ConfigureAwait(false);
 

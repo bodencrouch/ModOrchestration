@@ -38,6 +38,10 @@ namespace ModSync.Core.Services
             @"^install_folder(?<n>\d+)\s*=\s*(?<dir>.+?)\s*$",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+        private static readonly Regex IncludeDirective = new Regex(
+            @"^\s*#include\s+""(?<name>[^""]+)""",
+            RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
         internal static bool HostNeedsWineCompiler() => !RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
         internal static bool IsBuiltinNssCrash([CanBeNull] string patcherText)
@@ -120,7 +124,12 @@ namespace ModSync.Core.Services
                 return;
             }
 
-            EnsureInclude(tslPatcherDirectory.FullName, tslPatcherDirectory.FullName, "nwscript.nss");
+            EnsureIncludeWithTransitiveDependencies(
+                tslPatcherDirectory.FullName,
+                tslPatcherDirectory.FullName,
+                "nwscript.nss",
+                gameDirectory: null,
+                processed: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
             if (!File.Exists(dest))
             {
                 return;
@@ -320,11 +329,11 @@ namespace ModSync.Core.Services
             int needed = 0;
             foreach (string scriptName in scriptNames.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                needed++;
                 string leafNcs = Path.ChangeExtension(scriptName, ".ncs");
                 string dest = Path.Combine(overrideDir, leafNcs);
                 if (File.Exists(dest) && new FileInfo(dest).Length > 0)
                 {
+                    needed++;
                     installed++;
                     continue;
                 }
@@ -332,10 +341,19 @@ namespace ModSync.Core.Services
                 string source = FindProcessedOrRawScript(tslPatcherDirectory.FullName, scriptName);
                 if (string.IsNullOrEmpty(source))
                 {
+                    needed++;
                     continue;
                 }
 
-                string ncsPath = CompileWithWine(source, tslPatcherDirectory.FullName);
+                // CompileList often names include files. nwnnsscomp ignores those
+                // ("File is an include file") and there is no NCS to recover.
+                if (IsIncludeOnlyScript(source))
+                {
+                    continue;
+                }
+
+                needed++;
+                string ncsPath = CompileWithWine(source, tslPatcherDirectory.FullName, gameDirectory);
                 if (string.IsNullOrEmpty(ncsPath))
                 {
                     continue;
@@ -575,7 +593,32 @@ namespace ModSync.Core.Services
         }
 
         [CanBeNull]
-        private static string CompileWithWine([NotNull] string sourceNss, [NotNull] string searchRoot)
+        internal static bool IsIncludeOnlyScript([NotNull] string nssPath)
+        {
+            if (string.IsNullOrEmpty(nssPath) || !File.Exists(nssPath))
+            {
+                return false;
+            }
+
+            string text;
+            try
+            {
+                text = File.ReadAllText(nssPath);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+
+            return text.IndexOf("void main", StringComparison.OrdinalIgnoreCase) < 0
+                && text.IndexOf("StartingConditional", StringComparison.OrdinalIgnoreCase) < 0;
+        }
+
+        [CanBeNull]
+        private static string CompileWithWine(
+            [NotNull] string sourceNss,
+            [NotNull] string searchRoot,
+            [CanBeNull] string gameDirectory = null)
         {
             string compiler = FindNwnnsscomp(Path.GetDirectoryName(sourceNss) ?? searchRoot, searchRoot);
             if (string.IsNullOrEmpty(compiler))
@@ -603,7 +646,10 @@ namespace ModSync.Core.Services
                 File.Copy(sourceNss, stagedNss, overwrite: true);
             }
 
-            EnsureInclude(workDir, searchRoot, "nwscript.nss");
+            var processedIncludes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            EnsureIncludeWithTransitiveDependencies(workDir, searchRoot, "nwscript.nss", gameDirectory, processedIncludes);
+            EnsureIncludeWithTransitiveDependencies(workDir, searchRoot, "k_inc_generic.nss", gameDirectory, processedIncludes);
+
             string parent = Path.GetDirectoryName(sourceNss);
             if (!string.IsNullOrEmpty(parent))
             {
@@ -616,6 +662,14 @@ namespace ModSync.Core.Services
                     }
                 }
             }
+
+            // The script being compiled (and any sibling .nss just bulk-copied above) may
+            // itself #include something beyond nwscript.nss/k_inc_generic.nss (e.g. the
+            // production case: k_inc_generic -> k_inc_gensupport). EnsureInclude early-returns
+            // once a file is already staged, so this only walks #include directives for names
+            // not yet resolved.
+            EnsureIncludeWithTransitiveDependencies(
+                workDir, searchRoot, Path.GetFileName(stagedNss), gameDirectory, processedIncludes);
 
             string expectedNcs = Path.ChangeExtension(stagedNss, ".ncs");
             if (File.Exists(expectedNcs))
@@ -727,16 +781,20 @@ namespace ModSync.Core.Services
                 return _cachedCompiler;
             }
 
-            string parent = Directory.GetParent(searchRoot)?.FullName;
-            if (!string.IsNullOrEmpty(parent))
+            // Walk up from tslpatchdata / inner extract so sibling mods under the
+            // extract scratch (k1_auto_extract, k2_ody_extract, …) are visible.
+            string walk = Directory.GetParent(searchRoot)?.FullName;
+            for (int up = 0; up < 6 && !string.IsNullOrEmpty(walk); up++)
             {
-                string sibling = FindNwnnsscompUnderExtractParent(parent);
+                string sibling = FindNwnnsscompUnderExtractParent(walk);
                 if (!string.IsNullOrEmpty(sibling))
                 {
                     _cachedCompiler = sibling;
                     Logger.LogVerbose($"[NSS] Using nwnnsscomp.exe from sibling extract '{sibling}'.");
                     return sibling;
                 }
+
+                walk = Directory.GetParent(walk)?.FullName;
             }
 
             return null;
@@ -852,6 +910,90 @@ namespace ModSync.Core.Services
             return Path.Combine(Path.GetTempPath(), "modsync-wine-nss");
         }
 
+        /// <summary>
+        /// Stages <paramref name="fileName"/> into <paramref name="workDir"/> (via
+        /// <see cref="EnsureInclude"/>), then parses the staged file's own
+        /// <c>#include "X"</c> directives and recursively stages those too. Guards against
+        /// cycles/repeats with <paramref name="processed"/> so circular or repeated
+        /// <c>#include</c> chains (case-insensitive Windows-authored filenames) terminate.
+        /// </summary>
+        private static void EnsureIncludeWithTransitiveDependencies(
+            [NotNull] string workDir,
+            [NotNull] string searchRoot,
+            [NotNull] string fileName,
+            [CanBeNull] string gameDirectory,
+            [NotNull] HashSet<string> processed)
+        {
+            // #include directive text is untrusted mod content; strip any path segments so a
+            // crafted "../../x" can't make EnsureInclude/File.Copy write outside workDir
+            // (path-sandboxing convention: only bare filenames may cross this boundary).
+            string bareFileName = Path.GetFileName(fileName);
+            if (string.IsNullOrEmpty(bareFileName))
+            {
+                return;
+            }
+
+            string normalizedName = bareFileName.EndsWith(".nss", StringComparison.OrdinalIgnoreCase)
+                ? bareFileName
+                : bareFileName + ".nss";
+            if (!processed.Add(normalizedName))
+            {
+                return;
+            }
+
+            EnsureInclude(workDir, searchRoot, normalizedName);
+            if (!string.IsNullOrEmpty(gameDirectory))
+            {
+                EnsureInclude(workDir, ResolveOverrideDirectory(gameDirectory), normalizedName);
+                EnsureInclude(workDir, gameDirectory, normalizedName);
+            }
+
+            string staged = Path.Combine(workDir, normalizedName);
+            if (!File.Exists(staged))
+            {
+                return;
+            }
+
+            foreach (string included in ParseIncludeDirectives(staged))
+            {
+                EnsureIncludeWithTransitiveDependencies(workDir, searchRoot, included, gameDirectory, processed);
+            }
+        }
+
+        [ItemNotNull]
+        private static IEnumerable<string> ParseIncludeDirectives([NotNull] string nssPath)
+        {
+            string text;
+            try
+            {
+                text = File.ReadAllText(nssPath);
+            }
+            catch (Exception)
+            {
+                yield break;
+            }
+
+            foreach (Match match in IncludeDirective.Matches(text))
+            {
+                string name = match.Groups["name"].Value.Trim();
+                if (!string.IsNullOrEmpty(name))
+                {
+                    yield return name;
+                }
+            }
+        }
+
+        /// <summary>Test-only entry point mirroring <see cref="EnsureIncludeWithTransitiveDependencies"/>.</summary>
+        internal static void StageIncludeChainForTests([NotNull] string workDir, [NotNull] string searchRoot, [NotNull] string fileName)
+        {
+            EnsureIncludeWithTransitiveDependencies(
+                workDir,
+                searchRoot,
+                fileName,
+                gameDirectory: null,
+                processed: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+
         private static void EnsureInclude([NotNull] string workDir, [NotNull] string searchRoot, [NotNull] string fileName)
         {
             string dest = Path.Combine(workDir, fileName);
@@ -863,10 +1005,24 @@ namespace ModSync.Core.Services
             string found = SafeFindFirst(searchRoot, fileName);
             if (string.IsNullOrEmpty(found))
             {
-                string parent = Directory.GetParent(searchRoot)?.FullName;
-                if (!string.IsNullOrEmpty(parent))
+                string env = Environment.GetEnvironmentVariable("MODSYNC_NWNNSSCOMP");
+                if (!string.IsNullOrWhiteSpace(env))
                 {
-                    found = FindIncludeUnderExtractParent(parent, fileName);
+                    string beside = Path.Combine(Path.GetDirectoryName(env) ?? string.Empty, fileName);
+                    if (File.Exists(beside))
+                    {
+                        found = beside;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(found))
+            {
+                string walk = Directory.GetParent(searchRoot)?.FullName;
+                for (int up = 0; up < 6 && !string.IsNullOrEmpty(walk) && string.IsNullOrEmpty(found); up++)
+                {
+                    found = FindIncludeUnderExtractParent(walk, fileName);
+                    walk = Directory.GetParent(walk)?.FullName;
                 }
             }
 

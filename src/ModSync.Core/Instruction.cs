@@ -817,22 +817,20 @@ namespace ModSync.Core
                 fileExtension = Arguments;
             }
 
-            List<string> filesList = _fileSystemProvider.GetFilesInDirectory(directoryPath.FullName);
+            // Recurse into subdirectories: duplicate .tga/.tpc/.dds pairs can be written by mods
+            // into Override subfolders, not just the top level, so a top-directory-only scan
+            // would silently leave those duplicates in place. Grouping is scoped per-directory
+            // (see BuildDuplicateGroupKey) -- two same-named files in *different* subfolders are
+            // not "duplicates" of each other, only same-named files within the same folder are.
+            List<string> filesList = _fileSystemProvider.GetFilesInDirectory(directoryPath.FullName, "*.*", SearchOption.AllDirectories);
+            Dictionary<string, List<string>> fileGroups = GroupFilesByBaseNameForCompatibleExtensions(
+                _fileSystemProvider, filesList, compatibleExtensions, caseInsensitive);
             Dictionary<string, int> fileNameCounts = caseInsensitive
                 ? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (string fileNameWithoutExtension in from filePath in filesList
-                                                        select _fileSystemProvider.GetFileName(filePath) into fileName
-                                                        let fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName)
-                                                        let thisExtension = Path.GetExtension(fileName)
-                                                        let compatibleExtensionFound = caseInsensitive
-                        ? compatibleExtensions.Any(ext => ext.Equals(thisExtension, StringComparison.OrdinalIgnoreCase))
-                        : compatibleExtensions.Contains(thisExtension, StringComparer.Ordinal)
-                                                        where compatibleExtensionFound
-                                                        select fileNameWithoutExtension)
+            foreach (KeyValuePair<string, List<string>> group in fileGroups)
             {
-                _ = fileNameCounts.TryGetValue(fileNameWithoutExtension, out int count);
-                fileNameCounts[fileNameWithoutExtension] = count + 1;
+                fileNameCounts[group.Key] = group.Value.Count;
             }
             foreach (string filePath in filesList)
             {
@@ -847,7 +845,8 @@ namespace ModSync.Core
                     string fileName = _fileSystemProvider.GetFileName(filePath);
                     _ = Logger.LogAsync($"Deleted file: '{fileName}'");
                     string baseName = Path.GetFileNameWithoutExtension(fileName);
-                    int count = fileNameCounts[baseName] - 1;
+                    string groupKey = BuildDuplicateGroupKey(filePath, baseName);
+                    int count = fileNameCounts[groupKey] - 1;
                     _ = Logger.LogVerboseAsync(
                         $"Leaving alone '{count.ToString(System.Globalization.CultureInfo.InvariantCulture)}' file(s) with the same name of '{baseName}'."
                     );
@@ -862,13 +861,14 @@ namespace ModSync.Core
                 string fileName = _fileSystemProvider?.GetFileName(filePath);
                 string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
                 string fileExtensionFromFile = Path.GetExtension(fileName);
+                string groupKey = BuildDuplicateGroupKey(filePath, fileNameWithoutExtension);
                 if (string.IsNullOrEmpty(fileNameWithoutExtension))
                 {
                     _ = Logger.LogWarningAsync(
                         $"Skipping '{fileName}' Reason: fileNameWithoutExtension is null/empty somehow?"
                     );
                 }
-                else if (!fileNameCounts.TryGetValue(fileNameWithoutExtension, out int value))
+                else if (!fileNameCounts.TryGetValue(groupKey, out int value))
                 {
                     _ = Logger.LogVerboseAsync(
                         $"Skipping '{fileName}' Reason: Not present in dictionary, ergo does not have a desired extension."
@@ -896,6 +896,205 @@ namespace ModSync.Core
                 return false;
             }
         }
+
+        /// <summary>
+        /// Builds the key used to decide whether two files are "the same file, different
+        /// extension": the containing directory plus the filename without its extension.
+        /// Duplicate detection is intentionally scoped per-directory -- two same-named files that
+        /// live in different subfolders of Override are not duplicates of one another.
+        /// </summary>
+        private static string BuildDuplicateGroupKey([NotNull] string filePath, [CanBeNull] string fileNameWithoutExtension)
+        {
+            string directoryPart = Path.GetDirectoryName(filePath) ?? string.Empty;
+            return directoryPart + "|" + fileNameWithoutExtension;
+        }
+
+        /// <summary>
+        /// Groups every file under a pre-enumerated file list by its containing directory plus
+        /// filename (without extension), restricted to files whose extension is one of
+        /// <paramref name="compatibleExtensions"/>. Shared between <see cref="DeleteDuplicateFile"/>
+        /// (single-extension purge, driven by a per-instruction <c>Arguments</c> value) and
+        /// <see cref="RunFinalDuplicateSweepAsync"/> (purges whatever extensions the guide's own
+        /// DelDuplicate instructions named, run once after every component in a guide has
+        /// installed) so both duplicate-detection paths agree on what counts as "the same file,
+        /// different extension".
+        /// </summary>
+        private static Dictionary<string, List<string>> GroupFilesByBaseNameForCompatibleExtensions(
+            [NotNull] Services.FileSystem.IFileSystemProvider fileSystemProvider,
+            [NotNull][ItemNotNull] List<string> filesList,
+            [NotNull] IReadOnlyList<string> compatibleExtensions,
+            bool caseInsensitive)
+        {
+            Dictionary<string, List<string>> groups = caseInsensitive
+                ? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+            foreach (string filePath in filesList)
+            {
+                string fileName = fileSystemProvider.GetFileName(filePath);
+                string thisExtension = Path.GetExtension(fileName);
+                bool compatibleExtensionFound = caseInsensitive
+                    ? compatibleExtensions.Any(ext => ext.Equals(thisExtension, StringComparison.OrdinalIgnoreCase))
+                    : compatibleExtensions.Contains(thisExtension, StringComparer.Ordinal);
+                if (!compatibleExtensionFound)
+                {
+                    continue;
+                }
+
+                string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
+                if (string.IsNullOrEmpty(fileNameWithoutExtension))
+                {
+                    continue;
+                }
+
+                string groupKey = BuildDuplicateGroupKey(filePath, fileNameWithoutExtension);
+                if (!groups.TryGetValue(groupKey, out List<string> group))
+                {
+                    group = new List<string>();
+                    groups[groupKey] = group;
+                }
+
+                group.Add(filePath);
+            }
+
+            return groups;
+        }
+
+        /// <summary>
+        /// Final post-install safety-net sweep for duplicate texture-override pairs.
+        /// <para>
+        /// <see cref="DeleteDuplicateFile"/> (the <c>DelDuplicate</c> instruction) runs once, at a
+        /// fixed point in a guide's install order, and only purges duplicates that exist in
+        /// <paramref name="directoryFullName"/> at that exact moment. Components that run
+        /// <em>after</em> it can (and do) write fresh files that recreate duplicate extension pairs
+        /// for the same basename -- those never get cleaned up because dedup never runs again.
+        /// </para>
+        /// <para>
+        /// This method re-applies the same "does this basename have 2+ files across
+        /// <paramref name="compatibleExtensions"/>" detection <see cref="DeleteDuplicateFile"/>
+        /// already uses (via <see cref="GroupFilesByBaseNameForCompatibleExtensions"/>). For every
+        /// duplicate group found, it deletes whichever files match an extension in
+        /// <paramref name="purgeExtensions"/> -- the same extension(s) the guide's own
+        /// <c>DelDuplicate</c> instructions already named via their <c>Arguments</c> value -- and
+        /// keeps everything else. This mirrors the per-instruction path exactly instead of
+        /// re-deriving a "which extension wins" rule from <paramref name="compatibleExtensions"/>'s
+        /// order: that list is only ever a co-occurrence/membership set (e.g. ".dds"/".tpc"/".tga"
+        /// are "the same override texture, different format"), not a survival-priority ordering.
+        /// Stems with only one compatible extension present are left untouched entirely -- there is
+        /// nothing to dedupe there, which is what correctly leaves already-resolved
+        /// legitimate-exception stems alone.
+        /// </para>
+        /// Intended to be invoked once, by the overall install loop, after every component in the
+        /// guide has finished installing.
+        /// </summary>
+        /// <param name="fileSystemProvider">Provider used to enumerate and delete files.</param>
+        /// <param name="directoryFullName">Directory to sweep (e.g. the game's Override folder).</param>
+        /// <param name="purgeExtensions">
+        /// The extension(s) to remove from a duplicate group when found alongside at least one
+        /// other compatible-extension file, collected from the guide's own DelDuplicate
+        /// instructions. If empty, the sweep is a no-op.
+        /// </param>
+        /// <param name="compatibleExtensions">
+        /// The co-occurrence set used to detect duplicate groups. Defaults to
+        /// <see cref="Data.Game.TextureOverridePriorityList"/>.
+        /// </param>
+        /// <returns>The number of files deleted by the sweep.</returns>
+        public static async Task<int> RunFinalDuplicateSweepAsync(
+            [NotNull] Services.FileSystem.IFileSystemProvider fileSystemProvider,
+            [NotNull] string directoryFullName,
+            [NotNull] IReadOnlyCollection<string> purgeExtensions,
+            [CanBeNull] IReadOnlyList<string> compatibleExtensions = null,
+            bool caseInsensitive = true)
+        {
+            if (fileSystemProvider is null)
+            {
+                throw new ArgumentNullException(nameof(fileSystemProvider));
+            }
+
+            if (string.IsNullOrEmpty(directoryFullName))
+            {
+                throw new ArgumentException(message: "Invalid directory path.", nameof(directoryFullName));
+            }
+
+            if (purgeExtensions is null)
+            {
+                throw new ArgumentNullException(nameof(purgeExtensions));
+            }
+
+            if (purgeExtensions.Count == 0 || !fileSystemProvider.DirectoryExists(directoryFullName))
+            {
+                return 0;
+            }
+
+            IReadOnlyList<string> extensions = compatibleExtensions ?? Data.Game.TextureOverridePriorityList;
+            if (extensions is null || extensions.Count == 0)
+            {
+                return 0;
+            }
+
+            List<string> filesList = fileSystemProvider.GetFilesInDirectory(directoryFullName, "*.*", SearchOption.AllDirectories);
+            Dictionary<string, List<string>> fileGroups = GroupFilesByBaseNameForCompatibleExtensions(
+                fileSystemProvider, filesList, extensions, caseInsensitive);
+
+            StringComparison extensionComparison = caseInsensitive
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+            int deletedCount = 0;
+            foreach (List<string> group in fileGroups.Values)
+            {
+                if (group.Count <= 1)
+                {
+                    // Only one compatible extension present for this stem -- nothing to dedupe.
+                    // This is also what naturally leaves already-single-extension stems (e.g.
+                    // legitimate guide exceptions already resolved by their own DelDuplicate pass)
+                    // untouched.
+                    continue;
+                }
+
+                List<string> toDelete = group.Where(filePath => purgeExtensions.Any(ext =>
+                    string.Equals(Path.GetExtension(fileSystemProvider.GetFileName(filePath)), ext, extensionComparison))).ToList();
+                if (toDelete.Count == 0)
+                {
+                    continue;
+                }
+
+                if (toDelete.Count == group.Count)
+                {
+                    // Guard: never empty a duplicate group entirely. If every file in the group
+                    // matches a purge extension (e.g. a guide purges both ".tpc" and ".tga" and a
+                    // stem only ever had those two), leave the group alone rather than delete the
+                    // last surviving file -- that would be strictly worse than doing nothing.
+                    continue;
+                }
+
+                List<string> survivors = group.Except(toDelete, StringComparer.Ordinal).ToList();
+                string survivorNames = string.Join(", ", survivors.Select(fileSystemProvider.GetFileName));
+
+                foreach (string filePath in toDelete)
+                {
+                    try
+                    {
+                        _ = fileSystemProvider.DeleteFileAsync(filePath);
+                        string fileName = fileSystemProvider.GetFileName(filePath);
+                        string stem = Path.GetFileNameWithoutExtension(fileName);
+                        await Logger.LogWarningAsync(
+                            $"Final duplicate sweep: removed '{fileName}' (stem '{stem}') because a later " +
+                            $"component recreated a duplicate after the guide's own DelDuplicate instruction " +
+                            $"already ran; keeping '{survivorNames}'."
+                        ).ConfigureAwait(false);
+                        deletedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogException(ex);
+                    }
+                }
+            }
+
+            return deletedCount;
+        }
+
         /// <summary>
         /// Executes a cleanlist operation: reads a CSV file where each line contains a mod name and files to delete,
         /// and deletes those files if the corresponding mod is selected.
@@ -1001,20 +1200,20 @@ namespace ModSync.Core
                         }
                     }
 
-                    bool mandatory = modName.IndexOf("mandatory", StringComparison.OrdinalIgnoreCase) >= 0;
-                    string overrideRoot = MainConfig.DestinationPath == null
-                        ? null
-                        : Path.Combine(MainConfig.DestinationPath.FullName, "Override");
-                    bool payloadMode = overrideRoot != null
-                        && !targetDirectory.FullName.StartsWith(
-                            overrideRoot,
-                            StringComparison.OrdinalIgnoreCase);
-
-                    // Name-matching cleanlist rows against component titles under-deletes
-                    // (War Droid Mk 1 HD vs "HD War Droids by Dark Hope"). When the destination
-                    // is the extracted payload, delete a listed file only if Override already
-                    // owns that name — the .bat's yes/no prompt, by evidence.
-                    bool isSelected = payloadMode || (isModSelectedFunc?.Invoke(modName) ?? true);
+                    // Ask the actual mod-selection state (isModSelectedFunc) whether the mod
+                    // this row is about was selected/installed in this run. Previously, when
+                    // the destination was the extracted payload directory ("payloadMode"),
+                    // this check was bypassed in favor of a FileExists(Override/fileName)
+                    // proxy on the theory that Override already having a same-named file
+                    // implied the competing mod was selected. That proxy is unsound: another
+                    // component (e.g. duplicate-texture dedup) can independently delete the
+                    // Override copy before CleanList runs, making FileExists false even
+                    // though the competing mod WAS selected — which caused this file's
+                    // "losing" duplicate to be kept/re-added, undoing the dedup. Use
+                    // isModSelectedFunc for every destination; see IsModSelected in
+                    // ModComponent.cs for the fuzzy name/author matching that resolves a
+                    // cleanlist row's free-text mod description to a selected component.
+                    bool isSelected = isModSelectedFunc?.Invoke(modName) ?? true;
 
                     if (!isSelected)
                     {
@@ -1029,18 +1228,6 @@ namespace ModSync.Core
                     // Delete each file
                     foreach (string fileName in filesToDelete)
                     {
-                        if (payloadMode && !mandatory && overrideRoot != null)
-                        {
-                            string alreadyInstalled = Path.Combine(overrideRoot, fileName);
-                            if (!_fileSystemProvider.FileExists(alreadyInstalled))
-                            {
-                                await Logger.LogVerboseAsync(
-                                    $"  Keeping payload '{fileName}' (Override does not already provide it)")
-                                    .ConfigureAwait(false);
-                                continue;
-                            }
-                        }
-
                         string fullPath = Path.Combine(targetDirectory.FullName, fileName);
 
                         if (_fileSystemProvider.FileExists(fullPath))
@@ -1651,7 +1838,7 @@ namespace ModSync.Core
 
                     string engine = MainConfig.PatcherEngine ?? PatcherEngines.Holopatcher;
                     bool useKpatcher = string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase);
-                    bool useOdyPatcher = string.Equals(engine, PatcherEngines.OdyPatcher, StringComparison.OrdinalIgnoreCase);
+                    bool useOdyPatcher = PatcherEngines.IsBioFamily(engine);
                     bool useExternalPatcher = useKpatcher || useOdyPatcher;
 
                     // OdyPatcher rejects --flag=value (and shell/ProcessStartInfo quote collapsing of
@@ -1744,6 +1931,63 @@ namespace ModSync.Core
                     await Logger.LogAsync($"Patcher exited with exit code {exitCode}").ConfigureAwait(false);
                     bool nssRecovered = false;
                     string patcherText = (output ?? string.Empty) + Environment.NewLine + (error ?? string.Empty);
+                    if (!useExternalPatcher && IsHoloListIndexParseFailure(patcherText))
+                    {
+                        // Holo 1.5.x rejects TSLPatcher's TypeId=ListIndex (struct id = list
+                        // index). BioPatcher 1.0.0 parses it. Retry once so fail-closed
+                        // installs are not stuck on a Holo config-reader gap.
+                        var bioArgList = new List<string>
+                        {
+                            "--install",
+                            "--cli",
+                            "-y",
+                            "--game-dir",
+                            gameDirArg,
+                            "--tslpatchdata",
+                            tslPatchDataArg,
+                        };
+                        if (!string.IsNullOrEmpty(Arguments))
+                        {
+                            bioArgList.Add("--namespace-option-index");
+                            bioArgList.Add(Arguments.Trim());
+                        }
+
+                        string bioArgs = string.Join(separator: " ", bioArgList);
+                        await Logger.LogWarningAsync(
+                                "HoloPatcher cannot parse TypeId=ListIndex. Retrying this patch with BioPatcher.")
+                            .ConfigureAwait(false);
+                        (string bioPath, bool bioFound) = await Services.InstallationService.FindOdyPatcherExecutableAsync(
+                                baseDir,
+                                resourcesDir)
+                            .ConfigureAwait(false);
+                        if (!bioFound)
+                        {
+                            await Logger.LogErrorAsync(
+                                    "BioPatcher retry skipped: executable not found. Set --odypatcher-path or install biopatcher on PATH.")
+                                .ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await Logger.LogAsync($"Using BioPatcher CLI: '{bioPath}' {bioArgs}").ConfigureAwait(false);
+                            if (_fileSystemProvider?.IsDryRun == true)
+                            {
+                                (exitCode, output, error) = await _fileSystemProvider.ExecuteProcessAsync(bioPath, bioArgs)
+                                    .ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                (exitCode, output, error) = await PlatformAgnosticMethods.ExecuteProcessAsync(
+                                        bioPath,
+                                        bioArgs,
+                                        logLinePrefix: "[Patcher] ")
+                                    .ConfigureAwait(false);
+                            }
+                        }
+                        await PipePatcherLogIntoModSyncAsync(tslPatcherDirectory.FullName, output, error)
+                            .ConfigureAwait(false);
+                        await Logger.LogAsync($"BioPatcher retry exited with exit code {exitCode}").ConfigureAwait(false);
+                        patcherText = (output ?? string.Empty) + Environment.NewLine + (error ?? string.Empty);
+                    }
                     if (exitCode != 0
                         && Services.UnixNssCompileRecovery.HostNeedsWineCompiler()
                         && Services.UnixNssCompileRecovery.IsBuiltinNssCrash(patcherText))
@@ -1789,6 +2033,34 @@ namespace ModSync.Core
                         {
                             return ActionExitCode.PatcherError;
                         }
+                    }
+
+                    // The patcher reported success, but its exit code alone does not prove that every
+                    // declared [InstallList] destination file (streamwaves/streamsounds/streammusic/
+                    // movies/data — the folders it silently overwrites without going through Override or
+                    // modules) actually landed on disk. This is visibility only: it never changes exitCode,
+                    // it only makes an otherwise-silent data loss diagnosable.
+                    try
+                    {
+                        IReadOnlyList<string> missingInstallListFiles = await InstallListDestinationVerifier.VerifyAsync(
+                                _fileSystemProvider,
+                                tslPatcherDirectory,
+                                MainConfig.DestinationPath?.FullName,
+                                Arguments)
+                            .ConfigureAwait(false);
+                        if (missingInstallListFiles.Count > 0)
+                        {
+                            string componentName = GetParentComponent()?.Name ?? tslPatcherDirectory.FullName;
+                            await Logger.LogWarningAsync(
+                                    $"[InstallList] Component '{componentName}' patcher run at '{tslPatcherDirectory.FullName}'"
+                                    + " reported success, but the following declared InstallList destination file(s) are"
+                                    + " missing after install: " + string.Join(", ", missingInstallListFiles))
+                                .ConfigureAwait(false);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        await Logger.LogExceptionAsync(ex).ConfigureAwait(false);
                     }
 
                     try
@@ -1933,6 +2205,22 @@ namespace ModSync.Core
                 || Services.InnoSetupInstallerService.HostRunsWindowsExecutables())
             {
                 return null;
+            }
+
+            // This path calls InnoSetupInstallerService directly against the real game
+            // directory instead of going through _fileSystemProvider — the abstraction every
+            // other action type relies on to become a no-op under VirtualFileSystemProvider
+            // during dry-run. Without this guard, dry-run validation genuinely re-extracts the
+            // installer's full payload (dialog.tlk/2da files included) onto a live tree that may
+            // already be many components further along, silently reintroducing the installer's
+            // own bundled versions of files later components have already modified.
+            if (_fileSystemProvider?.IsDryRun == true)
+            {
+                await Logger.LogVerboseAsync(
+                    $"[DryRun] Skipping real Inno Setup extraction of '{Path.GetFileName(sourcePath)}': "
+                    + "this path writes directly to the real game directory and cannot be simulated "
+                    + "through the VFS, so it must not run during validation.").ConfigureAwait(false);
+                return ActionExitCode.Success;
             }
 
             bool isInno = Services.InnoSetupInstallerService.IsInnoSetupInstaller(sourcePath);
@@ -2312,6 +2600,17 @@ namespace ModSync.Core
             }
 
             return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
+        internal static bool IsHoloListIndexParseFailure([CanBeNull] string patcherText)
+        {
+            if (string.IsNullOrEmpty(patcherText))
+            {
+                return false;
+            }
+
+            return patcherText.IndexOf("Invalid TypeId", StringComparison.OrdinalIgnoreCase) >= 0
+                && patcherText.IndexOf("ListIndex", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private bool IsGuideDirectedTslPatchdataDeleteOutcome([CanBeNull] string patcherText)

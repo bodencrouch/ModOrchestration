@@ -877,5 +877,155 @@ namespace ModSync.Tests
         }
 
         #endregion
+
+        #region Unresolved Placeholder Guard
+
+        /// <summary>
+        /// A guide-parsing rebind step (AutoInstructionGenerator.BindBareCopyAsInstructions) parks a
+        /// bare Rename/Copy-as destination filename behind a literal "&lt;&lt;modDirectory&gt;&gt;\"
+        /// prefix so it survives sandbox validation while it waits to be grounded to a real source. If
+        /// that rebind silently fails, the placeholder token must never reach ComponentValidation as a
+        /// pass, since Instruction.RenameFile() writes the raw Destination string to disk verbatim
+        /// (never resolving placeholders in it by design).
+        /// </summary>
+        [Test]
+        public void ValidateComponent_RenameWithUnresolvedPlaceholderDestination_ReturnsError()
+        {
+            var component = new ModComponent
+            {
+                Name = "Test Mod",
+                Guid = Guid.NewGuid(),
+                Instructions = new System.Collections.ObjectModel.ObservableCollection<Instruction>
+                {
+                    new Instruction
+                    {
+                        Action = Instruction.ActionType.Rename,
+                        Source = new List<string> { @"<<kotorDirectory>>\Override\SomeSource.tga" },
+                        Destination = @"<<modDirectory>>\N_Duros04.tga",
+                    }
+                }
+            };
+
+            var validator = new ComponentValidation(component);
+            validator.Run();
+            List<string> errors = validator.GetErrors();
+
+            Assert.That(
+                errors,
+                Has.Some.Contains("Unresolved placeholder"),
+                "A Rename instruction whose Destination still contains an unresolved '<<...>>' "
+                + "placeholder token must fail validation instead of silently passing through to install."
+            );
+        }
+
+        [Test]
+        public void ValidateComponent_RenameWithBareFilenameDestination_ReturnsNoUnresolvedPlaceholderError()
+        {
+            var component = new ModComponent
+            {
+                Name = "Test Mod",
+                Guid = Guid.NewGuid(),
+                Instructions = new System.Collections.ObjectModel.ObservableCollection<Instruction>
+                {
+                    new Instruction
+                    {
+                        Action = Instruction.ActionType.Rename,
+                        Source = new List<string> { @"<<kotorDirectory>>\Override\SomeSource.tga" },
+                        Destination = "N_Duros04.tga",
+                    }
+                }
+            };
+
+            var validator = new ComponentValidation(component);
+            validator.Run();
+            List<string> errors = validator.GetErrors();
+
+            Assert.That(
+                errors,
+                Has.None.Contains("Unresolved placeholder"),
+                "A properly rebound Rename with a bare filename Destination must not trip the placeholder guard."
+            );
+        }
+
+        #endregion
+
+        #region Choose Zero-Selection Guard
+
+        /// <summary>
+        /// A 'Choose' instruction with branches defined but nothing selected (e.g. namespace
+        /// selection false-positive excluded every option) executes as a silent no-op that
+        /// still reports Success. It must surface as a validation warning so it is visible in
+        /// the wizard's Validate step instead of the component being checkmarked "installed"
+        /// with zero files ever written.
+        /// </summary>
+        [Test]
+        public void ValidateComponent_ChooseWithNoSelectedOptions_ReturnsWarning()
+        {
+            var option1 = new Option { Name = "Option 1", Guid = Guid.NewGuid(), IsSelected = false };
+            var option2 = new Option { Name = "Option 2", Guid = Guid.NewGuid(), IsSelected = false };
+            var component = new ModComponent
+            {
+                Name = "Test Mod",
+                Guid = Guid.NewGuid(),
+                Options = new System.Collections.ObjectModel.ObservableCollection<Option> { option1, option2 },
+                Instructions = new System.Collections.ObjectModel.ObservableCollection<Instruction>
+                {
+                    new Instruction
+                    {
+                        Action = Instruction.ActionType.Choose,
+                        Source = new List<string> { option1.Guid.ToString(), option2.Guid.ToString() },
+                    },
+                },
+            };
+
+            var validator = new ComponentValidation(component);
+            bool isValid = validator.Run();
+            List<string> warnings = validator.GetWarnings();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    isValid,
+                    Is.True,
+                    "Zero-selection is surfaced as a warning, not a validation failure; "
+                    + "some guide flows legitimately leave every branch ineligible.");
+                Assert.That(
+                    warnings,
+                    Has.Some.Contains("none are currently selected"),
+                    "A 'Choose' instruction with defined branches but zero selections must warn.");
+            });
+        }
+
+        [Test]
+        public void ValidateComponent_ChooseWithSelectedOption_ReturnsNoZeroSelectionWarning()
+        {
+            var option1 = new Option { Name = "Option 1", Guid = Guid.NewGuid(), IsSelected = true };
+            var option2 = new Option { Name = "Option 2", Guid = Guid.NewGuid(), IsSelected = false };
+            var component = new ModComponent
+            {
+                Name = "Test Mod",
+                Guid = Guid.NewGuid(),
+                Options = new System.Collections.ObjectModel.ObservableCollection<Option> { option1, option2 },
+                Instructions = new System.Collections.ObjectModel.ObservableCollection<Instruction>
+                {
+                    new Instruction
+                    {
+                        Action = Instruction.ActionType.Choose,
+                        Source = new List<string> { option1.Guid.ToString(), option2.Guid.ToString() },
+                    },
+                },
+            };
+
+            var validator = new ComponentValidation(component);
+            validator.Run();
+            List<string> warnings = validator.GetWarnings();
+
+            Assert.That(
+                warnings,
+                Has.None.Contains("none are currently selected"),
+                "A 'Choose' instruction with at least one selected branch must not warn.");
+        }
+
+        #endregion
     }
 }

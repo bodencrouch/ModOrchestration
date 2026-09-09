@@ -25,7 +25,7 @@ unmatched_token_penalty = 0.5
 [tokens]
 primary_namespace = ["main", "base", "default", "basic", "standard"]
 primary_description_phrases = ["default installation", "main installation", "the default"]
-optional_namespace = ["optional", "compat", "compatibility", "integration"]
+optional_namespace = ["optional", "compat", "compatibility", "integration", "option:"]
 exclude_from_primary_when_also = ["optional", "(optional)", "compat", "compatibility"]
 guide_requests_primary = ["main", "base install", "install the mod", "run the installer"]
 guide_requests_optional = ["each of the optional", "once for each of the optional", "for each of the optional installs", "all remaining content", "also install"]
@@ -33,10 +33,35 @@ significant_token_stopwords = ["optional", "option", "install", "installation", 
 
 [patterns]
 personally_recommend_named_install = '''\b(?:I\s+)?personally\s+recommend(?:\s+the)?\s+["“]?(?<name>[^"”\n,.]{3,60}?)["”]?\s+install\b'''
+# "I recommend the \"With Additional Scene\" option" — not "personally … install".
+recommend_named_option = '''\b(?:I\s+)?(?:strongly\s+)?recommend\s+(?:the\s+)?["“]?(?<name>[^"”\n,.]{3,80}?)["”]?\s+option\b'''
+# "Strongly recommend using the Editor Cut for balance" — no trailing "option".
+recommend_using_named = '''\b(?:I\s+)?(?:strongly\s+)?recommend\s+using\s+(?:the\s+)?["“]?(?<name>[^"”\n,.]{3,80}?)["”]?(?=\s+for\b|\s+option\b|[.,;]|$)'''
+# "install the 16:9 main install option" — aspect-ratio mains are mutex, not stacked.
+install_the_named_main_option = '''\binstall\s+the\s+["“]?(?<name>[^"”\n,.]{2,40}?)["”]?\s+main\s+install\s+option\b'''
+# "apply the Transparent Cockpit Windows - Retexture Friendly option"
+apply_the_named_option = '''\bapply\s+the\s+["“]?(?<name>[^"”\n,.]{3,80}?)["”]?\s+option\b'''
+compat_absent_option = '''\bonly\s+if\s+you\s+do\s+not\s+have\s+(?<compat>.+?)\s+installed\b'''
 default_install_named = '''\bthe\s+default\s+install\s*,\s+["“]?(?<name>[^"”\n,.]{3,60}?)["”]?(?=\s|,|\.|$)'''
 explicit_option_ordinal = '''\boption\s+(\d{1,2})\b'''
 additive_namespace = '''\b(as\s+well|also\s+install|in\s+addition|additionally|and\s+install\s+it)\b'''
 guide_excludes_namespace = '''\b(?:skip|ignore|do\s+not\s+install|don't\s+install|recommend\s+against|recommend\s+not)\b[^\n.]{0,80}\b{token}\b'''
+skip_folder_verb = '''(?:you\s+can\s+also\s+skip|skip(?:\s+it)?|do\s+not\s+(?:install|move|use)|don't\s+(?:install|move|use)|not\s+including)'''
+optional_folder_near_token = '''\b(?:if\s+you(?:'d|\s+would)\s+like|optionally)\b[\s\S]{0,120}\b{token}\b'''
+except_or_excluding_clause = '''\b(?:except|excluding|but\s+not|not\s+including)\b[\s\S]{0,500}'''
+delete_before_move_clause = '''\bdelete\b[\s\S]{0,500}?\b(?:before\s+)?mov(?:e|ing)\b'''
+guide_filename_token = '''\b([\w.-]+\.[A-Za-z0-9]{2,4})\b'''
+only_look_at_folders = '''only\s+look\s+at\s+the\s+([^.;]+?)(?:\s+folders?|\s+folder)\b'''
+enter_the_folder = '''enter\s+the\s+([^.;]+?)\s+folder\b'''
+only_move_from_folder = '''only\s+move\s+(?:the\s+)?files\s+from\s+["']?([^"'.]+)["']?'''
+from_the_named_folders = '''from\s+the\s+([^.;]+?)\s+folders\b'''
+ignore_named_file_clause = '''(?:you\s+can\s+)?ignore\s+([\w.-]+\.[A-Za-z0-9]{2,4})'''
+folder_name_split = '''\s*(?:/|\\|,|\band\b|\bor\b)\s*'''
+strip_trailing_folders = '''\s+folders?$'''
+picks_one_of_folders = '''\b(?:from\s+one\s+of|your\s+preferred)\b'''
+forbids_root_loose_files = '''do\s+not\s+move\s+(?:any\s+of\s+the\s+)?files\s+in\s+the\s+main'''
+requests_loose_file_install = '''\b(?:enter\s+the|only\s+look\s+at|only\s+move|mov(?:e|ing)\b|copy\b[\s\S]{0,80}override|loose\s+files)'''
+named_file_is_deferred = '''\b(?:if\s+(?:intending\s+to\s+play\s+)?(?:in\s+)?widescreen|if\s+using\s+widescreen|optional\s+download|after\s+completing\s+the\s+rest|when\s+coming\s+back)\b'''
 possessive_option_condition = '''^(?<mod>.+?)['\u2019]s\s+(?<opt>.+?)(?:\s+option)?\s*$'''
 if_using_condition = '''\bif\s+(?:using|you\s+utilize|you\s+use|installing)\s+(?:the\s+)?(?<mod>[A-Za-z0-9][A-Za-z0-9\s'\-%&.]{2,80}?)(?:\s*,|\s*\.|$|\s+and\b|\s+then\b|\s+re-)'''
 if_you_use_unresolved = '''\bif\s+(?:using|you\s+use|you\s+utilize|installing)\b'''
@@ -45,7 +70,7 @@ strip_trailing_option = '''\s+option$'''
 canonicalize_non_alnum = '''[^a-z0-9]+'''
 
 [filters]
-non_game_extensions = [".txt", ".rtf", ".pdf", ".doc", ".docx", ".md", ".html", ".htm", ".url", ".ini", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".psd", ".exe", ".bat", ".dll", ".cmd", ".sh"]
+non_game_extensions = [".txt", ".rtf", ".pdf", ".doc", ".docx", ".md", ".html", ".htm", ".url", ".ini", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".psd", ".exe", ".bat", ".dll", ".cmd", ".sh", ".kmm"]
 non_game_filenames = [".ds_store", "desktop.ini", "thumbs.db", "installlog.txt"]
 protected_game_extensions = [".tga", ".tpc", ".dds", ".txi", ".mdl", ".mdx", ".ncs", ".nss", ".utc", ".utp", ".uti", ".utd", ".utm", ".utt", ".utw", ".ute", ".uts", ".dlg", ".are", ".git", ".pth", ".ifo", ".2da", ".tlk", ".mod", ".rim", ".erf", ".bik", ".wav", ".mp3", ".lip", ".gui", ".ssf", ".jrl", ".lyt", ".vis"]
 apple_double_prefix = "._"
@@ -599,13 +624,19 @@ pattern = '''
 [entities.folder_from]
 options = "IgnoreCase"
 pattern = '''
-from\s+(?:the\s+)?(?:both\s+the\s+)?(?<folder>[\w\s\-_&/\\]+?)\s+(?:and\s+(?<folder2>[\w\s\-_/\\]+?)\s+)?(?:folder|directory)
+from\s+(?:the\s+)?(?:both\s+the\s+)?(?:[\w\-]+(?:'s|’s)\s+)?(?<folder>[\w\s\-_&/\\]+?)\s+(?:and\s+(?<folder2>[\w\s\-_/\\]+?)\s+)?(?:folder|directory)
 '''
 
 [entities.folder_name]
 options = "IgnoreCase"
 pattern = '''
 (?:the\s+)?["']?(?<folder>[\w\s\-_/\\]+?)["']?\s+folder
+'''
+
+[entities.prefix_filter]
+options = "IgnoreCase"
+pattern = '''
+(?:beginning|starting)(?:\s+with)?\s+(?<prefixes>(?:["']?[\w\-]+["']?(?:,\s*|\s+and\s+|\s+&\s+))+["']?[\w\-]+["']?)
 '''
 
 [entities.override_dest]

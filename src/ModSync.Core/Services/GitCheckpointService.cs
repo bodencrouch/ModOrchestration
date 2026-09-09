@@ -400,7 +400,7 @@ namespace ModSync.Core.Services
                     string gitPath = Path.Combine(_gitDirectory, relativePath);
 
                     Directory.CreateDirectory(Path.GetDirectoryName(gitPath));
-                    File.Copy(gameFile, gitPath, overwrite: true);
+                    CopyFileOverwriteWithRetry(gameFile, gitPath);
                 }
             }, cancellationToken).ConfigureAwait(false);
         }
@@ -445,9 +445,56 @@ namespace ModSync.Core.Services
                     string gamePath = Path.Combine(_gameDirectory, relativePath);
 
                     Directory.CreateDirectory(Path.GetDirectoryName(gamePath));
-                    File.Copy(gitFile, gamePath, overwrite: true);
+                    CopyFileOverwriteWithRetry(gitFile, gamePath);
                 }
             }, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Overwrite-copy that retries when the destination is briefly held.
+        /// Must not FileMode.Create the destination in place: live Override and
+        /// the checkpoint git tree are often hardlinked, and truncating the dest
+        /// zeroes the live file (K1 appearance.2da at [18]).
+        /// </summary>
+        private static void CopyFileOverwriteWithRetry(string sourcePath, string destinationPath)
+        {
+            const int maxAttempts = 8;
+            string tempPath = destinationPath + ".modsync-copytmp";
+            string destDir = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrEmpty(destDir))
+            {
+                Directory.CreateDirectory(destDir);
+            }
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    if (File.Exists(destinationPath))
+                    {
+                        File.SetAttributes(destinationPath, FileAttributes.Normal);
+                    }
+
+                    if (File.Exists(tempPath))
+                    {
+                        File.SetAttributes(tempPath, FileAttributes.Normal);
+                        File.Delete(tempPath);
+                    }
+
+                    File.Copy(sourcePath, tempPath, overwrite: true);
+                    if (File.Exists(destinationPath))
+                    {
+                        File.Delete(destinationPath);
+                    }
+
+                    File.Move(tempPath, destinationPath);
+                    return;
+                }
+                catch (Exception ex) when (attempt < maxAttempts && (ex is IOException || ex is UnauthorizedAccessException))
+                {
+                    Thread.Sleep(50 * attempt * attempt);
+                }
+            }
         }
 
         private static string BuildCommitMessage(ModComponent component, int index, int total)
