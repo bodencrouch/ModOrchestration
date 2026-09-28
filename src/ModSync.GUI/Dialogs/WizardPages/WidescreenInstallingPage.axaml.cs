@@ -13,6 +13,8 @@ using Avalonia.Threading;
 using JetBrains.Annotations;
 using ModSync.Core;
 using ModSync.Core.Services;
+using ModSync.Core.Services.Installation;
+using ModSync.Core.Services.Validation;
 
 namespace ModSync.Dialogs.WizardPages
 {
@@ -24,6 +26,7 @@ namespace ModSync.Dialogs.WizardPages
         public override bool CanNavigateForward => _canNavigateForward;
 
         private readonly List<ModComponent> _widescreenMods;
+        private readonly MainConfig _mainConfig;
         private readonly CancellationTokenSource _cancellationTokenSource;
         private ProgressBar _progressBar;
         private TextBlock _statusText;
@@ -45,6 +48,7 @@ namespace ModSync.Dialogs.WizardPages
             {
                 throw new ArgumentNullException(nameof(mainConfig));
             }
+            _mainConfig = mainConfig;
             _cancellationTokenSource = cancellationTokenSource ?? throw new ArgumentNullException(nameof(cancellationTokenSource));
 
             InitializeComponent();
@@ -85,41 +89,65 @@ namespace ModSync.Dialogs.WizardPages
             await Task.Run(async () =>
             {
                 var selectedMods = _widescreenMods.Where(m => m.IsSelected).ToList();
-
-                for (int i = 0; i < selectedMods.Count; i++)
+                if (selectedMods.Count == 0)
                 {
-                    if (cancellationToken.IsCancellationRequested || _cancellationTokenSource.IsCancellationRequested)
-                    {
-                        break;
-                    }
-
-                    ModComponent mod = selectedMods[i];
-
                     await Dispatcher.UIThread.InvokeAsync(() =>
                     {
                         if (_statusText != null)
                         {
-                            _statusText.Text = $"Installing: {mod.Name} ({i + 1}/{selectedMods.Count})";
-                        }
-
-                        if (_progressBar != null)
-                        {
-                            _progressBar.Value = selectedMods.Count == 0 ? 0 : (double)i / selectedMods.Count;
+                            _statusText.Text = "Select at least one widescreen mod before installing.";
                         }
                     });
+                    return;
+                }
 
-                    ModComponent.InstallExitCode exitCode = await InstallationService.InstallSingleComponentAsync(
-                        mod,
-                        _widescreenMods,
-                        cancellationToken);
-                    if (exitCode != ModComponent.InstallExitCode.Success)
+                using (var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                           cancellationToken,
+                           _cancellationTokenSource.Token))
+                {
+                    var validationOptions = ValidationPipelineOptions.WizardFull;
+                    validationOptions.MainConfig = _mainConfig;
+                    InstallationInputKind inputKind = InstallationPipelineService.ClassifyInputKind(
+                        selectedMods);
+                    var request = new InstallationPipelineRequest(selectedMods)
+                    {
+                        Frontend = InstallationFrontend.GuiWidescreen,
+                        InputKind = inputKind,
+                        Mode = inputKind == InstallationInputKind.MarkdownGuide
+                            ? InstallationPipelineMode.Reference
+                            : InstallationPipelineMode.Standard,
+                        Phase = InstallationPhase.Widescreen,
+                        PreserveInputOrder = inputKind == InstallationInputKind.MarkdownGuide,
+                        RunValidation = true,
+                        ValidationOptions = validationOptions,
+                        CancellationToken = linkedCancellation.Token,
+                        InstallationProgress = (current, total, name) =>
+                        {
+                            _ = Dispatcher.UIThread.InvokeAsync(() =>
+                            {
+                                if (_statusText != null)
+                                {
+                                    _statusText.Text = $"Installing: {name} ({current + 1}/{total})";
+                                }
+
+                                if (_progressBar != null)
+                                {
+                                    _progressBar.Value = total == 0 ? 0 : (double)current / total;
+                                }
+                            });
+                        },
+                    };
+                    InstallationPipelineResult result = await InstallationPipelineService
+                        .RunAsync(request)
+                        .ConfigureAwait(false);
+                    if (!result.Succeeded)
                     {
                         await Dispatcher.UIThread.InvokeAsync(() =>
                         {
                             if (_statusText != null)
                             {
                                 _statusText.Text =
-                                    $"Widescreen install blocked for '{mod.Name}' ({exitCode}).";
+                                    $"Widescreen installation blocked ({result.ExitCode}). No later step was installed.";
                             }
                         });
                         return;
@@ -155,5 +183,3 @@ namespace ModSync.Dialogs.WizardPages
         }
     }
 }
-
-

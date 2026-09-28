@@ -96,6 +96,20 @@ namespace ModSync.Core
         private bool _isDownloaded;
         private bool _isValidating;
         private bool _widescreenOnly;
+        [NotNull] private string _sourceFormat = string.Empty;
+
+        /// <summary>
+        /// Runtime provenance for the representation that produced this component. This is deliberately
+        /// excluded from serialized build files: it describes the current ingest boundary, not mod metadata.
+        /// </summary>
+        [NotNull]
+        [JsonIgnore]
+        public string SourceFormat
+        {
+            get => _sourceFormat;
+            set => _sourceFormat = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        }
+
         public Guid Guid
         {
             get => _guid;
@@ -1648,6 +1662,21 @@ namespace ModSync.Core
                 case Instruction.ActionType.Choose:
                     instruction.SetRealPaths(sourceIsNotFilePath: true);
                     IReadOnlyList<Option> list = instruction.GetChosenOptions();
+                    if (list.Count == 0 && instruction.Source?.Count > 0)
+                    {
+                        // The Choose instruction has branches defined, but selection logic
+                        // (guide-driven namespace selection or manual user choice) landed on
+                        // none of them. This executes as a silent no-op that still reports
+                        // Success, so a component can be checkmarked "installed" despite zero
+                        // files ever being written. Surface it loudly without blocking: some
+                        // guide flows legitimately leave every branch ineligible.
+                        await Logger.LogWarningAsync(
+                            $"Choose instruction (index {instructionIndex}) for '{Name}' has "
+                            + $"{instruction.Source.Count} defined branch(es) but zero are selected;"
+                            + " this instruction will install nothing."
+                        ).ConfigureAwait(false);
+                    }
+
                     for (int i = 0; i < list.Count; i++)
                     {
                         Option thisOption = list[i];
@@ -1682,7 +1711,42 @@ namespace ModSync.Core
                             return true;
                         }
 
-                        string[] stopWords = new[] { "by", "for", "the", "and", "of", "mod", "pack", "k1", "k2", "hd", "kotor", "kotorn", "version", "recolored", "reskin", "retexture", "fix", "fixes" };
+                        string[] stopWords = new[] { "by", "for", "the", "and", "or", "of", "mod", "pack", "k1", "k2", "hd", "kotor", "kotorn", "version", "recolored", "reskin", "retexture", "fix", "fixes" };
+
+                        // Cleanlist rows commonly follow the installer .bat's original prompt
+                        // wording, "<mod description> by <author(s)>" (e.g. "HD War Droids by
+                        // Dark Hope"), where the description can diverge sharply from the
+                        // component's registered Name ("War Droid Mk 1 HD") while the author
+                        // matches the component's Author field exactly. Split the author
+                        // clause off before tokenizing so author words don't dilute the
+                        // name-token overlap below, and use the split author(s) as a second,
+                        // independent matching signal.
+                        (string, List<string>) SplitAuthorSuffix(string name)
+                        {
+                            var authors = new List<string>();
+                            int idx = name.LastIndexOf(" by ", StringComparison.OrdinalIgnoreCase);
+                            if (idx < 0)
+                            {
+                                return (name, authors);
+                            }
+
+                            string namePortion = name.Substring(0, idx).TrimEnd(' ', ':', '-');
+                            string authorPortion = name.Substring(idx + 4).Trim();
+                            string[] rawAuthors = authorPortion.Split(
+                                new[] { "/", "," },
+                                StringSplitOptions.RemoveEmptyEntries);
+                            foreach (string a in rawAuthors)
+                            {
+                                string trimmed = a.Trim();
+                                if (trimmed.Length > 0)
+                                {
+                                    authors.Add(trimmed);
+                                }
+                            }
+
+                            return (namePortion, authors);
+                        }
+
                         HashSet<string> Tokenize(string name, string[] stop)
                         {
                             string lower = name.ToLowerInvariant();
@@ -1720,13 +1784,21 @@ namespace ModSync.Core
                             }
                             return set;
                         }
-                        HashSet<string> target = Tokenize(modName, stopWords);
+                        (string namePart, List<string> authorCandidates) = SplitAuthorSuffix(modName);
+
+                        HashSet<string> target = Tokenize(namePart, stopWords);
+                        if (target.Count == 0)
+                        {
+                            target = Tokenize(modName, stopWords);
+                        }
+
                         if (target.Count == 0)
                         {
                             return false;
                         }
 
-                        // Exact or substring quick checks first
+                        // Exact or substring quick checks first (against both the raw
+                        // cleanlist name and the author-stripped description).
                         foreach (ModComponent component in componentsList)
                         {
                             if (component is null || !component.IsSelected)
@@ -1735,16 +1807,80 @@ namespace ModSync.Core
                             }
 
                             string compName = component.Name ?? string.Empty;
-                            if (string.Equals(compName, modName, StringComparison.OrdinalIgnoreCase))
+                            if (string.Equals(compName, modName, StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(compName, namePart, StringComparison.OrdinalIgnoreCase))
                             {
                                 return true;
                             }
 
-                            if (compName.IndexOf(modName, StringComparison.OrdinalIgnoreCase) >= 0 || modName.IndexOf(compName, StringComparison.OrdinalIgnoreCase) >= 0)
+                            if (compName.IndexOf(modName, StringComparison.OrdinalIgnoreCase) >= 0 || modName.IndexOf(compName, StringComparison.OrdinalIgnoreCase) >= 0
+                                || compName.IndexOf(namePart, StringComparison.OrdinalIgnoreCase) >= 0 || namePart.IndexOf(compName, StringComparison.OrdinalIgnoreCase) >= 0)
                             {
                                 return true;
                             }
                         }
+
+                        // Author-aware match: the cleanlist row's author clause matches the
+                        // component's registered Author field, and the descriptions still
+                        // share enough meaningful tokens. A prolific author (e.g. "Dark Hope"
+                        // supplies over a dozen K1 cleanlist rows) can have several different,
+                        // selected components, so a single incidental shared token (e.g. every
+                        // "HD ... Droids by Dark Hope" row sharing the word "droid") is not
+                        // enough on its own -- require either 2+ shared tokens, or that the
+                        // smaller description is fully contained in the larger one (handles
+                        // short single-token descriptions like "HD Astromechs" matching "HD
+                        // Astromech Droids").
+                        if (authorCandidates.Count > 0)
+                        {
+                            foreach (ModComponent component in componentsList)
+                            {
+                                if (component is null || !component.IsSelected)
+                                {
+                                    continue;
+                                }
+
+                                string compAuthor = component.Author ?? string.Empty;
+                                if (compAuthor.Length == 0)
+                                {
+                                    continue;
+                                }
+
+                                bool authorMatches = false;
+                                foreach (string candidate in authorCandidates)
+                                {
+                                    if (string.Equals(candidate, compAuthor, StringComparison.OrdinalIgnoreCase)
+                                        || compAuthor.IndexOf(candidate, StringComparison.OrdinalIgnoreCase) >= 0
+                                        || candidate.IndexOf(compAuthor, StringComparison.OrdinalIgnoreCase) >= 0)
+                                    {
+                                        authorMatches = true;
+                                        break;
+                                    }
+                                }
+
+                                if (!authorMatches)
+                                {
+                                    continue;
+                                }
+
+                                HashSet<string> compTokensForAuthorMatch = Tokenize(component.Name ?? string.Empty, stopWords);
+                                int authorMatchIntersect = 0;
+                                foreach (string t in target)
+                                {
+                                    if (compTokensForAuthorMatch.Contains(t))
+                                    {
+                                        authorMatchIntersect++;
+                                    }
+                                }
+
+                                int authorMatchMinSize = Math.Min(target.Count, compTokensForAuthorMatch.Count);
+                                if (authorMatchMinSize > 0
+                                    && (authorMatchIntersect >= 2 || authorMatchIntersect == authorMatchMinSize))
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+
                         // Token overlap heuristic
                         foreach (ModComponent component in componentsList)
                         {
@@ -1856,7 +1992,10 @@ namespace ModSync.Core
                         ).ConfigureAwait(false);
                         if (exitCode == Instruction.ActionExitCode.OptionalInstallFailed)
                         {
-                            return InstallExitCode.UserCancelledInstall;
+                            // A failed Choose/option path is a mod failure, not a user abort.
+                            // Mapping this to UserCancelledInstall made --best-effort / --continue-on-mod-failure
+                            // halt the whole batch (InstallationService refuses to continue past "cancel").
+                            return InstallExitCode.UnknownError;
                         }
 
                         if (exitCode == Instruction.ActionExitCode.FileNotFoundPre ||

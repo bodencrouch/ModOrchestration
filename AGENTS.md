@@ -441,3 +441,25 @@ ModSync is a cross-platform multi-mod installer for Star Wars: KOTOR, built with
 - Some xUnit-based UI tests may fail headlessly depending on Avalonia headless support; these are pre-existing.
 - The NuGet config (`NuGet.config`) uses **nuget.org only** (GitHub Packages feed removed in PR #65). Public packages restore without auth.
 - `vendor/KPatcher` contains the vendored patcher source. The build can proceed without it for most workflows, but it is used by optional PostBuild copy targets.
+
+## Learned User Preferences
+
+- On install or comparison failures, never skip or ignore errors; roll back to the pre-failure state, fix, then retry—otherwise a full reinstall is required for valid tests.
+- Manual installs must follow `mod-builds/content/k{1,2}/full.md` literally and completely; no shortcuts.
+- Drive automation from `content/k1/full.md` and `content/k2/full.md` only—never use `KOTOR1_Full.md` or pre-built `KOTOR*_Full.toml` as the guide source.
+- Do not redownload mod archives when they are already present.
+- Always verify patcher success from install logs after each step; on failure stop, roll back, and resolve before continuing.
+- Do not launch patchers or other GUIs on the default KDE Plasma desktop—use a headless or sandboxed non-interactive environment and true CLI/headless invocation.
+- For parallel HoloPatcher vs OdyPatcher runs, diff after each mod; on discrepancy roll back both lanes and fix OdyPatcher before continuing.
+- Missing-target delete instructions from full.md (files that may not exist) should not be treated as hard errors.
+
+## Learned Workspace Facts
+
+- Live hot install trees and extract scratch belong under `/home/brunner56/modsync-hot` (for example `K1_manual`, `K1_auto`, `k1extract`); `kotor_*_workdir` paths are often symlinks into that tree.
+- Canonical mod archives live at `/run/media/brunner56/MyBook/kotor_mod_archives`; vanilla refs at `/run/media/brunner56/MyBook/kotor_vanilla_refs`.
+- Bundled patchers are `vendor/bin/HoloPatcher_linux` and `vendor/bin/odypatcher`.
+- The completed K1_manual reference used ModSync’s `HoloPatcher_linux` with each mod’s tslpatchdata—not OdyPatcher and not each mod’s `Installer.exe`.
+- Keep large extracts off the USB archive store—use `modsync-hot` (or `/tmp` for tiny mods); never extract Ultimate HR packs into `kotor_mod_archives`.
+- Prefer fail-closed ModSync CLI installs from full.md; do not pass `--best-effort` for parity runs.
+- One-shot K1 parity from full.md only is specified in `docs/knowledgebase/k1-oneshot-parity-spec.md`.
+- Parallel Holo/Ody parity judgment should compare file/resource content, not patch counts; packing-only ERF/TLK byte diffs can be acceptable when content matches.

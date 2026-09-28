@@ -184,10 +184,24 @@ namespace ModSync.Core.Parsing
             List<string> sanitizedSources = instruction.Source
                 .Where(source => !string.IsNullOrWhiteSpace(source))
                 .Select(NormalizePlaceholders)
+                .Select(SandboxBareFilenameSource)
                 .Where(IsSandboxedPath)
                 .ToList();
 
             string destination = NormalizePlaceholders(instruction.Destination);
+
+            // Copy-as / rename targets are bare filenames in guide prose ("rename it PMBJ01.tga").
+            // Sandbox rules require a placeholder root; park the new name under modDirectory so the
+            // draft survives review and merge with Extract (rename runs in the extract folder before Move).
+            if (!string.IsNullOrEmpty(destination)
+                && !IsSandboxedPath(destination)
+                && (instruction.Action == Instruction.ActionType.Rename
+                    || instruction.Action == Instruction.ActionType.Copy)
+                && IsBareFilenameDestination(destination))
+            {
+                destination = ModDirectoryPlaceholder + @"\" + destination.Trim().Trim('"', '\'');
+            }
+
             if (!string.IsNullOrEmpty(destination) && !IsSandboxedPath(destination))
             {
                 return false;
@@ -271,8 +285,51 @@ namespace ModSync.Core.Parsing
 
         private static bool RequiresDestination(Instruction.ActionType action)
         {
-            return action == Instruction.ActionType.Move
-                || action == Instruction.ActionType.Copy;
+            // Move always needs a destination folder. Copy-as halves from guide prose
+            // ("copy the file 'X' and make a duplicate") legitimately have no Destination
+            // until a following "rename this duplicate to Y" clause is coalesced.
+            return action == Instruction.ActionType.Move;
+        }
+
+        private static bool IsBareFilenameDestination([NotNull] string destination)
+        {
+            string dest = destination.Trim().Trim('"', '\'');
+            return dest.IndexOf("<<", StringComparison.Ordinal) < 0
+                && Path.HasExtension(dest)
+                && dest.IndexOf('\\') < 0
+                && dest.IndexOf('/') < 0
+                && dest.IndexOf("..", StringComparison.Ordinal) < 0;
+        }
+
+        /// <summary>
+        /// Guide copy-as sources are often bare stems ("LDA_EHawk01") without a placeholder.
+        /// Prefix them so sandbox filtering does not drop the draft before coalesce.
+        /// </summary>
+        [NotNull]
+        private static string SandboxBareFilenameSource([NotNull] string source)
+        {
+            if (IsSandboxedPath(source))
+            {
+                return source;
+            }
+
+            string leaf = source.Trim().Trim('"', '\'');
+            if (leaf.IndexOf("<<", StringComparison.Ordinal) >= 0
+                || leaf.IndexOf('\\') >= 0
+                || leaf.IndexOf('/') >= 0
+                || leaf.IndexOf("..", StringComparison.Ordinal) >= 0
+                || leaf.IndexOf(' ') >= 0)
+            {
+                return source;
+            }
+
+            // Accept stems with or without an extension (Ebon Hawk quotes LDA_EHawk01 without .tga).
+            if (leaf.Length >= 3 && leaf.All(c => char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == '.'))
+            {
+                return ModDirectoryPlaceholder + @"\" + leaf;
+            }
+
+            return source;
         }
 
         [NotNull]

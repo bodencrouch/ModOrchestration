@@ -370,6 +370,8 @@ FodyWeavers.xsd
 # Custom
 *.toml
 *.tml
+# Shipped app config, not a mod-build guide/instruction file (D1a is about those, not this).
+!src/ModSync.Core/Config/guide-interpretation.defaults.toml
 logs_and_data_saved_from_dotnet_clean/*
 bin/*
 dist/*
@@ -442,3 +444,6 @@ clutter/
 .cursor/hooks/state/
 kotor_auto_workdir/
 .autoclaw/
+kotor_manual_workdir/
+modbuild_oracles/
+.worktrees/

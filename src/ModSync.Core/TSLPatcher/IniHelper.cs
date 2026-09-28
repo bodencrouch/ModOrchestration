@@ -44,6 +44,103 @@ namespace ModSync.Core.TSLPatcher
             }
         }
 
+        /// <summary>
+        /// Holo 1.5.1 KeyErrors when a 2DA <c>ChangeRow</c>/<c>AddRow</c>/<c>Replace</c>
+        /// names a section the ini never defines. Windows TSLPatcher skips those rows.
+        /// JC's Blaster Adjustment <c>pistol_rifle.ini</c> ships this leftover
+        /// (<c>ChangeRow12=repeating_blaster</c> with no <c>[repeating_blaster]</c>).
+        /// </summary>
+        public static int DropDangling2daRowReferences([NotNull] DirectoryInfo directory)
+        {
+            if (directory is null)
+            {
+                throw new ArgumentNullException(nameof(directory));
+            }
+
+            if (!directory.Exists)
+            {
+                return 0;
+            }
+
+            var rowKey = new Regex(
+                @"^(ChangeRow|AddRow|Replace)\d+$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            int dropped = 0;
+            FileInfo[] iniFiles;
+            try
+            {
+                iniFiles = directory.GetFilesSafely(searchPattern: "*.ini", SearchOption.AllDirectories);
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
+
+            foreach (FileInfo file in iniFiles)
+            {
+                if (file.Name.Equals("namespaces.ini", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string[] lines = File.ReadAllLines(file.FullName);
+                var sections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string raw in lines)
+                {
+                    string trimmed = raw.Trim();
+                    if (trimmed.StartsWith("[", StringComparison.Ordinal)
+                        && trimmed.EndsWith("]", StringComparison.Ordinal)
+                        && trimmed.Length >= 2)
+                    {
+                        _ = sections.Add(trimmed.Substring(1, trimmed.Length - 2));
+                    }
+                }
+
+                bool changed = false;
+                string section = string.Empty;
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string trimmed = lines[i].Trim();
+                    if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
+                    {
+                        section = trimmed.Substring(1, trimmed.Length - 2);
+                        continue;
+                    }
+
+                    if (!section.EndsWith(".2da", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    int eq = trimmed.IndexOf('=');
+                    if (eq <= 0)
+                    {
+                        continue;
+                    }
+
+                    string key = trimmed.Substring(0, eq).Trim();
+                    string value = trimmed.Substring(eq + 1).Trim();
+                    if (!rowKey.IsMatch(key) || string.IsNullOrEmpty(value) || sections.Contains(value))
+                    {
+                        continue;
+                    }
+
+                    lines[i] = ";" + lines[i];
+                    dropped++;
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    File.WriteAllLines(file.FullName, lines);
+                    Logger.LogVerbose($"[Patcher] Commented dangling 2DA row references in '{file.Name}'.");
+                }
+            }
+
+            return dropped;
+        }
+
         public static Dictionary<string, Dictionary<string, string>> ReadNamespacesIniFromArchive(
             [NotNull] string archivePath
         )

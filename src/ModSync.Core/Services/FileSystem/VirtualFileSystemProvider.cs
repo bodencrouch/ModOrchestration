@@ -929,8 +929,14 @@ namespace ModSync.Core.Services.FileSystem
                 }
             }
 
-            string extractRootDirectory = Path.GetFullPath(Path.Combine(destinationPath, Path.GetFileNameWithoutExtension(archivePath)))
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            // Must match RealFileSystemProvider exactly. Unconditionally appending the archive-name
+            // subfolder here put the virtual entries one directory deeper than the real install
+            // writes them, so a later Move reading the scratch tree found nothing and validation
+            // reported a missing source for an archive that was present on disk.
+            string extractRootDirectory = ArchiveExtractLayout.ResolveExtractRoot(
+                archivePath,
+                destinationPath,
+                createDirectories: false);
 
             lock (_lockObject)
             {

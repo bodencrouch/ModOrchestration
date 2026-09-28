@@ -57,6 +57,9 @@ namespace ModSync.Core.Installation
         public Guid ComponentId { get; set; }
 
         [JsonProperty]
+        public string ComponentName { get; set; }
+
+        [JsonProperty]
         public ModComponent.ComponentInstallState State { get; set; } = ModComponent.ComponentInstallState.Pending;
 
         [JsonProperty]

@@ -5,6 +5,9 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-[assembly: NUnit.Framework.Timeout(120_000)]
+// Do not apply NUnit's obsolete TimeoutAttribute assembly-wide. It aborts the test thread at
+// 120 seconds, including correctly named LongRunning tests, and can leave MainConfig/static parser
+// state half-mutated for the next test. Bounded tests use CancelAfter; agent/CI runners enforce a
+// process timeout when classifying long-running tests.
 
 [assembly: SuppressMessage("Usage", "MA0004:Use Task.ConfigureAwait(false)", Justification = "<Pending>", Scope = "member", Target = "~M:ModSync.Tests.VirtualFileSystemWildcardTests.RunBothProviders(System.Collections.Generic.List{ModSync.Core.Instruction},System.String,System.String)~System.Threading.Tasks.Task{System.ValueTuple{ModSync.Core.Services.FileSystem.VirtualFileSystemProvider,ModSync.Core.Services.FileSystem.RealFileSystemProvider}}")]

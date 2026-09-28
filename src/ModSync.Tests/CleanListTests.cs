@@ -184,5 +184,112 @@ namespace ModSync.Tests
                 };
             }
         }
+
+        // Regression test for the "payloadMode" bug: when CleanList's target directory is
+        // the extracted payload (not Override itself), the old implementation bypassed
+        // isModSelectedFunc and instead asked "does Override already contain a same-named
+        // file?" as a proxy for "was the competing mod selected?". That proxy is unsound in
+        // both directions:
+        //   1. A SELECTED competing mod's file can be missing from Override for reasons that
+        //      have nothing to do with selection (e.g. a dedup step already removed it) -- the
+        //      old proxy would then wrongly KEEP the payload duplicate instead of deleting it.
+        //   2. Override can already contain a same-named file for a mod that was NOT selected
+        //      (leftover/unrelated content) -- the old proxy would then wrongly DELETE the
+        //      payload file even though nothing selected replaced it.
+        // The fix always asks isModSelectedFunc, so both directions must resolve correctly
+        // regardless of the unrelated Override filesystem state.
+        [Test]
+        public async Task Test_CleanList_PayloadMode_UsesModSelection_NotOverrideFileExistence()
+        {
+            string extractedPayloadDir = Path.Combine(_workDir, "C_DrdWar");
+            string overrideDir = Path.Combine(_workDir, "Override");
+            Directory.CreateDirectory(extractedPayloadDir);
+            Directory.CreateDirectory(overrideDir);
+
+            // Selected mod's duplicate lives only in the extracted payload dir -- Override
+            // does NOT have it (as if a dedup step already removed the Override copy).
+            await NetFrameworkCompatibility.WriteAllTextAsync(Path.Combine(extractedPayloadDir, "C_DrdWar01.tga"), "dummy");
+
+            // Unselected mod's duplicate also lives in the extracted payload dir, but Override
+            // happens to already contain a same-named file for unrelated reasons.
+            await NetFrameworkCompatibility.WriteAllTextAsync(Path.Combine(extractedPayloadDir, "N_Other01.tga"), "dummy");
+            await NetFrameworkCompatibility.WriteAllTextAsync(Path.Combine(overrideDir, "N_Other01.tga"), "dummy");
+
+            string csv = string.Join(Environment.NewLine, new[]
+            {
+                "HD War Droids by Dark Hope,C_DrdWar01.tga",
+                "Some Other Reskin by Someone Else,N_Other01.tga",
+            });
+            string cleanlistPath = Path.Combine(_workDir, "cleanlist_k1.txt");
+            await NetFrameworkCompatibility.WriteAllTextAsync(cleanlistPath, csv);
+
+            DirectoryInfo originalSourcePath = MainConfig.SourcePath;
+            DirectoryInfo originalDestPath = MainConfig.DestinationPath;
+            _ = new MainConfig
+            {
+                sourcePath = new DirectoryInfo(_workDir),
+                destinationPath = new DirectoryInfo(_workDir),
+            };
+
+            try
+            {
+                var cleanList = new Instruction
+                {
+                    Action = Instruction.ActionType.CleanList,
+                    Source = new List<string> { cleanlistPath },
+                    Destination = extractedPayloadDir,
+                };
+
+                // Component name deliberately differs in wording/order from the cleanlist's
+                // free-text description ("War Droid Mk 1 HD" vs. "HD War Droids"), but the
+                // Author matches -- this is the real-world case that under-matched before the
+                // fix. "Some Other Reskin by Someone Else" has no matching selected component,
+                // so it must be treated as not-selected.
+                var selectedComponents = new List<ModComponent>
+                {
+                    new ModComponent { Name = "War Droid Mk 1 HD", Author = "Dark Hope", IsSelected = true },
+                };
+
+                var vfs = new VirtualFileSystemProvider();
+                await vfs.InitializeFromRealFileSystemAsync(_workDir);
+
+                var component = new ModComponent
+                {
+                    Name = "Cleanup",
+                    Instructions = new System.Collections.ObjectModel.ObservableCollection<Instruction>(new[] { cleanList }),
+                };
+                cleanList.SetParentComponent(component);
+                cleanList.SetFileSystemProvider(vfs);
+
+                Instruction.ActionExitCode code = await component.ExecuteSingleInstructionAsync(
+                    cleanList,
+                    instructionIndex: 1,
+                    componentsList: selectedComponents,
+                    fileSystemProvider: vfs,
+                    skipDependencyCheck: true,
+                    cancellationToken: CancellationToken.None
+                );
+
+                Assert.That(code, Is.EqualTo(Instruction.ActionExitCode.Success), "CleanList instruction should execute successfully");
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(
+                        vfs.FileExists(Path.Combine(extractedPayloadDir, "C_DrdWar01.tga")), Is.False,
+                        "Selected mod's duplicate should be deleted even though Override doesn't already have it");
+                    Assert.That(
+                        vfs.FileExists(Path.Combine(extractedPayloadDir, "N_Other01.tga")), Is.True,
+                        "Unselected mod's duplicate should be kept even though Override happens to already have a same-named file");
+                });
+            }
+            finally
+            {
+                _ = new MainConfig
+                {
+                    sourcePath = originalSourcePath,
+                    destinationPath = originalDestPath,
+                };
+            }
+        }
     }
 }

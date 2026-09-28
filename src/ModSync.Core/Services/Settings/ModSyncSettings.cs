@@ -32,6 +32,14 @@ namespace ModSync.Core.Services.Settings
         [CanBeNull]
         public string ActiveProfileName { get; set; }
 
+        /// <summary>
+        /// Optional path to a user guide-interpretation overlay. When empty, ModSync
+        /// reads <c>guide-interpretation.toml</c> beside <c>settings.json</c>.
+        /// </summary>
+        [JsonPropertyName("guideInterpretationPath")]
+        [CanBeNull]
+        public string GuideInterpretationPath { get; set; }
+
         [NotNull]
         public static string GetSettingsDirectory()
         {

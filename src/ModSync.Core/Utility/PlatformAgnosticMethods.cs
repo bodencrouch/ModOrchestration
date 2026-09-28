@@ -363,7 +363,8 @@ namespace ModSync.Core.Utility
             bool askAdmin = false,
             bool? useShellExecute = null,
             bool hideProcess = true,
-            bool noLogging = false
+            bool noLogging = false,
+            string logLinePrefix = null
         )
         {
             if (programFile is null)
@@ -458,7 +459,7 @@ namespace ModSync.Core.Utility
                                     _ = output.AppendLine(e.Data);
                                     if (!noLogging)
                                     {
-                                        _ = Logger.LogAsync(e.Data);
+                                        _ = Logger.LogAsync(PrefixProcessLogLine(logLinePrefix, e.Data));
                                     }
                                 }
                                 catch (Exception exception)
@@ -485,7 +486,7 @@ namespace ModSync.Core.Utility
                                     }
 
                                     _ = error.AppendLine(e.Data);
-                                    _ = Logger.LogErrorAsync(e.Data);
+                                    _ = Logger.LogErrorAsync(PrefixProcessLogLine(logLinePrefix, e.Data));
                                 }
                                 catch (Exception exception)
                                 {
@@ -584,6 +585,13 @@ namespace ModSync.Core.Utility
             await Logger.LogAsync("Process failed to start with all possible combinations of arguments.").ConfigureAwait(false);
             await Logger.LogExceptionAsync(ex ?? new InvalidOperationException()).ConfigureAwait(false);
             return (-1, string.Empty, string.Empty);
+        }
+
+        [NotNull]
+        private static string PrefixProcessLogLine([CanBeNull] string prefix, [CanBeNull] string line)
+        {
+            string text = line ?? string.Empty;
+            return string.IsNullOrEmpty(prefix) ? text : prefix + text;
         }
 
         private static partial class Interop

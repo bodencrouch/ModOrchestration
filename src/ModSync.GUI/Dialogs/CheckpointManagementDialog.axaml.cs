@@ -264,8 +264,6 @@ namespace ModSync.Dialogs
                     });
                 });
 
-                var coordinatorService = new InstallationCoordinatorService();
-
                 await Task.Run(async () =>
                 {
                     using (var cts = new CancellationTokenSource())

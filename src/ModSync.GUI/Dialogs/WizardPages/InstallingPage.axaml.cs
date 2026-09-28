@@ -15,6 +15,8 @@ using Avalonia.Threading;
 using JetBrains.Annotations;
 using ModSync.Core;
 using ModSync.Core.Services;
+using ModSync.Core.Services.Installation;
+using ModSync.Core.Services.Validation;
 using ModSync.Core.Utility;
 
 namespace ModSync.Dialogs.WizardPages
@@ -27,6 +29,7 @@ namespace ModSync.Dialogs.WizardPages
         public override bool CanNavigateForward => _canNavigateForward;
 
         private readonly List<ModComponent> _allComponents;
+        private readonly MainConfig _mainConfig;
 
         private ProgressBar _mainProgressBar;
         private ProgressBar _currentModProgress;
@@ -67,6 +70,7 @@ namespace ModSync.Dialogs.WizardPages
             {
                 throw new ArgumentNullException(nameof(mainConfig));
             }
+            _mainConfig = mainConfig;
 
             if (cancellationTokenSource is null)
             {
@@ -286,12 +290,53 @@ namespace ModSync.Dialogs.WizardPages
                         }
                     });
 
-                    // Use the unified installation service with checkpoint support
-                    ModComponent.InstallExitCode exitCode = await InstallationService.InstallAllSelectedComponentsAsync(
-                        _allComponents,
-                        ProgressCallback,
-                        cancellationToken
-                    );
+                    var validationOptions = ValidationPipelineOptions.WizardFull;
+                    validationOptions.MainConfig = _mainConfig;
+                    InstallationInputKind inputKind = InstallationPipelineService.ClassifyInputKind(
+                        _allComponents);
+                    var pipelineRequest = new InstallationPipelineRequest(_allComponents)
+                    {
+                        Frontend = InstallationFrontend.GuiWizard,
+                        InputKind = inputKind,
+                        Mode = inputKind == InstallationInputKind.MarkdownGuide
+                            ? InstallationPipelineMode.Reference
+                            : InstallationPipelineMode.Standard,
+                        Phase = InstallationPhase.Base,
+                        RunValidation = true,
+                        PreserveInputOrder = inputKind == InstallationInputKind.MarkdownGuide,
+                        ValidationOptions = validationOptions,
+                        InstallationProgress = ProgressCallback,
+                        CancellationToken = cancellationToken,
+                    };
+                    InstallationPipelineResult pipelineResult = await InstallationPipelineService
+                        .RunAsync(pipelineRequest)
+                        .ConfigureAwait(false);
+                    ModComponent.InstallExitCode exitCode = pipelineResult.ExitCode;
+
+                    if (!pipelineResult.Succeeded)
+                    {
+                        await Logger.LogErrorAsync(
+                            $"Installation blocked with exit code: {UtilityHelper.GetEnumDescription(exitCode)}. "
+                            + $"Plan fingerprint: {pipelineResult.Plan.Fingerprint}");
+                        await UpdateUIAsync(() =>
+                        {
+                            if (_currentModText != null)
+                            {
+                                _currentModText.Text = "Installation blocked. Fix the reported issue and retry.";
+                            }
+
+                            if (_currentOperationText != null)
+                            {
+                                _currentOperationText.Text = "Blocked";
+                            }
+
+                            if (_checkpointStatusText != null)
+                            {
+                                _checkpointStatusText.Text = "No later guide steps were installed";
+                            }
+                        });
+                        return;
+                    }
 
                     _installedCount = selectedMods.Count;
                     _installationComplete = true;
@@ -338,11 +383,6 @@ namespace ModSync.Dialogs.WizardPages
                     });
 
                     _canNavigateForward = true;
-
-                    if (exitCode != ModComponent.InstallExitCode.Success)
-                    {
-                        await Logger.LogErrorAsync($"Installation completed with exit code: {UtilityHelper.GetEnumDescription(exitCode)}");
-                    }
                 }
                 finally
                 {
@@ -478,5 +518,3 @@ namespace ModSync.Dialogs.WizardPages
         }
     }
 }
-
-

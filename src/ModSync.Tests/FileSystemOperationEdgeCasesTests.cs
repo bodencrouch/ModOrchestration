@@ -47,6 +47,7 @@ namespace ModSync.Tests
         [TearDown]
         public void TearDown()
         {
+            MainConfig.ExtractScratchPath = null;
             try
             {
                 if (Directory.Exists(_testDirectory))
@@ -499,6 +500,81 @@ namespace ModSync.Tests
 
             // Behavior may vary - could succeed or fail depending on implementation
             Assert.That(exitCode, Is.Not.EqualTo(Instruction.ActionExitCode.UnknownError), "Extract should handle existing files");
+        }
+
+        [Test]
+        public void EnsureExtractScratch_UsbArchiveStore_UsesHomeNvmeK1AutoExtract()
+        {
+            if (!Directory.Exists("/home/brunner56/modsync-hot"))
+            {
+                Assert.Ignore("modsync-hot NVMe scratch parent is not present on this machine");
+            }
+
+            _config.sourcePath = new DirectoryInfo("/run/media/brunner56/MyBook/kotor_mod_archives");
+            _config.destinationPath = new DirectoryInfo("/home/brunner56/modsync-hot/K1_auto");
+            MainConfig.EnsureExtractScratchAwayFromSource();
+
+            Assert.That(
+                MainConfig.ExtractScratchPath?.FullName,
+                Is.EqualTo("/home/brunner56/modsync-hot/k1_auto_extract"),
+                "USB archive extracts must land on the home NVMe, not beside the archive"
+            );
+        }
+
+        [Test]
+        public void EnsureExtractScratch_K1Ody_UsesDedicatedScratchNotHoloExtract()
+        {
+            if (!Directory.Exists("/home/brunner56/modsync-hot"))
+            {
+                Assert.Ignore("modsync-hot NVMe scratch parent is not present on this machine");
+            }
+
+            _config.sourcePath = new DirectoryInfo("/run/media/brunner56/MyBook/kotor_mod_archives");
+            _config.destinationPath = new DirectoryInfo("/home/brunner56/modsync-hot/K1_ody");
+            MainConfig.EnsureExtractScratchAwayFromSource();
+
+            Assert.That(
+                MainConfig.ExtractScratchPath?.FullName,
+                Is.EqualTo("/home/brunner56/modsync-hot/k1_ody_extract"),
+                "K1 Ody must not share k1_auto_extract with the live Holo writer"
+            );
+        }
+
+        [Test]
+        public async Task ExtractFile_WhenScratchSet_DoesNotWriteBesideArchive()
+        {
+            var archivePath = Path.Combine(_modDirectory, "Ultimate Dantooine High Resolution.rar.zip");
+            CreateMinimalZip(archivePath, new Dictionary<string, string>
+(StringComparer.Ordinal)
+            {
+                { "Dantooine HR/Override/LDA_flr06.tpc", "tpc" }
+            });
+
+            var scratch = Path.Combine(_testDirectory, "k1_auto_extract");
+            Directory.CreateDirectory(scratch);
+            MainConfig.ExtractScratchPath = new DirectoryInfo(scratch);
+
+            var instruction = new Instruction
+            {
+                Action = Instruction.ActionType.Extract,
+                Source = new List<string> { "<<modDirectory>>/Ultimate Dantooine High Resolution.rar.zip" },
+                Overwrite = true
+            };
+
+            instruction.SetFileSystemProvider(new RealFileSystemProvider());
+            instruction.SetRealPaths();
+
+            var exitCode = await instruction.ExtractFileAsync().ConfigureAwait(false);
+
+            string usbExtract = Path.Combine(_modDirectory, "Ultimate Dantooine High Resolution.rar", "Dantooine HR", "Override", "LDA_flr06.tpc");
+            string scratchExtract = Path.Combine(scratch, "Ultimate Dantooine High Resolution.rar", "Dantooine HR", "Override", "LDA_flr06.tpc");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(Instruction.ActionExitCode.Success), "Extract should succeed");
+                Assert.That(File.Exists(usbExtract), Is.False, "Must not unpack Ultimate HR back into the archive store");
+                Assert.That(File.Exists(scratchExtract), Is.True, "Extracted TPC must land in the NVMe scratch tree");
+            });
         }
 
         #endregion

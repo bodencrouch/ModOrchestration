@@ -30,17 +30,24 @@ namespace ModSync.Core.Services.FileSystem
 
         public Task CopyFileAsync(string sourcePath, string destinationPath, bool overwrite)
         {
-            string directoryName = Path.GetDirectoryName(destinationPath);
-            if (directoryName != null && !Directory.Exists(directoryName))
-            {
-                Directory.CreateDirectory(directoryName);
-            }
-
+            PrepareFileDestination(destinationPath, overwrite);
             File.Copy(sourcePath, destinationPath, overwrite);
             return Task.CompletedTask;
         }
 
         public Task MoveFileAsync(string sourcePath, string destinationPath, bool overwrite)
+        {
+            PrepareFileDestination(destinationPath, overwrite);
+            File.Move(sourcePath, destinationPath);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Validation AttemptFixes historically created file-named destinations as empty
+        /// directories (Override\N_CommM08.tga/). File.Move then throws "already exists"
+        /// even with overwrite, because the dest is a folder not a file.
+        /// </summary>
+        private static void PrepareFileDestination(string destinationPath, bool overwrite)
         {
             string directoryName = Path.GetDirectoryName(destinationPath);
             if (directoryName != null && !Directory.Exists(directoryName))
@@ -48,13 +55,19 @@ namespace ModSync.Core.Services.FileSystem
                 Directory.CreateDirectory(directoryName);
             }
 
-            if (File.Exists(destinationPath) && overwrite)
+            if (Directory.Exists(destinationPath))
+            {
+                if (!overwrite)
+                {
+                    throw new IOException($"The directory '{destinationPath}' already exists.");
+                }
+
+                Directory.Delete(destinationPath, recursive: false);
+            }
+            else if (File.Exists(destinationPath) && overwrite)
             {
                 File.Delete(destinationPath);
             }
-
-            File.Move(sourcePath, destinationPath);
-            return Task.CompletedTask;
         }
 
         public Task DeleteFileAsync(string path)
@@ -150,14 +163,6 @@ namespace ModSync.Core.Services.FileSystem
 
                     await Logger.LogAsync($"Extracting archive '{sourcePath}'...").ConfigureAwait(false);
 
-                    // Determine if destination was explicitly provided (different from archive's directory)
-                    // When explicitly provided, extract directly to destination without archive name subfolder
-                    // When using default (archive directory), add archive name subfolder to avoid conflicts
-                    string archiveDirectory = Path.GetDirectoryName(archive.FullName) ?? string.Empty;
-                    string normalizedDestPath = Path.GetFullPath(destPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    string normalizedArchiveDir = Path.GetFullPath(archiveDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    bool isExplicitDestination = !string.Equals(normalizedDestPath, normalizedArchiveDir, StringComparison.OrdinalIgnoreCase);
-
                     if (archive.Extension.Equals(value: ".exe", StringComparison.OrdinalIgnoreCase))
                     {
                         if (ArchiveHelper.TryExtractSevenZipSfx(archive.FullName, destPath, extracted))
@@ -196,10 +201,12 @@ namespace ModSync.Core.Services.FileSystem
                         throw new InvalidOperationException($"'{sourceRelDirPath}' is not a valid 7z self-extracting executable. Cannot extract.");
                     }
 
-                    string extractRootDirectory = isExplicitDestination
-                        ? Path.GetFullPath(destPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                        : Path.GetFullPath(Path.Combine(destPath, Path.GetFileNameWithoutExtension(archive.Name)))
-                            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    // Shared with VirtualFileSystemProvider so validation predicts exactly where the
+                    // real extraction writes; see ArchiveExtractLayout.
+                    string extractRootDirectory = ArchiveExtractLayout.ResolveExtractRoot(
+                        archive.FullName,
+                        destPath,
+                        createDirectories: true);
 
                     using (FileStream stream = File.OpenRead(archive.FullName))
                     {
@@ -244,28 +251,84 @@ namespace ModSync.Core.Services.FileSystem
                                     IArchiveEntry localEntry = entry;
                                     await Task.Run(() =>
                                     {
-                                        using (Stream sourceStream = localEntry.OpenEntryStream())
-                                        using (FileStream destinationStream = new FileStream(destinationItemPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                                        // Must not open destinationItemPath directly with FileMode.Create: if it
+                                        // already exists and happens to be hardlinked elsewhere (e.g. a checkpoint
+                                        // snapshot or another install tree sharing the inode), truncating it in
+                                        // place zeroes every hardlinked copy simultaneously. Same hazard class
+                                        // already fixed in GitCheckpointService.CopyFileOverwriteWithRetry ("K1
+                                        // appearance.2da at [18]") -- write to a fresh temp file first, then
+                                        // atomically replace the destination so an existing hardlink is unlinked,
+                                        // never truncated.
+                                        string tempPath = destinationItemPath + ".modsync-extracttmp";
+                                        try
                                         {
-                                            sourceStream.CopyTo(destinationStream);
-                                        }
+                                            using (Stream sourceStream = localEntry.OpenEntryStream())
+                                            using (FileStream destinationStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                                            {
+                                                sourceStream.CopyTo(destinationStream);
+                                            }
 
-                                        DateTime? lastModifiedTime = localEntry.LastModifiedTime;
-                                        if (lastModifiedTime.HasValue && lastModifiedTime.Value != default(DateTime))
+                                            DateTime? lastModifiedTime = localEntry.LastModifiedTime;
+                                            if (lastModifiedTime.HasValue && lastModifiedTime.Value != default(DateTime))
+                                            {
+                                                File.SetLastWriteTime(tempPath, lastModifiedTime.Value);
+                                            }
+
+                                            if (Directory.Exists(destinationItemPath))
+                                            {
+                                                // Matches the previous direct-write behavior: a directory sitting
+                                                // where a file must be written is a write failure, not something
+                                                // to silently skip.
+                                                throw new UnauthorizedAccessException(
+                                                    $"A directory already exists at '{destinationItemPath}'.");
+                                            }
+
+                                            if (File.Exists(destinationItemPath))
+                                            {
+                                                File.Delete(destinationItemPath);
+                                            }
+
+                                            File.Move(tempPath, destinationItemPath);
+                                        }
+                                        catch
                                         {
-                                            File.SetLastWriteTime(destinationItemPath, lastModifiedTime.Value);
+                                            if (File.Exists(tempPath))
+                                            {
+                                                File.Delete(tempPath);
+                                            }
+
+                                            throw;
                                         }
                                     }, token).ConfigureAwait(false);
 
                                     extracted.Add(destinationItemPath);
                                 }
-                                catch (ObjectDisposedException)
+                                catch (ObjectDisposedException ex)
                                 {
-                                    return;
+                                    // A bare `return` here abandoned the whole REMAINING archive and still reported
+                                    // success: the caller received a partial `extractedFiles` list with no warning and
+                                    // no exception. Because the destination directory is created before the write, the
+                                    // observable result was a directory tree containing zero files -- the "empty
+                                    // extracted folders" in the mod library are exactly this, frozen at the first
+                                    // entry. A mod that silently extracts nothing installs nothing while every step
+                                    // reports OK, which is the worst possible failure mode for an installer.
+                                    await Logger.LogErrorAsync(
+                                        $"Extraction of '{sourcePath}' was aborted at entry '{entry.Key}': the archive stream was disposed mid-extraction. "
+                                        + $"{extracted.Count} file(s) had been written; the rest of the archive was NOT extracted."
+                                    ).ConfigureAwait(false);
+                                    throw new IOException(
+                                        $"Archive '{sourcePath}' was only partially extracted (aborted at '{entry.Key}').", ex);
                                 }
-                                catch (UnauthorizedAccessException)
+                                catch (UnauthorizedAccessException ex)
                                 {
-                                    await Logger.LogWarningAsync($"Skipping file '{entry.Key}' due to lack of permissions.").ConfigureAwait(false);
+                                    // Skipping a file and continuing is also a silent partial extraction: the caller
+                                    // cannot distinguish "extracted everything" from "extracted everything except the
+                                    // files it could not write". Fail loudly instead and let the caller decide.
+                                    await Logger.LogErrorAsync(
+                                        $"Extraction of '{sourcePath}' failed at entry '{entry.Key}': permission denied writing '{destinationItemPath}'."
+                                    ).ConfigureAwait(false);
+                                    throw new IOException(
+                                        $"Archive '{sourcePath}' could not be fully extracted: permission denied for '{entry.Key}'.", ex);
                                 }
                             }
                         }

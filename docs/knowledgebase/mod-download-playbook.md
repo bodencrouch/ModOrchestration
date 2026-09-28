@@ -2023,3 +2023,11 @@ concern the MAC exists to catch.
   all four fetched cleanly with the standard cookie-authenticated curl recipe and passed
   `unzip -t`. Contents are loose `.tga`/`.tpc` lightmaps plus `.mdl`/`.mdx`/`.wok` — a
   Loose-File Mod with no installer, 53 files total across the four archives.
+
+- **2026-08-21 (read-only triage, DeadlyStream file 2075 "Robes With Shadows For TSL"):** the file page's
+  sidebar **`File Size` field matches the attachment's byte count** (page said `2.53 MB`; the archive
+  `Ultimate_Robes_Repair_For_TSL_v1.3.7z` is 2,652,648 B) — use it as a pre-download expected-size check,
+  and as a cheap single-vs-multi-attachment signal (one size shown + a plain `?do=download&csrfKey=`
+  anchor with no `data-ipsDialog` attribute = single file; the multi-variant modal case has the dialog attr).
+  Also re-confirmed: guest `curl` GET of a DeadlyStream *file page* needs no cookies, no session and hits
+  no Cloudflare challenge — only the `?do=download` hop needs the session cookie.
