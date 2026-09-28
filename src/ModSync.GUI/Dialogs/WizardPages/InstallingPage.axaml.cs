@@ -63,7 +63,8 @@ namespace ModSync.Dialogs.WizardPages
         private CancellationToken _pageCancellationToken;
 
         /// <summary>
-        /// Optional install runner for tests. Defaults to <see cref="InstallationService.InstallAllSelectedComponentsAsync"/>.
+        /// Optional install runner for tests. When null (production), the page runs the shared
+        /// <see cref="InstallationPipelineService"/> so validation and witness policy apply.
         /// </summary>
         [CanBeNull]
         internal Func<
