@@ -72,7 +72,7 @@ jobs:
     - name: Execute unit tests
       run: |
         $date = Get-Date -Format yyyy-MM-dd
-        dotnet test "$env:Test_Project_Path" --filter "FullyQualifiedName!~LongRunning" --logger "trx;LogFileName=test_results_$date.xml" --results-directory TestResults
+        dotnet test "$env:Test_Project_Path" --filter "FullyQualifiedName!~LongRunning" --logger "trx;LogFileName=test_results_$date.xml" --results-directory TestResults -- NUnit.UseNUnitFilter=false
       continue-on-error: true
 
     - name: Summarize test results
