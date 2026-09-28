@@ -87,6 +87,7 @@ jobs:
       - name: Generate the mock install, mods and build file
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mock"
           ./scripts/agents/create_mock_kotor_install.sh \
             --game "${{ matrix.game }}" \
             --out "$RUNNER_TEMP/mock/game" \
