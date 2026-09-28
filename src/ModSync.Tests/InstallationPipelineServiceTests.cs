@@ -44,8 +44,11 @@ namespace ModSync.Tests
         [TearDown]
         public void TearDown()
         {
-            // SetUp enables the process-wide NoCheckpoint static; don't leak it into later fixtures.
+            // SetUp enables the process-wide NoCheckpoint static; don't leak it (or the continue-on-*
+            // statics some tests set) into later fixtures.
             MainConfig.Instance.noCheckpoint = false;
+            MainConfig.Instance.continueInstallOnMissingSources = false;
+            MainConfig.Instance.continueInstallOnModFailure = false;
 
             if (Directory.Exists(_tempRoot))
             {
@@ -233,6 +236,94 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public async Task RunAsync_BestEffortSkippedMissingArchive_IsCompletedUnverifiedNotMissingSourceFiles()
+        {
+            // Witness plan R9 / U4.3: a best-effort run that skips a missing archive finished; it must be
+            // completed-unverified, not MissingSourceFiles (which the CLI used to map to exit 0).
+            File.WriteAllText(Path.Combine(_tempRoot, "mods", "payload.txt"), "copied");
+            MainConfig.Instance.continueInstallOnMissingSources = true;
+            MainConfig.Instance.continueInstallOnModFailure = true;
+
+            ModComponent present = CreateCopyComponent("Present");
+            ModComponent missing = CreateMissingSourceComponent("Missing");
+
+            InstallationPipelineResult result = await InstallationPipelineService.RunAsync(
+                new InstallationPipelineRequest(new[] { present, missing })
+                {
+                    RunValidation = false,
+                    Frontend = InstallationFrontend.Cli,
+                    Mode = InstallationPipelineMode.Standard,
+                    PreserveInputOrder = true,
+                });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.ExitCode, Is.EqualTo(ModComponent.InstallExitCode.CompletedUnverified));
+                Assert.That(result.Witness, Is.EqualTo(WitnessVerdict.CompletedUnverified));
+                Assert.That(result.Succeeded, Is.False);
+                Assert.That(result.InstallLoopExitCode, Is.EqualTo(ModComponent.InstallExitCode.MissingSourceFiles));
+                Assert.That(result.SkippedComponentCount, Is.EqualTo(1));
+                Assert.That(result.FailedComponentCount, Is.EqualTo(0));
+                Assert.That(File.Exists(Path.Combine(_tempRoot, "game", "Override", "payload.txt")), Is.True);
+            });
+        }
+
+        [Test]
+        public async Task RunAsync_ContinueOnModFailure_KeepsComponentFailuresVisibleOnUnverifiedResult()
+        {
+            File.WriteAllText(Path.Combine(_tempRoot, "mods", "payload.txt"), "copied");
+            MainConfig.Instance.continueInstallOnMissingSources = false;
+            MainConfig.Instance.continueInstallOnModFailure = true;
+
+            ModComponent failing = CreateMissingSourceComponent("Failing");
+            ModComponent present = CreateCopyComponent("Present");
+
+            InstallationPipelineResult result = await InstallationPipelineService.RunAsync(
+                new InstallationPipelineRequest(new[] { failing, present })
+                {
+                    RunValidation = false,
+                    Frontend = InstallationFrontend.Cli,
+                    Mode = InstallationPipelineMode.Standard,
+                    PreserveInputOrder = true,
+                });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.ExitCode, Is.EqualTo(ModComponent.InstallExitCode.CompletedUnverified));
+                Assert.That(result.Succeeded, Is.False);
+                Assert.That(result.InstallLoopExitCode, Is.EqualTo(ModComponent.InstallExitCode.CompletedWithFailures));
+                Assert.That(result.FailedComponentCount, Is.EqualTo(1));
+                Assert.That(File.Exists(Path.Combine(_tempRoot, "game", "Override", "payload.txt")), Is.True,
+                    "--continue-on-mod-failure still installs the later component");
+            });
+        }
+
+        [Test]
+        public void FinalizeResult_MissingSourceWithoutContinueFlag_StaysAHardFailure()
+        {
+            MainConfig.Instance.continueInstallOnMissingSources = false;
+            var request = new InstallationPipelineRequest(new[] { CreateComponent("Stopped") })
+            {
+                RunValidation = false,
+                PreserveInputOrder = true,
+            };
+            InstallationPlan plan = InstallationPipelineService.BuildPlan(request);
+
+            InstallationPipelineResult result = InstallationPipelineService.FinalizeResult(
+                request,
+                plan,
+                validationResult: null,
+                ModComponent.InstallExitCode.MissingSourceFiles);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.ExitCode, Is.EqualTo(ModComponent.InstallExitCode.MissingSourceFiles));
+                Assert.That(result.Witness, Is.EqualTo(WitnessVerdict.None));
+                Assert.That(result.Succeeded, Is.False);
+            });
+        }
+
+        [Test]
         public void Result_PublishedPassFailedAfterSuccessShapedBatch_IsNotSucceeded()
         {
             InstallationPlan plan = InstallationPipelineService.BuildPlan(
@@ -333,6 +424,18 @@ namespace ModSync.Tests
             {
                 Action = Instruction.ActionType.Copy,
                 Source = new List<string> { "<<modDirectory>>/payload.txt" },
+                Destination = "<<kotorDirectory>>/Override",
+            });
+            return component;
+        }
+
+        private static ModComponent CreateMissingSourceComponent(string name)
+        {
+            ModComponent component = CreateComponent(name);
+            component.Instructions.Add(new Instruction
+            {
+                Action = Instruction.ActionType.Copy,
+                Source = new List<string> { "<<modDirectory>>/does-not-exist.txt" },
                 Destination = "<<kotorDirectory>>/Override",
             });
             return component;

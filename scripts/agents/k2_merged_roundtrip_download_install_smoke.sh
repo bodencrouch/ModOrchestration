@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Full K2 neocities round-trip smoke: golden URLs + ingested NLP → download → extract → Override install.
 # Wraps the LongRunning integration test (network required; mod-builds at repo root).
+# The wrapped tests run `install --skip-validation --best-effort`, which exits 2 (completed,
+# unverified) rather than 0; the tests assert that code, so a passing `dotnet test` here is the
+# success signal.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

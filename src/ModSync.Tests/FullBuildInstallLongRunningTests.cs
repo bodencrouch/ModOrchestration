@@ -130,8 +130,10 @@ namespace ModSync.Tests
                 "--nexus-api-key", "test-placeholder-key",
             });
 
-            Assert.That(installExit, Is.EqualTo(0),
-                $"{buildLabel} best-effort install should complete (skipping mods without local archives)");
+            // --best-effort/--skip-validation finish completed-unverified (witness plan R9), including
+            // runs that skipped mods without local archives: exit 2, never 0.
+            Assert.That(installExit, Is.EqualTo(ModBuildConverter.CompletedUnverifiedExitCode),
+                $"{buildLabel} best-effort install should finish completed-unverified (skipping mods without local archives)");
         }
 
         private static IEnumerable<TestCaseData> FullBuildInstallCases()

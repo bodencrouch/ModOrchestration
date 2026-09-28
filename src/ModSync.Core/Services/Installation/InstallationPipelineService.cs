@@ -149,12 +149,14 @@ namespace ModSync.Core.Services.Installation
             [NotNull] InstallationPlan plan,
             [CanBeNull] ValidationPipelineResult validationResult,
             ModComponent.InstallExitCode exitCode,
-            WitnessVerdict witness = WitnessVerdict.None)
+            WitnessVerdict witness = WitnessVerdict.None,
+            ModComponent.InstallExitCode? installLoopExitCode = null)
         {
             Plan = plan;
             ValidationResult = validationResult;
             ExitCode = exitCode;
             Witness = witness;
+            InstallLoopExitCode = installLoopExitCode ?? exitCode;
         }
 
         [NotNull]
@@ -166,6 +168,24 @@ namespace ModSync.Core.Services.Installation
         public ModComponent.InstallExitCode ExitCode { get; }
 
         public WitnessVerdict Witness { get; }
+
+        /// <summary>
+        /// The exit code the install loop itself returned, before witness policy. Equal to
+        /// <see cref="ExitCode"/> except for completed-unverified runs, where it keeps whether the
+        /// run was clean (<see cref="ModComponent.InstallExitCode.Success"/>), continued past mod
+        /// failures (<see cref="ModComponent.InstallExitCode.CompletedWithFailures"/>), or skipped
+        /// missing archives (<see cref="ModComponent.InstallExitCode.MissingSourceFiles"/>).
+        /// </summary>
+        public ModComponent.InstallExitCode InstallLoopExitCode { get; }
+
+        /// <summary>Selected components that failed or were blocked by a failed dependency.</summary>
+        public int FailedComponentCount => Plan.SelectedComponents.Count(component =>
+            component.InstallState == ModComponent.ComponentInstallState.Failed
+            || component.InstallState == ModComponent.ComponentInstallState.Blocked);
+
+        /// <summary>Selected components skipped because their archives were not in the workspace.</summary>
+        public int SkippedComponentCount => Plan.SelectedComponents.Count(component =>
+            component.InstallState == ModComponent.ComponentInstallState.Skipped);
 
         public bool PublishedPassHolds =>
             Witness == WitnessVerdict.PublishedPass
@@ -300,24 +320,41 @@ namespace ModSync.Core.Services.Installation
         }
 
         [NotNull]
-        private static InstallationPipelineResult FinalizeResult(
+        internal static InstallationPipelineResult FinalizeResult(
             [NotNull] InstallationPipelineRequest request,
             [NotNull] InstallationPlan plan,
             [CanBeNull] ValidationPipelineResult validationResult,
             ModComponent.InstallExitCode exitCode)
         {
-            if (IsUnverifiedFinish(request)
-                && (exitCode == ModComponent.InstallExitCode.Success
-                    || exitCode == ModComponent.InstallExitCode.CompletedWithFailures))
+            if (IsUnverifiedFinish(request) && IsFinishedRun(exitCode))
             {
+                // Skip / no-checkpoint / best-effort runs that finished are completed-unverified
+                // (witness plan R9, U4.3), including runs that continued past failed or skipped
+                // components. The raw outcome and per-component counts stay on the result so
+                // frontends can still report those failures.
                 return new InstallationPipelineResult(
                     plan,
                     validationResult,
                     ModComponent.InstallExitCode.CompletedUnverified,
-                    WitnessVerdict.CompletedUnverified);
+                    WitnessVerdict.CompletedUnverified,
+                    exitCode);
             }
 
             return new InstallationPipelineResult(plan, validationResult, exitCode);
+        }
+
+        /// <summary>
+        /// True when the install loop ran to the end of the plan: clean, continued past per-mod
+        /// failures (<see cref="ModComponent.InstallExitCode.CompletedWithFailures"/>), or skipped
+        /// components whose archives were missing because continue-on-missing-sources was on. A
+        /// missing source without that flag is a hard stop and stays a failure.
+        /// </summary>
+        private static bool IsFinishedRun(ModComponent.InstallExitCode exitCode)
+        {
+            return exitCode == ModComponent.InstallExitCode.Success
+                || exitCode == ModComponent.InstallExitCode.CompletedWithFailures
+                || (exitCode == ModComponent.InstallExitCode.MissingSourceFiles
+                    && MainConfig.ContinueInstallOnMissingSources);
         }
 
         private static bool IsUnverifiedFinish([NotNull] InstallationPipelineRequest request)

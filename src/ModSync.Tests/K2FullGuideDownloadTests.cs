@@ -115,8 +115,10 @@ namespace ModSync.Tests
 
             Assert.Multiple(() =>
             {
-                Assert.That(installExit, Is.EqualTo(0),
-                    "install --download --select mod:Silent Sion should complete in best-effort mode");
+                // --skip-validation/--best-effort finish completed-unverified (witness plan R9): the
+                // archive is still downloaded, but the CLI must not report a verified install.
+                Assert.That(installExit, Is.EqualTo(ModBuildConverter.CompletedUnverifiedExitCode),
+                    "install --download --select mod:Silent Sion should finish completed-unverified in best-effort mode");
                 Assert.That(archiveExists || anyZipInModDir, Is.True,
                     $"Expected {SilentSionArchive} (or another downloaded archive) under the mod workspace");
             });
@@ -155,8 +157,10 @@ namespace ModSync.Tests
 
             Assert.Multiple(() =>
             {
-                Assert.That(installExit, Is.EqualTo(0),
-                    "round-trip install --download should complete for Silent Sion (best-effort)");
+                // --skip-validation/--best-effort finish completed-unverified (witness plan R9); the
+                // file assertions below prove the mod installed.
+                Assert.That(installExit, Is.EqualTo(ModBuildConverter.CompletedUnverifiedExitCode),
+                    "round-trip install --download should finish completed-unverified for Silent Sion (best-effort)");
                 Assert.That(
                     File.Exists(Path.Combine(_modDirectory, SilentSionArchive))
                     || modWorkspaceFiles.Any(path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)),
@@ -203,8 +207,10 @@ namespace ModSync.Tests
 
             Assert.Multiple(() =>
             {
-                Assert.That(installExit, Is.EqualTo(0),
-                    "round-trip install --download should complete for Prestige Class (best-effort)");
+                // --skip-validation/--best-effort finish completed-unverified (witness plan R9); the
+                // file assertions below prove the mod installed.
+                Assert.That(installExit, Is.EqualTo(ModBuildConverter.CompletedUnverifiedExitCode),
+                    "round-trip install --download should finish completed-unverified for Prestige Class (best-effort)");
                 Assert.That(
                     File.Exists(Path.Combine(_modDirectory, PrestigeArchive))
                     || modWorkspaceFiles.Any(path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)),

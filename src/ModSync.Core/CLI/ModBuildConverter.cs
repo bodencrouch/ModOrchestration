@@ -665,7 +665,7 @@ namespace ModSync.Core.CLI
             [Option("continue-on-mod-failure", Required = false, Default = false, HelpText = "If a mod install fails (e.g. patcher error), log and continue with the rest instead of aborting")]
             public bool ContinueOnModFailure { get; set; }
 
-            [Option("best-effort", Required = false, Default = false, HelpText = "Install everything possible: same as --continue-on-missing-sources --continue-on-mod-failure -y (skips missing archives and failed mods, exits 0 with warnings)")]
+            [Option("best-effort", Required = false, Default = false, HelpText = "Install everything possible: same as --continue-on-missing-sources --continue-on-mod-failure -y (skips missing archives and failed mods; exits 2, completed-unverified, with warnings)")]
             public bool BestEffort { get; set; }
 
             [Option("nexus-api-key", Required = false, HelpText = "Nexus Mods API key for automated Nexus downloads (or set KOTOR_MODSYNC_NEXUS_API_KEY / NEXUS_MODS_API_KEY)")]
@@ -3365,6 +3365,43 @@ componentName: null,
             }
         }
 
+        /// <summary>
+        /// Logs a completed-unverified install. A clean unverified run gets one warning; a run that
+        /// continued past failed components or skipped missing archives gets its own
+        /// "unverified, with N component failures" line so real mod failures are not hidden behind
+        /// the shared exit code.
+        /// </summary>
+        private static async Task LogCompletedUnverifiedAsync([NotNull] InstallationPipelineResult installResult)
+        {
+            int failed = installResult.FailedComponentCount;
+            int skipped = installResult.SkippedComponentCount;
+            bool hadFailures = failed > 0
+                || installResult.InstallLoopExitCode == ModComponent.InstallExitCode.CompletedWithFailures;
+
+            if (hadFailures)
+            {
+                await Logger.LogWarningAsync(
+                    $"Installation finished unverified, with {failed} component failure(s)"
+                    + (skipped > 0 ? $" and {skipped} component(s) skipped for missing archives" : string.Empty)
+                    + ". Review the failed mods above and re-run them; the game directory is not a verified install."
+                ).ConfigureAwait(false);
+            }
+            else if (skipped > 0
+                     || installResult.InstallLoopExitCode == ModComponent.InstallExitCode.MissingSourceFiles)
+            {
+                await Logger.LogWarningAsync(
+                    $"Installation finished unverified, with {skipped} component(s) skipped for missing archives. "
+                    + "Add the downloads and re-run those mods."
+                ).ConfigureAwait(false);
+            }
+
+            await Logger.LogWarningAsync(
+                "Installation finished completed-unverified: files were applied, but --skip-validation, "
+                + "--no-checkpoint, --best-effort, or --continue-on-* means there is no published install PASS. "
+                + $"Exiting with code {CompletedUnverifiedExitCode}; re-run without those flags for a verified install."
+            ).ConfigureAwait(false);
+        }
+
         private static async Task<int> RunInstallAsync(InstallOptions opts)
         {
             SetVerboseMode(opts.Verbose);
@@ -3702,31 +3739,13 @@ componentName: null,
                     return 0;
                 }
 
-                if (exitCode == ModComponent.InstallExitCode.MissingSourceFiles &&
-                    (opts.ContinueOnMissingSources || opts.BestEffort))
-                {
-                    await Logger.LogWarningAsync(
-                        "Installation finished with one or more mods skipped (missing archives). Add downloads and re-run for those mods."
-                    ).ConfigureAwait(false);
-                    return 0;
-                }
-
-                if (exitCode == ModComponent.InstallExitCode.CompletedWithFailures &&
-                    (opts.ContinueOnModFailure || opts.BestEffort))
-                {
-                    await Logger.LogWarningAsync(
-                        "Installation finished with one or more mod failures; review logs and re-run or fix failed mods."
-                    ).ConfigureAwait(false);
-                    return 0;
-                }
-
+                // No exit-0 shortcuts for --best-effort / --continue-on-*: a run that finished under
+                // those flags (or --skip-validation / --no-checkpoint) is completed-unverified and exits
+                // CompletedUnverifiedExitCode (witness plan R9, U4.3). Component failures and skipped
+                // archives are reported on their own line so they stay visible.
                 if (exitCode == ModComponent.InstallExitCode.CompletedUnverified)
                 {
-                    await Logger.LogWarningAsync(
-                        "Installation finished completed-unverified: files were applied, but --skip-validation, "
-                        + "--no-checkpoint, or --best-effort means there is no published install PASS. "
-                        + $"Exiting with code {CompletedUnverifiedExitCode}; re-run without those flags for a verified install."
-                    ).ConfigureAwait(false);
+                    await LogCompletedUnverifiedAsync(installResult).ConfigureAwait(false);
                     return CompletedUnverifiedExitCode;
                 }
 

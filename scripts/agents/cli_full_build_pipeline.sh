@@ -49,7 +49,10 @@ Options:
   --dry-run-only         Run validate --dry-run-only (skip archive checks; VFS only)
   --auto-generate-local  Fill missing instructions from archives in --source-dir during merge
   --export-all-formats   Write merged set as TOML, JSON, YAML, and XML
-  --install              Best-effort install after merge (requires game + source dirs; use with --dry-run-only first)
+  --install              Best-effort install after merge (requires game + source dirs; use with --dry-run-only first).
+                         Exits 2 (completed, unverified) when the install reaches the end of the plan:
+                         --best-effort/--skip-validation never publish a PASS, so 0 is not possible.
+                         Component failures are listed in the log, not in the exit code. 1 = failure.
   --validate-only        Skip merge; validate --input only (uses --output or default merged path)
   -h, --help             Show this help
 
@@ -251,9 +254,20 @@ if [[ "$install" == true ]]; then
     "$repo_root/scripts/agents/ensure_linux_holopatcher.sh" || true
   fi
   echo "Running best-effort install from merged instruction file..."
-  exec dotnet run --project "$repo_root/src/ModSync.Core/ModSync.Core.csproj" -f net9.0 -- \
+  # --best-effort/--skip-validation finish completed-unverified: the CLI exits 2, never 0
+  # (docs/knowledgebase/core-cli-reference.md). Pass the status through unchanged.
+  install_status=0
+  dotnet run --project "$repo_root/src/ModSync.Core/ModSync.Core.csproj" -f net9.0 -- \
     install -i "$output_path" -g "$game_dir" -s "$source_dir" \
-    -d --concurrent --best-effort --skip-validation --download-timeout-hours 72
+    -d --concurrent --best-effort --skip-validation --download-timeout-hours 72 || install_status=$?
+  if [[ "$install_status" -eq 2 ]]; then
+    echo "Best-effort install completed, unverified (exit 2): no published install PASS." >&2
+    echo "Check the log for 'finished unverified, with N component failure(s)'." >&2
+  elif [[ "$install_status" -ne 0 ]]; then
+    echo "Best-effort install failed with exit status $install_status." >&2
+  fi
+  echo "Merged instruction file: $output_path"
+  exit "$install_status"
 fi
 
 echo "Merged instruction file: $output_path"

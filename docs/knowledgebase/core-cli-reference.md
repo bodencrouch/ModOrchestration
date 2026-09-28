@@ -95,7 +95,15 @@ Install selected mods from an instruction file.
 | `--no-managed` | No | Force classic install for this run (ignore `managedDeploymentEnabled`) |
 | `--profile` | No | Profile name for managed deploy (overrides `activeProfileName` for this run) |
 
-**Exit codes:** `0` = verified install (published PASS); `2` = completed-unverified — files were applied, but `--skip-validation`, `--no-checkpoint`, or `--best-effort` means there is no published PASS; `1` = failure.
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Verified install (published PASS). Only a run without any of the flags below can exit 0. |
+| `2` | Completed-unverified. The run reached the end of the plan with `--skip-validation`, `--no-checkpoint`, `--best-effort`, `--continue-on-missing-sources`, or `--continue-on-mod-failure` set, so there is no published PASS. This includes runs that continued past failed components or skipped missing archives. |
+| `1` | Failure: validation blocked the install, or the run stopped at a failing component. |
+
+Following the witness plan (`docs/plans/2026-08-31-0216-feat-witness-pass-type-plan.md`, R9 and U4.3), these flags have no exit-0 shortcut. The plan says every finished run under them "must emit completed-unverified", so a best-effort run that had component failures also exits `2`; it does not get a separate exit code. Its failures stay visible in two ways. The log has a separate warning line, `Installation finished unverified, with N component failure(s)` (plus `and M component(s) skipped for missing archives` when archives were skipped). `InstallationPipelineResult` also carries `InstallLoopExitCode` (`CompletedWithFailures` / `MissingSourceFiles` / `Success`), `FailedComponentCount`, and `SkippedComponentCount`. Scripts that need to know whether any mod failed should read that line, not the exit code. A missing archive *without* `--continue-on-missing-sources`/`--best-effort` is still a hard stop and exits `1`.
 
 **Managed deploy:** fail-closed when `--managed` is set without a resolvable profile. See [managed-deployment.md](managed-deployment.md) and [install-profiles.md](install-profiles.md).
 
