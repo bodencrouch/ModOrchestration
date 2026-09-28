@@ -31,9 +31,6 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v5
 
-      - name: Check out the UI submodules
-        run: git submodule update --init --depth 1 src/AvRichTextBox src/RtfDomParserAvalonia
-
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
@@ -70,9 +67,6 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v5
-
-      - name: Check out the UI submodules
-        run: git submodule update --init --depth 1 src/AvRichTextBox src/RtfDomParserAvalonia
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
