@@ -83,42 +83,45 @@ namespace ModSync.Core.Services.Validation
                     result.PassedCount++;
                 }
 
-                cancellationToken.ThrowIfCancellationRequested();
-                step++;
-                progress?.Invoke(ValidationPipelineStage.Conflicts, step, totalSteps, "Checking mod conflicts...");
-                ValidationPipelineStageResult conflictStage = RunConflictStage(componentsToValidate, allComponents);
-                result.Stages.Add(conflictStage);
-                if (!conflictStage.Passed)
+                if (!options.SkipConflictAndOrderValidation)
                 {
-                    result.HasCriticalErrors = true;
-                    result.ErrorCount += conflictStage.Messages.Count(m => m.StartsWith("ERROR:", StringComparison.Ordinal));
-                }
-                else if (conflictStage.HasWarnings)
-                {
-                    result.WarningCount += conflictStage.Messages.Count(m => m.StartsWith("WARNING:", StringComparison.Ordinal));
-                }
-                else
-                {
-                    result.PassedCount++;
-                }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    step++;
+                    progress?.Invoke(ValidationPipelineStage.Conflicts, step, totalSteps, "Checking mod conflicts...");
+                    ValidationPipelineStageResult conflictStage = RunConflictStage(componentsToValidate, allComponents);
+                    result.Stages.Add(conflictStage);
+                    if (!conflictStage.Passed)
+                    {
+                        result.HasCriticalErrors = true;
+                        result.ErrorCount += conflictStage.Messages.Count(m => m.StartsWith("ERROR:", StringComparison.Ordinal));
+                    }
+                    else if (conflictStage.HasWarnings)
+                    {
+                        result.WarningCount += conflictStage.Messages.Count(m => m.StartsWith("WARNING:", StringComparison.Ordinal));
+                    }
+                    else
+                    {
+                        result.PassedCount++;
+                    }
 
-                cancellationToken.ThrowIfCancellationRequested();
-                step++;
-                progress?.Invoke(ValidationPipelineStage.InstallOrder, step, totalSteps, "Validating install order...");
-                ValidationPipelineStageResult orderStage = RunInstallOrderStage(componentsToValidate);
-                result.Stages.Add(orderStage);
-                if (!orderStage.Passed)
-                {
-                    result.HasCriticalErrors = true;
-                    result.ErrorCount++;
-                }
-                else if (orderStage.HasWarnings)
-                {
-                    result.WarningCount++;
-                }
-                else
-                {
-                    result.PassedCount++;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    step++;
+                    progress?.Invoke(ValidationPipelineStage.InstallOrder, step, totalSteps, "Validating install order...");
+                    ValidationPipelineStageResult orderStage = RunInstallOrderStage(componentsToValidate);
+                    result.Stages.Add(orderStage);
+                    if (!orderStage.Passed)
+                    {
+                        result.HasCriticalErrors = true;
+                        result.ErrorCount++;
+                    }
+                    else if (orderStage.HasWarnings)
+                    {
+                        result.WarningCount++;
+                    }
+                    else
+                    {
+                        result.PassedCount++;
+                    }
                 }
             }
 
@@ -244,8 +247,11 @@ namespace ModSync.Core.Services.Validation
                     count++;
                 }
 
-                // Conflicts + InstallOrder always run under FullValidation.
-                count += 2;
+                if (!options.SkipConflictAndOrderValidation)
+                {
+                    // Conflicts + InstallOrder under FullValidation.
+                    count += 2;
+                }
             }
 
             if (!options.DryRunOnly && !options.SkipComponentArchiveValidation)

@@ -50,6 +50,7 @@ Details: [managed-deployment.md](managed-deployment.md#validation-vs-managed-ins
 | Preset | FullValidation | DryRun | DryRunOnly | UseFileSelection | Typical caller |
 |--------|----------------|--------|------------|------------------|----------------|
 | `WizardFull` | yes | yes | no | yes | Install wizard **ValidatePage**; legacy Validate; `install` pre-check |
+| `InstallStartReadiness` | yes | no | no | yes | Install wizard **InstallStartPage** (Environment only; skips archives/FOMOD gate/conflicts/order/DryRun) |
 | `LegacyDryRunOnly` | no | yes | no | yes | Available preset; legacy Getting Started Validate currently uses `WizardFull` |
 | `CliFullWithDryRun` | yes | yes | no | yes | CLI `--full --dry-run --use-file-selection` |
 | `CliDryRunOnly` | no | no | yes | yes | CLI `--dry-run-only` |
@@ -61,6 +62,7 @@ Other flags:
 | `SkipEnvironmentValidation` | Tests, headless fixtures without HoloPatcher |
 | `SkipComponentArchiveValidation` | Graph-only tests |
 | `SkipFomodConfigurationGate` | Tests without FOMOD fixtures |
+| `SkipConflictAndOrderValidation` | Install-start readiness; graph-only skip |
 | `ErrorsOnly` | `--errors-only` |
 | `UseFileSelection` | `--use-file-selection` (default true in options type; CLI defaults differ — see below) |
 

@@ -259,6 +259,11 @@ Widescreen-only pages are added dynamically after the base install when needed.
   - background downloads continue while the wizard advances
 - `InstallStartPage`
   - review page before the real install begins
+  - Environment readiness summary (`InstallStartReadiness`); Next blocked on critical failures
+  - Optional **Resume previous install** / **Start over** when `install_session.json` has incomplete selected work
+- `InstallingPage`
+  - Honest success / failed / cancelled states; Resume/Retry continues remaining mods (not pristine undo)
+  - Review/progress page before Next is allowed after a successful install
 
 ## Install order is load-bearing — NEVER append a fixed step at the end
 

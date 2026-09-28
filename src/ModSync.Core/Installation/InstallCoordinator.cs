@@ -36,7 +36,8 @@ namespace ModSync.Core.Installation
             [NotNull] IList<ModComponent> components,
             [NotNull] DirectoryInfo destinationPath,
             CancellationToken cancellationToken,
-            bool preserveInputOrder = false)
+            bool preserveInputOrder = false,
+            bool enableGitCheckpoints = true)
         {
             await CheckpointManager.InitializeAsync(components, destinationPath).ConfigureAwait(false);
             if (!MainConfig.NoCheckpoint)
@@ -69,12 +70,14 @@ namespace ModSync.Core.Installation
 
             ReleaseCheckpointService();
 
-            if (MainConfig.NoCheckpoint)
+            if (MainConfig.NoCheckpoint || !enableGitCheckpoints)
             {
-                // Checkpoint system explicitly disabled (--no-checkpoint): skip the git-based
-                // baseline snapshot entirely (it re-syncs the whole game directory and is
+                // Git checkpoints disabled (--no-checkpoint, or the caller opted out): skip the
+                // git-based baseline snapshot entirely (it re-syncs the whole game directory and is
                 // prohibitively slow on large installs / slow storage). No rollback capability
-                // is available for this session.
+                // is available for this session, but the install_session.json resume record is
+                // still written so the wizard can offer Resume/Start over.
+                await CheckpointManager.SaveAsync().ConfigureAwait(false);
                 List<ModComponent> orderedNoCheckpoint = preserveInputOrder
                     ? components.ToList()
                     : GetOrderedInstallList(components);

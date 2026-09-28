@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,7 +30,14 @@ namespace ModSync.Tests.HeadlessUITests
         [AvaloniaFact(DisplayName = "InstallStartPage blocks when selected FOMOD archive is unconfigured")]
         public async Task InstallStartPage_ValidateAsync_UnconfiguredFomod_ReturnsFalse()
         {
-            string modDir = CreateTempModDir();
+            string root = CreateTempModDir();
+            string gameDir = Path.Combine(root, "game");
+            string modDir = Path.Combine(root, "mods");
+            Directory.CreateDirectory(gameDir);
+            Directory.CreateDirectory(modDir);
+            File.WriteAllText(Path.Combine(gameDir, "swkotor.exe"), string.Empty);
+            EnsureHolopatcherInTestResources();
+
             MainConfig previous = MainConfig.Instance;
 
             try
@@ -41,7 +49,7 @@ namespace ModSync.Tests.HeadlessUITests
                 MainConfig.Instance = new MainConfig
                 {
                     sourcePath = new DirectoryInfo(modDir),
-                    destinationPath = new DirectoryInfo(modDir),
+                    destinationPath = new DirectoryInfo(gameDir),
                 };
 
                 var page = new InstallStartPage(new List<ModComponent> { component });
@@ -54,14 +62,21 @@ namespace ModSync.Tests.HeadlessUITests
             finally
             {
                 MainConfig.Instance = previous;
-                TryDeleteDirectory(modDir);
+                TryDeleteDirectory(root);
             }
         }
 
         [AvaloniaFact(DisplayName = "InstallStartPage allows continue when selected FOMOD archive is configured")]
         public async Task InstallStartPage_ValidateAsync_ConfiguredFomod_ReturnsTrue()
         {
-            string modDir = CreateTempModDir();
+            string root = CreateTempModDir();
+            string gameDir = Path.Combine(root, "game");
+            string modDir = Path.Combine(root, "mods");
+            Directory.CreateDirectory(gameDir);
+            Directory.CreateDirectory(modDir);
+            File.WriteAllText(Path.Combine(gameDir, "swkotor.exe"), string.Empty);
+            EnsureHolopatcherInTestResources();
+
             MainConfig previous = MainConfig.Instance;
 
             try
@@ -74,19 +89,49 @@ namespace ModSync.Tests.HeadlessUITests
                 MainConfig.Instance = new MainConfig
                 {
                     sourcePath = new DirectoryInfo(modDir),
-                    destinationPath = new DirectoryInfo(modDir),
+                    destinationPath = new DirectoryInfo(gameDir),
                 };
 
                 var page = new InstallStartPage(new List<ModComponent> { component });
                 (bool isValid, string errorMessage) = await page.ValidateAsync(CancellationToken.None);
 
-                Assert.True(isValid);
+                Assert.True(isValid, errorMessage);
                 Assert.True(string.IsNullOrEmpty(errorMessage));
             }
             finally
             {
                 MainConfig.Instance = previous;
-                TryDeleteDirectory(modDir);
+                TryDeleteDirectory(root);
+            }
+        }
+
+        private static void EnsureHolopatcherInTestResources()
+        {
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string resourcesDir = Path.Combine(baseDir, "Resources");
+            Directory.CreateDirectory(resourcesDir);
+            string targetPath = Path.Combine(resourcesDir, "holopatcher");
+            if (File.Exists(targetPath))
+            {
+                return;
+            }
+
+            string vendorHolopatcher = Path.GetFullPath(Path.Combine(
+                baseDir,
+                "..", "..", "..", "..", "..",
+                "vendor", "bin", "HoloPatcher_linux"));
+            if (!File.Exists(vendorHolopatcher))
+            {
+                return;
+            }
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                File.Copy(vendorHolopatcher, targetPath, overwrite: true);
+            }
+            else
+            {
+                File.CreateSymbolicLink(targetPath, vendorHolopatcher);
             }
         }
 

@@ -1205,7 +1205,8 @@ Exception Type: {ex.GetType().FullName}";
             [CanBeNull] string profileOverride = null,
             bool? managedDeploymentOverride = null,
             bool preserveInputOrder = false,
-            bool failClosed = false)
+            bool failClosed = false,
+            bool enableGitCheckpoints = true)
         {
             if (allComponents is null)
             {
@@ -1218,7 +1219,8 @@ Exception Type: {ex.GetType().FullName}";
                     progressCallback,
                     cancellationToken,
                     preserveInputOrder,
-                    failClosed),
+                    failClosed,
+                    enableGitCheckpoints),
                 profileOverride,
                 managedDeploymentOverride).ConfigureAwait(false);
         }
@@ -1228,7 +1230,8 @@ Exception Type: {ex.GetType().FullName}";
             [CanBeNull] Action<int, int, string> progressCallback,
             CancellationToken cancellationToken,
             bool preserveInputOrder,
-            bool failClosed)
+            bool failClosed,
+            bool enableGitCheckpoints = true)
         {
             if (allComponents is null)
             {
@@ -1273,7 +1276,8 @@ Exception Type: {ex.GetType().FullName}";
                     allComponents,
                     destination,
                     cancellationToken,
-                    preserveInputOrder).ConfigureAwait(false);
+                    preserveInputOrder,
+                    enableGitCheckpoints).ConfigureAwait(false);
                 var orderedComponents = resume.OrderedComponents.Where(component => component.IsSelected).ToList();
                 int total = orderedComponents.Count;
                 ModComponent.InstallExitCode exitCode = ModComponent.InstallExitCode.Success;
@@ -1312,8 +1316,8 @@ Exception Type: {ex.GetType().FullName}";
                         await Logger.LogAsync($"Install of '{component.Name}' succeeded.").ConfigureAwait(false);
 
                         // Create checkpoint after successful installation (skipped entirely when
-                        // --no-checkpoint disabled the git-based checkpoint system, since
-                        // coordinator.CheckpointService is never created in that case).
+                        // Git checkpoints are disabled via --no-checkpoint or enableGitCheckpoints=false,
+                        // since coordinator.CheckpointService is never created in that case).
                         if (!MainConfig.NoCheckpoint && coordinator.CheckpointService != null)
                         {
                             try
@@ -1326,6 +1330,7 @@ Exception Type: {ex.GetType().FullName}";
                                 ).ConfigureAwait(false);
 
                                 coordinator.CheckpointManager.State.ComponentCheckpoints[component.Guid] = checkpoint.CommitId;
+                                await Logger.LogAsync($"✓ Checkpoint created: {checkpoint.ShortCommitId}").ConfigureAwait(false);
                             }
                             catch (Exception ex)
                             {
@@ -1459,7 +1464,8 @@ Exception Type: {ex.GetType().FullName}";
             [CanBeNull] string profileOverride = null,
             bool? managedDeploymentOverride = null,
             bool preserveInputOrder = false,
-            bool failClosed = false)
+            bool failClosed = false,
+            bool enableGitCheckpoints = true)
         {
             if (allComponents is null)
             {
@@ -1473,7 +1479,8 @@ Exception Type: {ex.GetType().FullName}";
                 profileOverride,
                 managedDeploymentOverride,
                 preserveInputOrder,
-                failClosed);
+                failClosed,
+                enableGitCheckpoints);
         }
 
         private static async Task RestoreFailedComponentAsync(
