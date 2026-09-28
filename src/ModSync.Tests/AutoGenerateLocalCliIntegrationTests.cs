@@ -101,10 +101,13 @@ namespace ModSync.Tests
                     ["https://example.com/existing-instructions-mod.zip"] = new ResourceMetadata(),
                 },
             };
+            // The existing instruction must be grounded (its archive exists in the mod workspace);
+            // AutoInstructionGenerator discards drafts whose sources are missing from the library
+            // and regenerates in their place.
             component.Instructions.Add(new Instruction
             {
                 Action = Instruction.ActionType.Extract,
-                Source = new List<string> { "<<modDirectory>>/placeholder.zip" },
+                Source = new List<string> { "<<modDirectory>>/" + archiveName },
             });
 
             int before = component.Instructions.Count;

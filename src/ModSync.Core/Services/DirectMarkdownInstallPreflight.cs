@@ -35,13 +35,11 @@ namespace ModSync.Core.Services
                 throw new ArgumentException("Direct Markdown mode requires a .md guide.", nameof(guidePath));
             }
 
-            string markdown = await File.ReadAllTextAsync(guidePath).ConfigureAwait(false);
-            GuideIngestResult result = GuideIngestService.Instance.IngestFromText(
-                markdown,
-                formatHint: "markdown",
-                parseDirections: true);
-            return result.Components.ToList();
+            return await FileLoadingService.LoadFromFileAsync(guidePath).ConfigureAwait(false);
         }
+
+        public static bool IsGuideDerived([NotNull][ItemNotNull] IEnumerable<ModComponent> components) =>
+            components.Any(HasDraftFlag);
 
         [NotNull]
         public static DirectMarkdownInstallPreflightResult Apply(
@@ -61,13 +59,6 @@ namespace ModSync.Core.Services
             {
                 if (!component.IsSelected)
                 {
-                    continue;
-                }
-
-                if (component.WidescreenOnly)
-                {
-                    component.IsSelected = false;
-                    skippedWidescreen++;
                     continue;
                 }
 
@@ -98,8 +89,53 @@ namespace ModSync.Core.Services
                 drafted);
         }
 
-        private static bool HasExecutableActions([NotNull] ModComponent component) =>
-            component.Instructions.Count > 0 || component.Options.Any(HasExecutableActions);
+        private static bool HasExecutableActions([NotNull] ModComponent component)
+        {
+            List<Instruction.ActionType> actions = component.Instructions
+                .Select(instruction => instruction.Action)
+                .Concat(component.Options.SelectMany(option => option.Instructions)
+                    .Select(instruction => instruction.Action))
+                .ToList();
+
+            bool hasPatcher = actions.Contains(Instruction.ActionType.Patcher);
+            bool hasLooseDeployment = actions.Contains(Instruction.ActionType.Move)
+                || actions.Contains(Instruction.ActionType.Copy);
+            bool hasExecutable = actions.Contains(Instruction.ActionType.Execute)
+                || actions.Contains(Instruction.ActionType.Run);
+            bool hasSpecialTerminalOperation = actions.Contains(Instruction.ActionType.CleanList)
+                || actions.Contains(Instruction.ActionType.DelDuplicate);
+
+            string method = component.InstallationMethod ?? string.Empty;
+            bool requiresPatcher = method.IndexOf("patcher", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool requiresLooseDeployment = method.IndexOf("loose", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool requiresExecutable = method.IndexOf("executable", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            // ".bat Patcher / .sh script" is the Remove Duplicate TGA/TPC method, not TSLPatcher.
+            // DelDuplicate / CleanList are the payload for those steps; requiring a Patcher
+            // instruction here left the crash-prevention barrier unresolved after generation.
+            if (hasSpecialTerminalOperation)
+            {
+                return true;
+            }
+
+            if (requiresPatcher && !hasPatcher)
+            {
+                return false;
+            }
+            if (requiresLooseDeployment && !hasLooseDeployment)
+            {
+                return false;
+            }
+            if (requiresExecutable && !hasExecutable)
+            {
+                return false;
+            }
+
+            // Extract/Delete/Rename by themselves are preparation or secondary operations. Treating
+            // them as readiness let archive-only and post-processing-only components report success
+            // without ever deploying a payload (the measured silent-no-op failure mode).
+            return hasPatcher || hasLooseDeployment || hasExecutable || hasSpecialTerminalOperation;
+        }
 
         private static bool HasDraftFlag([NotNull] ModComponent component) =>
             component.InstallationWarning?.IndexOf(

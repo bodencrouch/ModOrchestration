@@ -66,6 +66,8 @@
   <ItemGroup>
     <None Include="..\..\LICENSE.txt" Pack="true" PackagePath="" />
     <None Include="NLog.config" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Config\guide-interpretation.defaults.toml" CopyToOutputDirectory="PreserveNewest" Link="Config\guide-interpretation.defaults.toml" />
+    <EmbeddedResource Include="Config\guide-interpretation.defaults.toml" LogicalName="ModSync.Core.Config.guide-interpretation.defaults.toml" />
   </ItemGroup>
 
   <ItemGroup>

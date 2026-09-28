@@ -23,6 +23,7 @@ How the Avalonia app presents `InstallationValidationPipeline` results after PRs
 | Surface | Entry | Pipeline preset | Result UI |
 |---------|--------|-----------------|-----------|
 | Install wizard **ValidatePage** | `ValidateAsync` / **Run Validation** | `WizardFull` | In-page log, progress, summary badges; `ApplyPipelineResultToWizardUi` |
+| Install wizard **InstallStartPage** | navigate-to / Next gate | `InstallStartReadiness` | Compact Environment readiness status; points back to Validate for full detail |
 | Legacy **Getting Started → Validate** | `MainWindow.ValidateButton_Click` | `WizardFull` | Progress dialog log + `ValidationDialog` mod issue list |
 | **ValidationService.AnalyzeValidationFailures** | Async helper (pre-check / failure analysis) | `WizardFull` | Populates `Dialogs.ValidationIssue` + optional `systemIssues` strings |
 | Core CLI **validate** / **install** pre-check | `ModBuildConverter` | `WizardFull` (install) | stdout / exit code — no GUI mapper |

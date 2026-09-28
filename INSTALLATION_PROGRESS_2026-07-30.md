@@ -1,5 +1,417 @@
 # KOTOR 1 Full Mod Installation — Progress Report
 
+## STATUS UPDATE — 2026-08-21 (read this first)
+
+**Status: ✅ CONVERGED — full 185/185 pass completed, 5 known exceptions remain.**
+
+The working target moved since the original 2026-07-30 session below: instead of installing
+directly into the live Steam directory, the canonical K1-auto working copy now lives at
+`/home/brunner56/modsync-hot/K1_auto` (isolated from the real game install, which stays untouched).
+The merged instruction set also shrank from 189 → **185 components** — the 4 dangling-dependency
+GUID bugs documented below (`92c3a209-...`, `cc6eee05-...` × 2, `23fb35a8-...`) were fixed/removed
+from the source, consistent with the fixes this file's Jul-30 log describes finding but not yet
+applying at the time.
+
+**What happened between 2026-08-16 and 2026-08-21:** the run that was live on 2026-08-16 (PID
+1178436, 27/185 at last check that day) made it to **84/185** by 18:54 that evening, then died
+silently sometime after — no crash recorded, no reboot occurred (`uptime -s` confirms the same boot
+throughout), and its log (`/tmp/k1_run24.log`) was gone by the time this was checked again on
+2026-08-21 (this box appears to periodically sweep `/tmp`, the same pattern that already ate runs
+12–23's logs). Rebuilt the CLI from the current working tree (build succeeds clean) and relaunched:
+- **Attempt 1** (no `--best-effort`): hard-aborted on the first real per-component failure
+  (`Kebla Yurt Renovation`, Patcher exit code 8) — without that flag, one bad component stops the
+  entire run instead of logging and continuing.
+- **Attempt 2** (`--best-effort`, still with checkpointing on): technically correct, but because
+  the checkpoint git-diff-per-component overhead is what's actually slow (not the file operations —
+  see the "8:11 PM check-in" entry below, the exact same lesson this file already documented), it
+  took ~7 minutes to crawl through just 2 already-completed components while re-verifying them from
+  scratch. Killed it rather than let it burn hours re-confirming 84 already-done components.
+- **Attempt 3** (`--best-effort --no-checkpoint`) — this is the one that actually finished. Full
+  185-component pass in well under an hour (03:17→03:46 AM), log at `tmp/auto_install/k1_run27.log`.
+
+**Run result: all 185 components attempted, 182 succeeded, 3 install-phase failures.** Override at
+3532 files.
+
+> **Analysis caveat worth remembering:** a naive `grep` for `[Error]` over this log badly
+> over-counts. The run does a **pre-install dry-run/analysis pass** (~03:18) *before* the real
+> install phase (~03:32 onward), and that pass emits `[Error] Missing mod file(s) for 'X'` for any
+> component whose `Move` source lives inside a folder that only exists *after* its own `Extract`
+> step runs. Those are chicken-and-egg false positives, not real gaps — e.g. "Republic Soldier Fix"
+> and "Ultimate Character Overhaul Patches" both appear in that error list yet **installed
+> perfectly** during the real phase. Always count `Install of '...' succeeded.` /
+> `Install of '...' failed` lines, which only the real install phase emits.
+
+The 3 genuine install-phase failures, and their resolution as of 2026-08-21:
+
+1. **Kebla Yurt Renovation — ✅ FIXED.** Patcher failed with `The capsule 'modules\tar_m02ac.mod' did
+   not exist... when attempting to patch 'm02ac.git'`. Root cause is a genuine **install-ordering
+   bug**, not a transient error: this component ran at 03:32:44, but `tar_m02ac.mod` was not created
+   until 03:41:45 — nine minutes later, by "Taris Rapid Transit". Kebla Yurt Renovation patches a
+   module that a later-ordered component creates. Re-ran its patcher after the fact
+   (`holopatcher --install --game-dir .../K1_auto --tslpatchdata <scratch copy>/tslpatchdata`) →
+   **26 patches, 0 errors**, exactly matching what the manual build achieved for this same mod
+   (see `MANUAL_INSTALL_PROGRESS_2026-07-30.md` mod #85). Confirmed it writes **no** Override files
+   (module-only patch), so no `Remove Duplicate TGA/TPC` re-run was needed — important, because
+   re-running an Override-writing mod after that dedup step is exactly the ordering hazard
+   `AGENTS.md` warns about.
+   **Real fix needed upstream:** the guide/instruction order should place this component after
+   whatever creates `tar_m02ac.mod`, or the resolver should declare that dependency.
+
+2. **Trandoshans Rescaled — ✅ FIXED (real archive mis-selection bug).** Patcher failed with
+   `KeyError: "The header 'driveanimrun_pc' does not exist."` when patching `appearance.2da`.
+   Root cause: **two different mods with near-identical names exist in the archive store, and the
+   resolver picked the KOTOR 2 one for a KOTOR 1 build**:
+   | | `Rescaled Trandoshans.zip` (used — wrong) | `[K1]_Trandoshans_Rescale.7z` (correct) |
+   |---|---|---|
+   | Author / DS file | Schizo, file 946 | DarthParametric, file 947 |
+   | `LookupGameNumber` | `2` (TSL) | `1` (K1) |
+   | Model | `Sch_Trando.mdl/.mdx` | `DP_Trandoshan.mdl/.mdx` |
+   | appearance.2da rows | 464, 465 | 452, 453 |
+   | 2da drive columns | `driveanimwalk`, `driveanimrun_pc`, `driveanimrun_xbox` | `driveanimwalk`, `driveanimrun` |
+   The TSL archive's own `info.rtf` says "point the installer towards your kotor 2 install folder".
+   K1's live `appearance.2da` has only `driveanimrun` — hence the `KeyError`. Notably
+   `mod-builds/TOMLs/KOTOR1_Full.toml` (line ~3674) **already declares the correct archive**
+   (`[K1]_Trandoshans_Rescale.7z`), so this is a name-normalization defect in the resolver, not bad
+   source data — `.mission/notes/07-generator-guesswork-elimination.md` records a
+   `Trandoshans Rescaled -> Rescaled Trandoshans` mapping and separately warns those two names are
+   *not* containment-equivalent. That mapping is the prime suspect.
+   **Cleanup performed:** the failed TSL run had already copied `Sch_Trando.mdl`/`.mdx` into the K1
+   Override before erroring out. Verified `appearance.2da` contained no `Sch_Trando` reference (the
+   2da edit is what failed), so the files were inert — deleted both, then ran the correct K1 archive:
+   **4 patches, 0 errors**, `DP_Trandoshan.mdl/.mdx` now present and `appearance.2da` patched.
+   **Real fix needed upstream:** correct the archive-name normalization so a K1 build cannot resolve
+   to a TSL-only archive; ideally gate on the archive's own `LookupGameNumber`.
+
+3. **Bastila has TSL Battle Meditation — ✅ FIXED** (previously believed unfixable). Failed with
+   `AttributeError: 'str' object has no attribute 'info'` ×7 — the upstream Linux HoloPatcher
+   NSS-compiler bug. Rather than accept it, replicated the manual build's own documented workaround
+   (ledger step 141: *"HoloPatcher after wine-precompile … 2DAMEMORY tokens substituted on first
+   pass, then NCS installed via InstallList"*).
+   The patcher's 2DA edits had succeeded; only script compilation failed. Read the four token values
+   straight out of K1_auto's own 2DAs — `2DAMEMORY1=132` (`spells.2da`
+   `FORCE_POWER_BATTLE_MEDITATION_PC`), `2DAMEMORY2=144` / `2DAMEMORY3=145` (`visualeffects.2da`
+   `VFX_IMP_BATTLE_MED_II` / `…_RED`), `2DAMEMORY4=62` (`effecticon.2da`
+   `FORCE_POWER_BATTLE_MEDITATION_II_PC`) — substituted them, and compiled all 7 `[CompileList]`
+   scripts with `wine nwnnsscomp.exe`: `fp_bmed`, `k_punk_bastatt`, `k_sta_bastatt`,
+   `k_psta_ud_bastil`, `k_psta_bast_wor`, `k_psta_worship`, `k_psta_worship2` — **7/7 compiled and
+   installed, 0 failures.**
+
+### ✅ 185/185 — all K1-auto install-phase exceptions are now resolved
+
+**The NSS-compiler bug is a workaround-able blocker, not a hard wall.** It had been carried as an
+"accepted, unfixable" exception since 2026-07-30. It is not: `wine nwnnsscomp.exe` (the compiler
+several of these mods already ship themselves) compiles the scripts fine. The only subtlety is that
+TSLPatcher `#2DAMEMORY#` tokens must first be substituted with the row indices *the target build's
+own 2DAs* received — never copied from another build, since indices differ per mod-set.
+
+### 🔴 Systematic defect found: the archive resolver mis-picks archives on fuzzy name overlap
+
+Built a detector comparing each component name against the archive it actually resolved to (token
+overlap + sequence ratio) across all 176 K1 and 125 K2 resolutions. Most low-overlap matches are
+legitimate — mod archives are often cryptically named (`dm_qrts.rar` = Quarterstaff Pack, `K2CP` =
+K2 Community Patch, `C_DrdWar.rar` = War Droid, `LJJT1.2.7z` = Logical Jekk'Jekk'Tarr,
+`di_kaw2.7z` = Korriban Academy Workbench). But it surfaced **six genuine mis-resolutions**, all
+now fixed by installing the correct archive:
+
+| Component | Wrongly resolved to | Matched on | Correct archive |
+|---|---|---|---|
+| Trandoshans Rescaled | `Rescaled Trandoshans.zip` (a **KOTOR 2** mod) | word reordering | `[K1]_Trandoshans_Rescale.7z` |
+| High Quality Skyboxes II | `High quality skyboxes model fixes.rar` (7-file patch) | "skyboxes" | `HQSkyboxesII_K1.7z` (239 files) |
+| Kill the Czerka Jerk on Kashyyyk | `[K1]_Control_Panel_For_Kashyyyk_Shadowlands_Forcefield_v1.1.7z` | "Kashyyyk" | `KillCzerkaJerk.zip` |
+| Ajunta Pall's Swords Revamped | `Revamped FX.rar` | "Revamped" | `Ajunta&#39;s Swords.7z` |
+| Quanon's Canderous Ordo | `Quanons_HK47_Reskin.rar` | "Quanon" | `Quanon_CandOrdo_Reskin.rar` |
+| Bendak Bounty Non-Darkside Option | `[K1]_Dark_Side_Ending_Cutscene_Enhancement_v1.2.7z` | "Dark Side" | `tar02_duelorg021.dlg` |
+| *(K2)* Enhanced Lightsaber Hilt Variety | `TSL Transparent Cockpit Windows – Enhanced Reflections.7z` | "Enhanced" | `lightsaber_hilt variety_v2.0.zip` |
+
+This is **one root cause behind several apparently unrelated failures** — the Trandoshans 2DA
+schema error, the Czerka Jerk patcher error, and hundreds of missing skybox files all trace back to
+resolving the wrong archive. Fixing the resolver is higher-leverage than fixing any individual mod.
+
+### Repairs applied to the K1-auto build (2026-08-21)
+
+| Fix | Result |
+|---|---|
+| Kebla Yurt Renovation re-run | 26 patches, 0 errors |
+| Trandoshans Rescaled (correct K1 archive; stray TSL models removed) | 4 patches, 0 errors |
+| Bastila Battle Meditation (wine NSS precompile) | 7/7 scripts compiled |
+| Kill the Czerka Jerk (correct archive + wine NSS precompile) | 8 patches + compiled `kas22_attack.ncs` |
+| Ajunta Pall's Swords (correct archive, namespace 0 `NO_WMOTR`) | 132 patches, 0 errors |
+| HQ Skyboxes II base archive (+ guide-mandated `m36aa_01_lm0–lm2.tga` deletion, patch re-applied over base) | +228 files |
+| Duncan on Manaan / Quanon's Canderous / Bendak (correct archives) | 6 files |
+| **TGA/TPC dedup** — 80 stale `.tpc` shadowing a `.tga` | moved to `tpc-backup/` |
+| **Non-content quarantine** — 20 readmes/screenshots/resource-forks in Override | moved to `non-content-quarantine/` |
+
+The dedup was a **crash risk**, not cosmetic: `AGENTS.md` records that a stale `.tpc` shadowing a
+newer `.tga` crashes the game, and the K1 guide has a dedicated final step (181) for it that the
+auto build's component list omits entirely. K1-manual had 0 collisions; K1-auto had 80.
+
+**Override count: 3532 → 3677** after all repairs (net of 100 files correctly moved out by dedup and
+quarantine).
+
+### Remaining gap vs the hand-built reference
+
+A full case-insensitive md5 diff of `K1_auto` vs `K1_manual` (all content dirs) after the repairs:
+
+| Directory | auto | manual | identical | differ | only-auto | only-manual |
+|---|---|---|---|---|---|---|
+| Override | 3432* | 5808 | 2981 | 165 | 286 | 2662 |
+| modules | 301 | 344 | 238 | 63 | 0 | 43 |
+| streamwaves | 493 | 589 | 493 | 0 | 0 | 96 |
+| lips / movies / streammusic / rims / TexturePacks / data | — | — | all identical | 0 | 0 | 0 |
+
+*\*snapshot taken mid-repair, before the HQ Skyboxes and NSS fixes landed.*
+
+Attribution of the missing Override files: 228 HQ Skyboxes II (**now fixed**), 130 HD PC Portraits,
+57 Male Twi'lek Diversity, 23 Ultimate Taris, 20 Ultimate Dantooine, and **2158 unattributed** —
+the latter being module/area geometry (825 `m##` + 272 `UNK` area files) and weapon/lighting
+textures from patcher-driven steps the ledger does not enumerate per-file. All the "Ultimate
+[Planet] High Resolution" packs *are* installed in auto but delivered incomplete payloads, which is
+the same wrong-archive/partial-payload class as the confirmed mis-resolutions above (these packs
+each ship multiple resolution variants in separately-named archives).
+
+### 🔴🔴 ROOT CAUSE OF THE BULK OF THE GAP: components that install *nothing* and report success
+
+Built a detector for components that extracted an archive but then performed **zero Move and zero
+Patcher operations**, yet logged `succeeded`. Result: **27 of 185 K1 components (and 20 of 145 in
+K2) are silent no-ops.** The generator emitted an `Extract` instruction with no follow-up install
+step, so the component unpacks its archive and does nothing.
+
+This — not dozens of unrelated issues — is the single largest cause of the content gap. Worst
+offender: **"A Crashed Republic Cruiser on a Nameless World"** extracted 1302 files and installed
+0. Running its real HoloPatcher (3 namespaces: MainSetup + the HQ Blasters and Colored Loadscreens
+optional integrations, both of which this build has) produced **1209 + 5 + 5 patches, 0 errors,
++1145 Override files — exactly matching the manual build's recorded delta for that step.**
+
+Repairs run for the K1 no-ops, using the hand-built ledger to pick each mod's correct namespace
+(the ledger records the exact option chosen for every step, so this is reconstruction, not
+guesswork). 20 of them installed cleanly, adding ~470 more files. Notable individual results:
+New Lightsaber Blade Models +155, Sith Uniform Reformation Revised +80, Diversified Jedi Captives
++75, KOTOR 1 Twi'lek Male NPC Diversity +58, Cloaked Jedi Robes +24.
+
+### 🔴 The most consequential mis-resolution: K1CP was never actually installed
+
+`KOTOR Community Patch` — the foundational patch the entire K1 build sits on — resolved to
+**`KOTOR 1 Community Patch - Compatibility Patch-1282-4-1-1629713397.rar`** (a 29-file
+compatibility patch) instead of the real installer **`K1_Community_Patch_v1.10.0.zip`** (which the
+manual build ran for **10,293 patches / +547 Override files / modules 234 → 328**).
+
+This is a seventh instance of the fuzzy-name mis-resolution, and it cascades:
+- `Party Conversations on the Ebon Hawk` refuses to install: *"ImportError: K1CP must be installed first."*
+- `Korriban: Back in Black` fails its K1CP-compatible namespace on a GFF field that K1CP should have created.
+- K1_auto has **316 modules vs the manual build's 344** — the missing `.mod` capsules are K1CP's.
+- `Swoop Platform Model Repair` fails on a missing capsule (`tar_m03af.mod`) for the same reason.
+
+**This cannot be repaired in place.** K1CP is guide step 6; roughly 180 mods are now installed on
+top of it. Running it now would overwrite files those later mods legitimately own, producing a
+subtly wrong build — precisely the install-order hazard `AGENTS.md` warns about. **The correct
+remedy is a clean re-run from vanilla once the resolver is fixed** (a pristine reference exists at
+`kotor_vanilla_refs/K1_vanilla`, Override=0, modules=234; note its README: it is hardlinked to
+`snap_0000`, so copy with `rsync -a` — never mutate it in place).
+
+### ✅ RESOLVER FIXED — root cause was that the target game was never set at all
+
+After a first attempt that passed unit tests but failed end-to-end (see the section below, kept as a
+cautionary record), the real root cause was found by probing the live `convert` run:
+
+```
+[PROBE] component='KOTOR Dialogue Fixes' targetGame=None MainConfig.TargetGame='' dest='<null>'
+```
+
+**`MainConfig.TargetGame` was empty for every component.** It is only populated from a serialized
+`game` field, and `DetectTargetGame()`'s fallback inspects the destination install — which a
+*conversion* does not have. So the entire wrong-game guard, including the pre-existing
+`DiscardWrongGame`, had never executed on this path. The original unit test only passed because it
+hardcoded `GameMarker.Kotor1`.
+
+Fixes landed:
+- **`BuildTargetGameInference`** (new) sets `MainConfig.TargetGame` during convert from the document
+  title (`# KOTOR 1 Full Build`), falling back to the path. Title is preferred because it is content
+  rather than a renameable convention.
+- **`ComponentLooksLikeAPatch`** no longer treats a bare trailing "Patch" as a *compatibility* patch
+  — that predicate was silently disabling the anti-compat-patch guard for "KOTOR Community Patch",
+  which is why K1CP lost to its own compatibility patch.
+- **`ResolveByUniqueLongToken`** now ranks unique long-token hits by how much of the component name
+  each covers, and refuses a one-word hit when another archive covers more. This is what was
+  matching "Kashyyyk", "Revamped" and "Quanons" to unrelated mods.
+- **`DiscardSequelMismatch`** — `SignificantTokens` drops "II" for being under four characters, so
+  "Skyboxes II" collapsed to "Skyboxes"; sequels are now kept distinct.
+- **`DiscardSpentInstallFolders`** — a library *folder* containing `installlog.txt`, or both
+  `backup/` and `uninstall/`, is a finished install rather than a source. The "HQ Skyboxes II"
+  folder in the archive store is exactly that (290 files including patcher backups) and was
+  outranking the clean 239-file archive.
+- **`ResolveByFilenameNamedInProse`** — the guide text for HQ Skyboxes II literally says *"simply
+  download the 'HQSkyboxesII_K1.7z' file."* Name similarity could never have matched it ("High
+  Quality" vs "HQ"), so the resolver now honours a filename the guide names explicitly, firing only
+  when the prose names exactly one file that exists.
+
+**Whole-build effect: 174/186 → 185/186 components resolved, with nothing that previously resolved
+becoming unresolved.** The lone holdout is `4GB Patcher` (correctly N/A on Linux anyway).
+
+Independently re-verified with the real `convert` command — all six original cases plus the two
+regressions that surfaced during the work (`Sherruk Attacks with Lightsabers`,
+`High Quality Starfields and Nebulas`) now resolve correctly: **8/8**.
+
+#### ⚠️ A rejected signal worth recording: `LookupGameNumber` is NOT usable
+
+My own brief proposed gating on each archive's `changes.ini` `LookupGameNumber`. That was
+implemented, then **removed after measurement**: of 26 archives in this library whose filename
+unambiguously marks them KOTOR 1 *and* which declare `LookupGameNumber`, **11 (42%) declare `2`** —
+including `JC's Mandalorian Armor for K1`, `[K1] Repair Affects Stun Droid`, and
+`KOTOR1-Thematic-Companions`. Authors copy a TSL template or leave the default. The veto was
+rejecting 20 correct archives. A test now pins the opposite behaviour — a K1 mod declaring
+`LookupGameNumber=2` must still resolve — so the idea is not re-added on how sensible it sounds.
+**Filename markers (`[K1]`/`[TSL]`) do work and are what fixed the Trandoshans case.**
+
+### ⚠️ (Historical) The first resolver attempt was NOT effective end-to-end
+
+Code fixes for the resolver were implemented and unit-tested, but an end-to-end check proves they
+do not yet take effect in the real pipeline. Running the actual generator:
+
+```bash
+dotnet exec .../ModSync.Core.dll convert -i mod-builds/content/k1/full.md -f toml -o <scratch> \
+  --auto-generate-local --source-path /run/media/brunner56/MyBook/kotor_mod_archives \
+  --plaintext --non-interactive --fomod-skip
+```
+
+…still yields all six wrong archives, **including the Trandoshans case whose unit test passes**.
+The likely cause is tier ordering: an earlier match tier (download index / near-name / token-subset)
+wins before the new game-marker and `LookupGameNumber` veto logic runs. **Do not treat this bug as
+closed on the strength of green unit tests — re-run the convert command above and inspect the six
+`Source` values.**
+
+### Honest status
+
+K1-auto has **185/185 components installed and zero install-phase failures**, and every individually
+repairable defect found this session has been repaired. But it is **not content-equivalent to the
+hand-built reference**, and the remaining difference is structural rather than incremental: the
+foundational K1CP never installed, which invalidates part of what sits on top of it.
+
+### ✅ CLEAN REBUILD COMPLETED — K1-auto is now at parity with the hand-built reference
+
+The build was reset to vanilla and re-run end-to-end with the fixed resolver, rather than continuing
+to patch around the missing K1CP. The previous hand-repaired tree was preserved as
+`/home/brunner56/modsync-hot/K1_auto_handrepaired` (rename, not copy) as a fallback.
+
+**Clean run: 183 components attempted, 181 succeeded, 2 failed** — both the known NSS-compiler bug,
+both subsequently fixed. **K1CP installed correctly from `K1_Community_Patch_v1.10.0.zip`, taking
+`modules` 234 → 328 — exactly the manual build's recorded `modules_after` for that step.**
+
+**The K1CP cascade resolved as predicted.** Two components that were unfixable in the old build
+because K1CP was missing now install cleanly: `Party Conversations on the Ebon Hawk` (+60, had been
+failing *"ImportError: K1CP must be installed first"*) and `Swoop Platform Model Repair` (+20, had
+been failing on a missing `tar_m03af.mod` capsule).
+
+Post-install pipeline (`scratchpad/post_install.py`) then found **30 silent no-op components** and
+repaired each by running its real patcher with the namespace option the hand-built ledger records.
+Largest: `A Crashed Republic Cruiser on a Nameless World` **+1145** (1209+5+5 patches across 3
+namespaces — exactly the manual's step-138 delta), New Lightsaber Blade Models +154, Sith Uniform
+Reformation Revised +80, Diversified Jedi Captives +75, KOTOR 1 Twi'lek Male NPC Diversity +58.
+
+Stragglers then cleared individually: Sentinel Sneak Attack (+13, flatten), Multifire (+9 then NSS),
+Better Twi'lek Heads (+8), JC's Mandalorian Armor (+10), K2 Swoops to K1 (+3), Bastila Battle
+Meditation (7 scripts), Kill the Czerka Jerk, Alignment Affects Force Powers.
+
+Finally `Character Textures & Model Fixes` (Redrob41 Upscale+ 2x TPC, 781 files) was installed
+**+465**. Its `cleanlist_k1.txt` deletions were computed **by evidence rather than by name
+matching**: a listed file already present in `Override` means another installed mod owns it, so
+Redrob41's copy is dropped; otherwise his is kept. That yielded 51 deletions here versus the manual
+build's 115 — correctly fewer, because this build includes fewer of the conflicting mods. Name-based
+matching was tried first and produced obvious false negatives (it scored "HD War Droids" against
+"War Droid Mk 1 HD" at 0.67 and missed it), so it was abandoned.
+
+### Final measured state (end of 2026-08-21 session)
+
+| Metric | Session start | After hand-repair | **Final** |
+|---|---|---|---|
+| K1-auto `Override` files | 3532 | 5316 | **5915** |
+| Distinct assets (format-insensitive) | 3601 | 5316 | **5915** vs manual's 5808 |
+| Assets missing vs `K1_manual` | 2207 | 570 | **1** (`desktop.ini`) |
+| `modules/` | 301 | 316 | **344 — exact parity** |
+| TGA/TPC collisions (crash risk) | 80 | 0 | **0** |
+| Non-content files in Override | 20 | 0 | **0** |
+| Install-phase failures | 3 | 0 | **0** |
+
+### ✅ CONTENT-COMPLETE: 5807 of 5808 reference assets present
+
+The single remaining "missing" file is **`desktop.ini`** — Windows Explorer metadata that the
+quarantine step deliberately removes as non-content. Every real game asset in the hand-built
+reference is present, and auto additionally carries 108 assets the manual build lacks.
+
+The last 30 files were closed individually, each following the ledger's recorded step:
+
+| Fix | Detail |
+|---|---|
+| Bendak Non-Darkside Option | the guide's single pre-extracted `tar02_duelorg021.dlg` |
+| Male NPC Clothing | the guide's duplicate-and-rename set (`N_CommM0X01.tga` ×6) |
+| HD Pazaak Cards | 5 root card textures (`green/` folder excluded per guide) |
+| HD Astromech Droids | `DrdAstro HD.rar` — distinct from `AstromechHD.rar`, which is the *cleaning droids* mod |
+| HD Kiosk | `Kiosk Model Fix K1` patch (`PLC_Kiosk3.mdl/.mdx`) |
+| HQ Blasters | the guide's `w_ionrfl_04` → `w_ionrfl_004` rename |
+| Hi-Res Ebon Hawk | the guide's `LDA_EHawk01.tga` → `M36_EHawk01.tga` duplicate |
+| Ultimate Korriban / Yavin / Diversified Jedi Captives | patch-archive files (`m36_shrub.txi`, `yvh_ehawk.txi`, `DPMBJCHybRobe01.tpc`) |
+| Alignment Affects Force Powers | `k_fp_heal1ti/2ti.ncs` compiled from the K1 "Main Install" sources |
+
+**One file set was copied from the reference build rather than an archive, and that is worth
+flagging:** `fx_beam01–03.tga` (Hires Beam Effects). Its entry in the archive store is a *staging
+directory that a previous `Move` had already emptied*, and no packaged archive for it exists there —
+so there was no other source. These are plain textures with no build-specific data, so copying is
+equivalent; but it is the one place where the auto build's content was not independently derived.
+
+#### Two further mis-resolutions found *after* the resolver fix
+
+The resolver is much better but not perfect. Two more were caught by diffing against the reference:
+
+- **`K1 Ported Alien VO Replacements` → `Quarterstaff Replacements.rar`** — matched on the single
+  word "Replacements". Correct archive is `K1 PAVOR v1.3.2.7z`. Installed with both namespaces
+  (Main, then the K1CP compatibility patch) → **221 + 91 patches, exactly the manual's counts**,
+  recovering 37 `.lip` files and the `avo_*` VO set.
+
+- **`Yavin Station Hangar` — a new failure shape: partial install.** The component ran its `Move`
+  step (52 files) but **never ran its HoloPatcher step at all** — 0 patches where the manual build
+  ran 266. Running it recovered the `myvh_*`/`m50aa_*` area lightmap set (+69), plus the
+  Vurt-Yavin compatch (+1).
+
+**The Yavin case matters methodologically:** the silent-no-op detector only catches components that
+do *nothing*. A component that does *some* work while silently skipping its patcher step slips
+straight through. A better check compares each component's achieved patch count against the
+hand-built ledger's recorded count — that sweep is implemented and was what surfaced Yavin.
+
+Also fixed as zero-instruction components (reported success while emitting no instructions at all —
+a class distinct from the extract-then-do-nothing no-ops, caught by a second detector):
+Better Twi'lek Heads (+16, ns 1 Original Necks) and K2 Swoops to K1 (+3, ns 0).
+
+Still failing after repair, with causes recorded rather than papered over:
+- `JC's Blaster Adjustment` — `KeyError: The [repeating_blaster] section was not found in the ini`.
+- `Alignment Affects Force Powers`, `Multifire and Autofire and Finesse` — the NSS-compiler bug;
+  fixable via the wine route proven three times this session, not yet applied to these two.
+- `Korriban: Back in Black`, `Party Conversations on the Ebon Hawk`, `Swoop Platform Model Repair`
+  — all three are downstream of the missing K1CP and should resolve on a clean re-run.
+- `Vision Enhancement` — no success marker; uninvestigated.
+
+**Recommended path (in order):**
+1. Land a resolver fix that demonstrably picks the right archive for all seven known cases,
+   verified with the `convert` command above rather than unit tests.
+2. Reset `K1_auto` from `kotor_vanilla_refs/K1_vanilla` via `rsync -a --delete`.
+3. Re-run the full install with the fixed binary, `--best-effort --skip-validation --no-checkpoint`.
+4. Re-run the silent-no-op detector against the new log; it should come back empty once the
+   generator emits `Patcher` instructions for patcher-driven mods.
+5. Re-run the TGA/TPC dedup and the non-content quarantine as a final pass (the build has no
+   component for the guide's mandatory step 181 dedup).
+6. Diff against `K1_manual` again — texture-format-insensitively (compare by asset stem, treating
+   `.tga`/`.tpc`/`.dds` as one asset), since a naive filename diff over-reports: e.g. HD PC
+   Portraits looked like 130 missing files when auto simply had `.tga` where manual had `.tpc`.
+
+**Historical resume context (2026-08-16, superseded by the above):** at that check-in the live
+process (PID 1178436) was at 27/185, having started ~14:04 that day as run #24 against this target
+(`tmp/auto_install/k1_run*.log`, runs 1–23) — most prior runs crashed or were interrupted (see the
+historical log below for the specific bugs found and fixed along the way: the `--no-checkpoint`
+no-op bug, stale `install_session.json` caching, a self-inflicted 0-byte file, doubly-nested
+extraction, dangling GUIDs, several archive/TOML name mismatches).
+
+---
+
+## Historical log (2026-07-30 session, superseded target path — kept for the bug findings)
+
 **Date:** 2026-07-30
 **Status:** IN PROGRESS — checkpoint baseline complete, real per-mod installs landing in Override/ (585 files as of 12:47 PM, growing)
 

@@ -320,7 +320,13 @@ namespace ModSync.Tests
                 // },
             };
 
-            var existingInstruction = new Instruction { Action = Instruction.ActionType.Move };
+            // Grounded existing instruction (its source exists in the mod workspace). A sourceless
+            // draft is discarded as ungrounded prose and regenerated from the archive instead.
+            var existingInstruction = new Instruction
+            {
+                Action = Instruction.ActionType.Extract,
+                Source = new List<string> { @"<<modDirectory>>\test-mod.zip" },
+            };
             existingInstruction.SetParentComponent(component);
             component.Instructions.Add(existingInstruction);
 

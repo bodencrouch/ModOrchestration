@@ -82,7 +82,7 @@ Install selected mods from an instruction file.
 | `--concurrent` | No | Parallel downloads |
 | `-y` / `--yes` | No | Auto-confirm prompts |
 | `--skip-validation` | No | Skip pre-install checks (not recommended) |
-| `--no-checkpoint` | No | Disable checkpointing |
+| `--no-checkpoint` | No | Disable Git checkpoint commits during install; `install_session.json` resume still works |
 | `--best-effort` | No | Continue on missing sources and mod failures; implies `-y`; without Nexus key, **deselects Nexus-only mods** |
 | `--continue-on-missing-sources` | No | Partial install when archives missing |
 | `--continue-on-mod-failure` | No | Continue after per-mod failure |
@@ -94,6 +94,16 @@ Install selected mods from an instruction file.
 | `--managed` | No | Force managed hardlink deploy for this run (requires `--profile` or an active profile in settings) — [#177](https://github.com/oldrepublicwizard/ModSync/pull/177) |
 | `--no-managed` | No | Force classic install for this run (ignore `managedDeploymentEnabled`) |
 | `--profile` | No | Profile name for managed deploy (overrides `activeProfileName` for this run) |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Verified install (published PASS). Only a run without any of the flags below can exit 0. |
+| `2` | Completed-unverified. The run reached the end of the plan with `--skip-validation`, `--no-checkpoint`, `--best-effort`, `--continue-on-missing-sources`, or `--continue-on-mod-failure` set, so there is no published PASS. This includes runs that continued past failed components or skipped missing archives. |
+| `1` | Failure: validation blocked the install, or the run stopped at a failing component. |
+
+Following the witness plan (`docs/plans/2026-08-31-0216-feat-witness-pass-type-plan.md`, R9 and U4.3), these flags have no exit-0 shortcut. The plan says every finished run under them "must emit completed-unverified", so a best-effort run that had component failures also exits `2`; it does not get a separate exit code. Its failures stay visible in two ways. The log has a separate warning line, `Installation finished unverified, with N component failure(s)` (plus `and M component(s) skipped for missing archives` when archives were skipped). `InstallationPipelineResult` also carries `InstallLoopExitCode` (`CompletedWithFailures` / `MissingSourceFiles` / `Success`), `FailedComponentCount`, and `SkippedComponentCount`. Scripts that need to know whether any mod failed should read that line, not the exit code. A missing archive *without* `--continue-on-missing-sources`/`--best-effort` is still a hard stop and exits `1`.
 
 **Managed deploy:** fail-closed when `--managed` is set without a resolvable profile. See [managed-deployment.md](managed-deployment.md) and [install-profiles.md](install-profiles.md).
 

@@ -5,12 +5,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ModSync.Core;
 using ModSync.Core.Installation;
 using ModSync.Core.Services;
+using ModSync.Core.Services.Checkpoints;
 using ModSync.Tests.TestHelpers;
 using NUnit.Framework;
 
@@ -302,6 +304,64 @@ namespace ModSync.Tests
                 Assert.That(resume.OrderedComponents, Has.Count.EqualTo(2), "Should contain both components");
                 Assert.That(resume.OrderedComponents.Any(c => c.Guid == mod1.Guid), Is.True, "Should contain Mod 1");
                 Assert.That(resume.OrderedComponents.Any(c => c.Guid == mod2.Guid), Is.True, "Should contain Mod 2");
+            });
+        }
+
+        [Test]
+        public async Task PromoteSnapshot_StagesOnGameVolume_NotTempPath()
+        {
+            File.WriteAllText(Path.Combine(_workingDirectory.FullName, "marker.txt"), "ok");
+            var beforeTemp = new HashSet<string>(
+                Directory.GetDirectories(Path.GetTempPath(), "ModSync_Backup_*"),
+                StringComparer.Ordinal);
+
+            var coordinator = new InstallCoordinator();
+            _ = await coordinator.InitializeAsync(MainConfig.AllComponents, MainConfig.DestinationPath, CancellationToken.None);
+            await coordinator.CheckpointManager.PromoteSnapshotAsync(_workingDirectory, CancellationToken.None);
+
+            var afterTemp = Directory.GetDirectories(Path.GetTempPath(), "ModSync_Backup_*");
+            string backupZip = Path.Combine(_workingDirectory.FullName, ModComponent.CheckpointFolderName, "last_good_backup.zip");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(afterTemp.Except(beforeTemp), Is.Empty, "Snapshot staging must not use tmpfs / Path.GetTempPath()");
+                Assert.That(File.Exists(backupZip), Is.True, "last_good_backup.zip should land under .modsync on the game volume");
+            });
+        }
+
+        [Test]
+        public async Task PromoteSnapshot_SkipsImmutableVanillaMediaAndData()
+        {
+            Directory.CreateDirectory(Path.Combine(_workingDirectory.FullName, "Override"));
+            Directory.CreateDirectory(Path.Combine(_workingDirectory.FullName, "movies"));
+            Directory.CreateDirectory(Path.Combine(_workingDirectory.FullName, "streamwaves", "globe"));
+            Directory.CreateDirectory(Path.Combine(_workingDirectory.FullName, "data"));
+            File.WriteAllText(Path.Combine(_workingDirectory.FullName, "Override", "appearance.2da"), "override");
+            File.WriteAllText(Path.Combine(_workingDirectory.FullName, "dialog.tlk"), "tlk");
+            File.WriteAllBytes(Path.Combine(_workingDirectory.FullName, "movies", "legal.bik"), new byte[1024]);
+            File.WriteAllBytes(Path.Combine(_workingDirectory.FullName, "streamwaves", "globe", "n_gend.wav"), new byte[1024]);
+            File.WriteAllBytes(Path.Combine(_workingDirectory.FullName, "data", "chitin.bif"), new byte[1024]);
+
+            var coordinator = new InstallCoordinator();
+            _ = await coordinator.InitializeAsync(MainConfig.AllComponents, MainConfig.DestinationPath, CancellationToken.None);
+            await coordinator.CheckpointManager.PromoteSnapshotAsync(_workingDirectory, CancellationToken.None);
+
+            string backupZip = Path.Combine(_workingDirectory.FullName, ModComponent.CheckpointFolderName, "last_good_backup.zip");
+            using ZipArchive zip = ZipFile.OpenRead(backupZip);
+            var names = zip.Entries.Select(e => e.FullName.Replace('\\', '/')).ToList();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(CheckpointPaths.IsUnderImmutableVanillaDirectory("movies/legal.bik"), Is.True);
+                Assert.That(CheckpointPaths.IsUnderImmutableVanillaDirectory("steamassets/data/foo.bif"), Is.True);
+                Assert.That(CheckpointPaths.IsUnderImmutableVanillaDirectory("Override/appearance.2da"), Is.False);
+                Assert.That(names, Does.Contain("Override/appearance.2da").Or.Contain("Override\\appearance.2da"));
+                Assert.That(names.Any(n => n.EndsWith("dialog.tlk", StringComparison.OrdinalIgnoreCase)), Is.True);
+                Assert.That(names.Any(n => n.IndexOf("movies", StringComparison.OrdinalIgnoreCase) >= 0), Is.False);
+                Assert.That(names.Any(n => n.IndexOf("streamwaves", StringComparison.OrdinalIgnoreCase) >= 0), Is.False);
+                Assert.That(names.Any(n => n.IndexOf("/data/", StringComparison.OrdinalIgnoreCase) >= 0
+                                           || n.StartsWith("data/", StringComparison.OrdinalIgnoreCase)
+                                           || n.IndexOf("data\\", StringComparison.OrdinalIgnoreCase) >= 0), Is.False);
             });
         }
 

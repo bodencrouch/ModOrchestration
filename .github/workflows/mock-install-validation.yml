@@ -1,0 +1,185 @@
+name: Mock Install Validation
+
+# Runs a real ModSync install against a synthetic KOTOR install and proves the game
+# directory actually changed. No game data and no third-party mod archives are involved:
+# every file is generated from its format layout by src/ModSync.Tests/Fixtures.
+#
+# A zero exit code is never treated as success. Every job compares the game directory
+# before and after and fails if nothing moved.
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "9.0.x"
+  TEST_PROJECT: "src/ModSync.Tests/ModSync.Tests.csproj"
+  TEST_BIN: "src/ModSync.Tests/bin/Debug/net9.0"
+  CORE_DLL: "src/ModSync.Core/bin/Debug/net9.0/ModSync.Core.dll"
+
+jobs:
+  fixture-checks:
+    name: Fixture structure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+
+      - name: Check out the UI submodules
+        run: git submodule update --init --depth 1 src/AvRichTextBox src/RtfDomParserAvalonia
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build the test project
+        run: dotnet build "${{ env.TEST_PROJECT }}" --configuration Debug -f net9.0
+
+      - name: Check the mock matches ModSync's own detection
+        run: |
+          dotnet test "${{ env.TEST_PROJECT }}" \
+            --configuration Debug \
+            --no-build \
+            -f net9.0 \
+            --filter "FullyQualifiedName~MockKotorInstallTests" \
+            --logger "console;verbosity=normal"
+
+  mock-install:
+    name: Install into mock ${{ matrix.game }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - game: k1
+            # K1 keeps content at the install root and capitalises Override.
+            override_subpath: "Override"
+            content_subpath: "."
+          - game: k2
+            # The Aspyr layout nests content under steamassets and uses a lowercase override.
+            override_subpath: "steamassets/override"
+            content_subpath: "steamassets"
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+
+      - name: Check out the UI submodules
+        run: git submodule update --init --depth 1 src/AvRichTextBox src/RtfDomParserAvalonia
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build the test project
+        run: dotnet build "${{ env.TEST_PROJECT }}" --configuration Debug -f net9.0
+
+      - name: Link the bundled Linux HoloPatcher
+        run: |
+          set -euo pipefail
+          ./scripts/agents/ensure_linux_holopatcher.sh "$PWD/${{ env.TEST_BIN }}"
+          ./scripts/agents/ensure_linux_holopatcher.sh "$PWD/src/ModSync.Core/bin/Debug/net9.0"
+          "$PWD/${{ env.TEST_BIN }}/Resources/holopatcher" --help > /dev/null
+          echo "HoloPatcher runs on this runner."
+
+      - name: Generate the mock install, mods and build file
+        run: |
+          set -euo pipefail
+          ./scripts/agents/create_mock_kotor_install.sh \
+            --game "${{ matrix.game }}" \
+            --out "$RUNNER_TEMP/mock/game" \
+            --mod-dir "$RUNNER_TEMP/mock/mods" \
+            --build-file "$RUNNER_TEMP/mock/mock_build.toml" \
+            --no-build
+
+      - name: Record the baseline
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_mock_install.py snapshot \
+            --override-dir "$RUNNER_TEMP/mock/game/${{ matrix.override_subpath }}" \
+            --dialog-tlk "$RUNNER_TEMP/mock/game/${{ matrix.content_subpath }}/dialog.tlk" \
+            --table "$RUNNER_TEMP/mock/game/${{ matrix.override_subpath }}/mock_baseline.2da" \
+            --state "$RUNNER_TEMP/mock/baseline.json"
+
+      - name: Run the install
+        run: |
+          set -euo pipefail
+          # No pipe: piping into tee would mask the CLI's exit status behind tee's.
+          set +e
+          dotnet "${{ env.CORE_DLL }}" install \
+            -i "$RUNNER_TEMP/mock/mock_build.toml" \
+            -g "$RUNNER_TEMP/mock/game" \
+            -s "$RUNNER_TEMP/mock/mods" \
+            --skip-validation \
+            --no-checkpoint \
+            -y > "$RUNNER_TEMP/mock/install.log" 2>&1
+          install_status=$?
+          set -e
+
+          tail -n 60 "$RUNNER_TEMP/mock/install.log"
+          echo "install exit status: $install_status"
+
+          # --skip-validation/--no-checkpoint installs finish completed-unverified: the CLI exits
+          # with its dedicated code 2 instead of 0 (no published install PASS). Any other non-zero
+          # status is a real failure. The steps below still prove the game directory changed.
+          if [ "$install_status" -ne 0 ] && [ "$install_status" -ne 2 ]; then
+            echo "::error::ModSync install exited with status $install_status"
+            exit 1
+          fi
+
+          # The CLI has historically logged errors and still exited 0, so the log is
+          # checked independently of the status.
+          if grep -q "\[Error\]" "$RUNNER_TEMP/mock/install.log"; then
+            echo "::error::The install log contains errors despite a zero exit status"
+            grep -n "\[Error\]" "$RUNNER_TEMP/mock/install.log" | head -n 20
+            exit 1
+          fi
+
+      - name: Prove the game directory changed
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_mock_install.py assert \
+            --override-dir "$RUNNER_TEMP/mock/game/${{ matrix.override_subpath }}" \
+            --dialog-tlk "$RUNNER_TEMP/mock/game/${{ matrix.content_subpath }}/dialog.tlk" \
+            --table "$RUNNER_TEMP/mock/game/${{ matrix.override_subpath }}/mock_baseline.2da" \
+            --state "$RUNNER_TEMP/mock/baseline.json" \
+            --expect-file "mock_loose_marker.txt" \
+            --expect-file "mock_tsl_installed.txt" \
+            --expect-string "ModSync mock appended string A" \
+            --expect-string "ModSync mock appended string B"
+
+      - name: Confirm the patcher ran rather than being skipped
+        run: |
+          set -euo pipefail
+          grep -q "Using CLI to run command" "$RUNNER_TEMP/mock/install.log" \
+            || { echo "::error::No patcher process was launched"; exit 1; }
+          grep -q "Patcher exited with exit code 0" "$RUNNER_TEMP/mock/install.log" \
+            || { echo "::error::The patcher did not report a clean exit"; exit 1; }
+
+      - name: Run the install integration tests
+        run: |
+          dotnet test "${{ env.TEST_PROJECT }}" \
+            --configuration Debug \
+            --no-build \
+            -f net9.0 \
+            --filter "FullyQualifiedName~MockInstallIntegrationTests" \
+            --logger "console;verbosity=normal"
+
+      - name: Upload the install log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-install-${{ matrix.game }}-logs
+          path: |
+            ${{ runner.temp }}/mock/install.log
+            ${{ runner.temp }}/mock/baseline.json
+          retention-days: 14
+          if-no-files-found: warn

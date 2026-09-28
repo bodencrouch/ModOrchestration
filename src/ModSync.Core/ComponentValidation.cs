@@ -41,7 +41,8 @@ namespace ModSync.Core
         }
         public bool Run() =>
             VerifyExtractPaths()
-            && ParseDestinationWithAction();
+            && ParseDestinationWithAction()
+            && VerifyChooseSelections();
         private void AddError([NotNull] string message, [NotNull] Instruction instruction) =>
             _validationResults.Add(new ValidationResult(this, instruction, message, isError: true));
         private void AddWarning([NotNull] string message, [NotNull] Instruction instruction) =>
@@ -107,15 +108,20 @@ namespace ModSync.Core
                             continue;
                         case Instruction.ActionType.Extract:
                         case Instruction.ActionType.Choose:
+                        case Instruction.ActionType.Delete:
+                        case Instruction.ActionType.DelDuplicate:
+                        case Instruction.ActionType.CleanList:
+                            // Guide deletes name files inside extracts or missing Override
+                            // targets. CleanList sources live in the repo
+                            // (mod-builds/scripts/cleanlist_k1.txt), not the archive store.
+                            // DelDuplicate operates on the live Override. None of these are
+                            // archive-membership checks.
                             continue;
                         case Instruction.ActionType.Execute:
                         case Instruction.ActionType.Patcher:
                         case Instruction.ActionType.Move:
                         case Instruction.ActionType.Copy:
                         case Instruction.ActionType.Rename:
-                        case Instruction.ActionType.Delete:
-                        case Instruction.ActionType.DelDuplicate:
-                        case Instruction.ActionType.CleanList:
                         case Instruction.ActionType.Run:
                         default:
                             break;
@@ -324,6 +330,21 @@ namespace ModSync.Core
                                 instruction
                             );
                         }
+                        // 'Rename' Destination is contractually a bare filename that is never
+                        // resolved through ReplaceCustomVariables (see Instruction.RenameFile).
+                        // A literal placeholder token surviving to this point means an earlier
+                        // guide-parsing/rebind step (AutoInstructionGenerator.BindBareCopyAsInstructions)
+                        // failed to ground it, and it would otherwise be written to disk verbatim.
+                        else if (instruction.Destination.IndexOf("<<", StringComparison.Ordinal) >= 0)
+                        {
+                            success = false;
+                            AddError(
+                                "Unresolved placeholder in 'Destination'."
+                                + $" Got '{instruction.Destination}',"
+                                + " expected a bare filename with no '<<...>>' placeholder token.",
+                                instruction
+                            );
+                        }
                         break;
                     case Instruction.ActionType.Run:
                     case Instruction.ActionType.Execute:
@@ -339,6 +360,34 @@ namespace ModSync.Core
                             {
                                 destinationPath = PathHelper.GetCaseSensitivePath(destinationPath).Item1;
                             }
+                        }
+                        if (LooksLikeFileDestination(destinationPath))
+                        {
+                            string parentPath = Path.GetDirectoryName(destinationPath);
+                            if (string.IsNullOrWhiteSpace(parentPath)
+                                || !PathValidator.IsValidPath(parentPath)
+                                || !Directory.Exists(parentPath))
+                            {
+                                success = false;
+                                AddError($"Destination folder cannot be found! Got '{parentPath}'", instruction);
+                                if (MainConfig.AttemptFixes && PathValidator.IsValidPath(parentPath))
+                                {
+                                    Logger.Log("Fixing the above error automatically...");
+                                    try
+                                    {
+                                        _ = Directory.CreateDirectory(parentPath);
+                                        success = Directory.Exists(parentPath);
+                                    }
+                                    catch (Exception e)
+                                    {
+                                        Logger.LogException(e);
+                                        AddError(e.Message, instruction);
+                                        success = false;
+                                    }
+                                }
+                            }
+
+                            break;
                         }
                         if (string.IsNullOrWhiteSpace(destinationPath)
                             || !PathValidator.IsValidPath(destinationPath)
@@ -366,6 +415,53 @@ namespace ModSync.Core
                 }
             }
             return success;
+        }
+
+        /// <summary>
+        /// Warns (never blocks) when a 'Choose' instruction defines one or more branch
+        /// options but none of them are currently selected. That instruction would execute
+        /// as a silent no-op that still reports Success, so the component can be
+        /// checkmarked "installed" despite zero files ever being written. Some guide flows
+        /// legitimately leave every branch ineligible (e.g. all siblings incompatible with
+        /// the current build), so this is surfaced as a warning, not a validation failure.
+        /// </summary>
+        private bool VerifyChooseSelections()
+        {
+            var instructions = ComponentToValidate.Instructions?.ToList() ?? new List<Instruction>();
+            foreach (Option thisOption in ComponentToValidate.Options ?? Enumerable.Empty<Option>())
+            {
+                if (thisOption?.Instructions != null)
+                {
+                    instructions.AddRange(thisOption.Instructions);
+                }
+            }
+
+            foreach (Instruction instruction in instructions)
+            {
+                if (instruction is null
+                    || instruction.Action != Instruction.ActionType.Choose
+                    || instruction.Source is null
+                    || instruction.Source.Count == 0)
+                {
+                    continue;
+                }
+
+                bool anySelected = ComponentToValidate.Options != null
+                    && ComponentToValidate.Options.Any(o =>
+                        o != null
+                        && o.IsSelected
+                        && instruction.Source.Contains(o.Guid.ToString(), StringComparer.OrdinalIgnoreCase));
+                if (!anySelected)
+                {
+                    AddWarning(
+                        $"This 'Choose' instruction defines {instruction.Source.Count} branch option(s),"
+                        + " but none are currently selected; it will install nothing.",
+                        instruction
+                    );
+                }
+            }
+
+            return true;
         }
         [NotNull]
         private static string GetErrorDescription(ArchivePathCode code)
@@ -485,6 +581,26 @@ namespace ModSync.Core
 
             if (!ArchiveHelper.HasArchiveExtension(archivePath))
             {
+                // Some mods ship in the archive store as an already-extracted directory
+                // tree instead of a .zip/.rar/.7z ("K2 Swoops to K1/[K1] Swoop from K2 to
+                // K1/..."). relativePath's first segment restates the directory's own name
+                // (matching how a real archive name anchors the rest of the path), so strip
+                // it and check the remainder against the real filesystem.
+                if (Directory.Exists(archivePath))
+                {
+                    string[] segments = relativePath.Split(
+                        new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                        StringSplitOptions.RemoveEmptyEntries);
+                    if (segments.Length > 1)
+                    {
+                        string candidate = Path.Combine(
+                            new[] { archivePath }.Concat(segments.Skip(1)).ToArray());
+                        return File.Exists(candidate) || Directory.Exists(candidate)
+                            ? ArchivePathCode.FoundSuccessfully
+                            : ArchivePathCode.NotFoundInArchive;
+                    }
+                }
+
                 return ArchivePathCode.NotAnArchive;
             }
 
@@ -503,6 +619,23 @@ namespace ModSync.Core
             return matchResult.Matches
                 ? ArchivePathCode.FoundSuccessfully
                 : ArchivePathCode.NotFoundInArchive;
+        }
+
+        /// <summary>
+        /// Copy/Move destinations that include a filename (Override\N_CommM08.tga) must not
+        /// be created as directories. AttemptFixes used to do that and then real Move failed
+        /// with "already exists" against the leftover folder.
+        /// </summary>
+        private static bool LooksLikeFileDestination([CanBeNull] string destinationPath)
+        {
+            if (string.IsNullOrWhiteSpace(destinationPath))
+            {
+                return false;
+            }
+
+            string leaf = Path.GetFileName(
+                destinationPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            return !string.IsNullOrEmpty(leaf) && Path.HasExtension(leaf);
         }
     }
 }

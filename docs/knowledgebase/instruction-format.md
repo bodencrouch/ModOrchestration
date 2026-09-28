@@ -69,6 +69,18 @@ For narrative examples of graph fields, see `README.md` or the [pastebin explana
 
 Each instruction row also carries **Source**, **Destination** (when applicable), **Arguments**, **Overwrite**, and optional per-instruction **Dependencies** / **Restrictions**.
 
+### DelDuplicate final sweep (not wired; follow-up)
+
+`[REPO]` `DelDuplicate` runs once, at its place in guide order, and only sees duplicates that exist at that moment. `Instruction.RunFinalDuplicateSweepAsync` can re-apply a guide's DelDuplicate purges after the whole guide installs, but the install loop does **not** call it. An unconditional end-of-install sweep deletes game-directory files outside guide order (see AGENTS.md, "Install order is load-bearing"), has no VFS dry-run equivalent, so validation would not match install, and can remove a file that a later mod ships on purpose.
+
+`[OPEN]` Before the sweep is wired in, it must:
+
+1. run the same sweep in the VFS dry-run, so validation matches install;
+2. only remove files of the extension that the owning component's own DelDuplicate purged, and never a file that a later component deliberately ships (for example, respect `Overwrite`/ownership records from the install plan);
+3. never run after a failure break or a fail-closed stop.
+
+Until then, `RealWorldInstallationScenariosTests.Install_FinalDuplicateSweep_CatchesLateReintroducedDuplicate` (from `feat/aio-consolidation`) fails, as it already did on that branch tip. It is not skipped or weakened.
+
 ## Minimal TOML example
 
 Placeholder-only paths; not a complete real mod:

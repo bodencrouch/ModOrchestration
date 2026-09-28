@@ -60,6 +60,34 @@ namespace ModSync.Tests
             string modifiedContent = File.ReadAllText(Path.Combine(_testDirectoryPath, iniFileName));
             Assert.That(modifiedContent, Does.Contain("ConfirmMessage=N/A"));
         }
+
+        [Test]
+        public void DropDangling2daRowReferences_CommentsMissingChangeRowSections()
+        {
+            Assert.That(_testDirectoryPath, Is.Not.Null);
+            const string ini = @"[2DAList]
+Table0=baseitems.2da
+
+[baseitems.2da]
+ChangeRow0=blaster_pistol
+ChangeRow12=repeating_blaster
+
+[blaster_pistol]
+RowIndex=12
+numdice=1
+";
+            File.WriteAllText(Path.Combine(_testDirectoryPath, "pistol_rifle.ini"), ini);
+
+            int dropped = IniHelper.DropDangling2daRowReferences(new DirectoryInfo(_testDirectoryPath));
+            string after = File.ReadAllText(Path.Combine(_testDirectoryPath, "pistol_rifle.ini"));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(dropped, Is.EqualTo(1));
+                Assert.That(after, Does.Contain("ChangeRow0=blaster_pistol"));
+                Assert.That(after, Does.Contain(";ChangeRow12=repeating_blaster"));
+            });
+        }
     }
 
 }

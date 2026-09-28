@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
@@ -23,6 +24,20 @@ namespace ModSync.Core
         [CanBeNull]
         private Services.FileSystem.IFileSystemProvider _fileSystemProvider;
         internal void SetFileSystemProvider([NotNull] Services.FileSystem.IFileSystemProvider provider) => _fileSystemProvider = provider ?? throw new ArgumentNullException(nameof(provider));
+
+        /// <summary>
+        /// Set by <see cref="Services.AutoInstructionGenerator"/> on the blanket <c>folder\*</c>
+        /// sweeps it synthesizes from archive listings. Those wildcards match every file the mod
+        /// author packaged -- readmes, screenshots, macOS resource forks, installer executables --
+        /// and copy all of it into the game's Override folder. When this is set, wildcard matches
+        /// that are packaging debris are dropped before the Move runs.
+        /// <para>
+        /// Deliberately internal and not serialized: it describes how the path was produced, not
+        /// what the author asked for. A hand-authored instruction naming a specific file is never
+        /// filtered.
+        /// </para>
+        /// </summary>
+        internal bool ExcludeNonGameContent { get; set; }
         public enum ActionExitCode
         {
             UnauthorizedAccessException = -1,
@@ -306,10 +321,13 @@ namespace ModSync.Core
             if (!sourceIsNotFilePath)
             {
                 Logger.LogVerbose($"[Instruction.SetRealPaths] Calling ReplaceCustomVariables on source paths...");
-                var processedSource = Source.Select(UtilityHelper.ReplaceCustomVariables).ToList();
+                var processedSource = Source.Select(UtilityHelper.ReplaceCustomVariables)
+                    .Select(RemapExtractedTreeToScratch)
+                    .ToList();
                 Logger.LogVerbose($"[Instruction.SetRealPaths] After ReplaceCustomVariables on source: [{string.Join(", ", processedSource)}]");
                 Logger.LogVerbose($"[Instruction.SetRealPaths] Calling EnumerateFilesWithWildcards with processed paths...");
                 newSourcePaths = PathHelper.EnumerateFilesWithWildcards(processedSource, _fileSystemProvider);
+                newSourcePaths = DropNonGameContentFromWildcardMatches(processedSource, newSourcePaths);
                 if (skipExistenceCheck)
                 {
                     foreach (string processedPath in processedSource)
@@ -408,19 +426,26 @@ namespace ModSync.Core
             {
                 thisDestination = new DirectoryInfo(destinationPath);
             }
-            if (
-                !skipExistenceCheck
-                && !skipDestinationValidation
-                && thisDestination != null
-                && !_fileSystemProvider.DirectoryExists(thisDestination.FullName)
-                && Action != ActionType.DelDuplicate
-            )
+
+            // Copy/Move/Extract used to skip existence checks so they could create a missing
+            // destination. On a case-sensitive volume that created steamassets/Override beside
+            // the real steamassets/override (or threw DirectoryNotFoundException writing into the
+            // missing Override). Always remap to an existing case-insensitive sibling first.
+            if (thisDestination != null
+                && MainConfig.CaseInsensitivePathing
+                && _fileSystemProvider != null
+                && !_fileSystemProvider.DirectoryExists(thisDestination.FullName))
             {
-                if (MainConfig.CaseInsensitivePathing)
+                DirectoryInfo caseMatched = PathHelper.GetCaseSensitivePath(thisDestination);
+                if (caseMatched != null
+                    && _fileSystemProvider.DirectoryExists(caseMatched.FullName))
                 {
-                    thisDestination = PathHelper.GetCaseSensitivePath(thisDestination);
+                    thisDestination = caseMatched;
                 }
-                if (thisDestination != null && !_fileSystemProvider.DirectoryExists(thisDestination.FullName))
+                else if (
+                    !skipExistenceCheck
+                    && !skipDestinationValidation
+                    && Action != ActionType.DelDuplicate)
                 {
                     throw new DirectoryNotFoundException("Could not find the 'Destination' path on disk!");
                 }
@@ -466,6 +491,198 @@ namespace ModSync.Core
 
             RealSourcePaths = new List<string>(newFullPaths);
         }
+        /// <summary>
+        /// Removes packaging debris from the expansion of a GENERATED <c>folder\*</c> sweep.
+        /// <para>
+        /// Only wildcard matches are considered: a literal source path is something someone asked
+        /// for by name. If every match is filtered out the original list is kept, because turning
+        /// "this component installed a readme" into "this component failed" would be a worse bug
+        /// than the one being fixed.
+        /// </para>
+        /// </summary>
+        [CanBeNull]
+        private List<string> DropNonGameContentFromWildcardMatches(
+            [NotNull][ItemCanBeNull] IReadOnlyList<string> processedSource,
+            [CanBeNull] List<string> resolvedPaths)
+        {
+            if (!ExcludeNonGameContent || resolvedPaths is null || resolvedPaths.Count == 0)
+            {
+                return resolvedPaths;
+            }
+
+            bool anyWildcard = processedSource.Any(p =>
+                !string.IsNullOrEmpty(p)
+                && (p.IndexOf('*') >= 0 || p.IndexOf('?') >= 0));
+            if (!anyWildcard)
+            {
+                return resolvedPaths;
+            }
+
+            var kept = resolvedPaths
+                .Where(p => !Services.NonGameContentFilter.IsNonGameContent(p))
+                .ToList();
+
+            if (kept.Count == 0)
+            {
+                return resolvedPaths;
+            }
+
+            if (kept.Count != resolvedPaths.Count)
+            {
+                Logger.LogVerbose(
+                    $"[Instruction.SetRealPaths] Excluded {resolvedPaths.Count - kept.Count} non-game file(s) "
+                    + "from a generated wildcard sweep.");
+            }
+
+            return kept;
+        }
+
+        [NotNull]
+        private string RemapExtractedTreeToScratch([NotNull] string path)
+        {
+            if (Action == ActionType.Extract
+                || MainConfig.ExtractScratchPath is null
+                || MainConfig.SourcePath is null
+                || string.IsNullOrWhiteSpace(path))
+            {
+                return path;
+            }
+
+            ModComponent parent = GetParentComponent();
+            ModComponent installComponent = ResolveComponentThatOwnsExtract(parent);
+            if (installComponent?.Instructions is null
+                || !installComponent.Instructions.Any(i => i.Action == ActionType.Extract))
+            {
+                return path;
+            }
+
+            string usbRoot;
+            string full;
+            try
+            {
+                usbRoot = Path.GetFullPath(MainConfig.SourcePath.FullName);
+                full = Path.GetFullPath(path);
+            }
+            catch (IOException)
+            {
+                return path;
+            }
+
+            if (!full.StartsWith(usbRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return path;
+            }
+
+            string relative = full.Substring(usbRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return Path.Combine(MainConfig.ExtractScratchPath.FullName, relative);
+        }
+
+        /// <summary>
+        /// Namespace <see cref="Option"/>s are themselves <see cref="ModComponent"/>s. Patcher
+        /// instructions on an option set their parent to that option, but the Extract that created
+        /// the on-disk tree lives on the outer component. Remapping <c>&lt;&lt;modDirectory&gt;&gt;</c>
+        /// paths into the extract scratch must follow that outer Extract — otherwise Choose/Patcher
+        /// looks for Installer.exe under the archive store after a successful extract to scratch
+        /// (measured: K1 Ported Alien VO Replacements / PAVOR).
+        /// </summary>
+        [CanBeNull]
+        private static ModComponent ResolveComponentThatOwnsExtract([CanBeNull] ModComponent parent)
+        {
+            if (parent is null || !(parent is Option))
+            {
+                return parent;
+            }
+
+            IReadOnlyList<ModComponent> all = MainConfig.AllComponents;
+            if (all is null || all.Count == 0)
+            {
+                return parent;
+            }
+
+            foreach (ModComponent candidate in all)
+            {
+                if (candidate?.Options is null || candidate.Options.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (Option option in candidate.Options)
+                {
+                    if (option is null)
+                    {
+                        continue;
+                    }
+
+                    if (ReferenceEquals(option, parent) || option.Guid == parent.Guid)
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return parent;
+        }
+
+        [CanBeNull]
+        private static string RedirectExtractDestinationToScratch([NotNull] string sourcePath, [CanBeNull] string destinationPath)
+        {
+            if (MainConfig.ExtractScratchPath is null)
+            {
+                return destinationPath;
+            }
+
+            string archiveDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+            string dest = string.IsNullOrEmpty(destinationPath) ? archiveDirectory : destinationPath;
+            string destFull;
+            string archiveDirFull;
+            try
+            {
+                destFull = Path.GetFullPath(dest).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                archiveDirFull = Path.GetFullPath(archiveDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch (IOException)
+            {
+                return destinationPath;
+            }
+
+            bool destIsArchiveDir = string.Equals(destFull, archiveDirFull, StringComparison.OrdinalIgnoreCase);
+            bool destIsOnArchiveStore = false;
+            string sourceRootFull = null;
+            if (MainConfig.SourcePath != null)
+            {
+                sourceRootFull = Path.GetFullPath(MainConfig.SourcePath.FullName)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                destIsOnArchiveStore = destFull.Equals(sourceRootFull, StringComparison.OrdinalIgnoreCase)
+                    || destFull.StartsWith(sourceRootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || destFull.StartsWith(sourceRootFull + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (!destIsArchiveDir && !destIsOnArchiveStore)
+            {
+                return destinationPath;
+            }
+
+            string relative;
+            if (destIsArchiveDir || sourceRootFull is null || destFull.Equals(sourceRootFull, StringComparison.OrdinalIgnoreCase))
+            {
+                relative = Path.GetFileNameWithoutExtension(sourcePath);
+            }
+            else
+            {
+                relative = destFull.Substring(sourceRootFull.Length)
+                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+
+            if (string.IsNullOrEmpty(relative))
+            {
+                return destinationPath;
+            }
+
+            string scratchDest = Path.Combine(MainConfig.ExtractScratchPath.FullName, relative);
+            _ = Directory.CreateDirectory(scratchDest);
+            return scratchDest;
+        }
+
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0051:Method is too long", Justification = "<Pending>")]
         public async Task<ActionExitCode> ExtractFileAsync(
             DirectoryInfo argDestinationPath = null,
@@ -494,6 +711,15 @@ namespace ModSync.Core
                 foreach (string sourcePath in RealSourcePaths)
                 {
                     string destinationPath = argDestinationPath?.FullName ?? RealDestinationPath?.FullName ?? Path.GetDirectoryName(sourcePath);
+                    string originalDestination = destinationPath;
+                    destinationPath = RedirectExtractDestinationToScratch(sourcePath, destinationPath);
+                    if (!string.IsNullOrEmpty(destinationPath)
+                        && !string.Equals(originalDestination, destinationPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await Logger.LogAsync(
+                            $"Extract destination redirected off archive store: '{originalDestination}' → '{destinationPath}'"
+                        ).ConfigureAwait(false);
+                    }
                     if (string.IsNullOrEmpty(destinationPath))
                     {
                         await Logger.LogErrorAsync($"Could not determine destination path for archive: {sourcePath}").ConfigureAwait(false);
@@ -591,22 +817,20 @@ namespace ModSync.Core
                 fileExtension = Arguments;
             }
 
-            List<string> filesList = _fileSystemProvider.GetFilesInDirectory(directoryPath.FullName);
+            // Recurse into subdirectories: duplicate .tga/.tpc/.dds pairs can be written by mods
+            // into Override subfolders, not just the top level, so a top-directory-only scan
+            // would silently leave those duplicates in place. Grouping is scoped per-directory
+            // (see BuildDuplicateGroupKey) -- two same-named files in *different* subfolders are
+            // not "duplicates" of each other, only same-named files within the same folder are.
+            List<string> filesList = _fileSystemProvider.GetFilesInDirectory(directoryPath.FullName, "*.*", SearchOption.AllDirectories);
+            Dictionary<string, List<string>> fileGroups = GroupFilesByBaseNameForCompatibleExtensions(
+                _fileSystemProvider, filesList, compatibleExtensions, caseInsensitive);
             Dictionary<string, int> fileNameCounts = caseInsensitive
                 ? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (string fileNameWithoutExtension in from filePath in filesList
-                                                        select _fileSystemProvider.GetFileName(filePath) into fileName
-                                                        let fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName)
-                                                        let thisExtension = Path.GetExtension(fileName)
-                                                        let compatibleExtensionFound = caseInsensitive
-                        ? compatibleExtensions.Any(ext => ext.Equals(thisExtension, StringComparison.OrdinalIgnoreCase))
-                        : compatibleExtensions.Contains(thisExtension, StringComparer.Ordinal)
-                                                        where compatibleExtensionFound
-                                                        select fileNameWithoutExtension)
+            foreach (KeyValuePair<string, List<string>> group in fileGroups)
             {
-                _ = fileNameCounts.TryGetValue(fileNameWithoutExtension, out int count);
-                fileNameCounts[fileNameWithoutExtension] = count + 1;
+                fileNameCounts[group.Key] = group.Value.Count;
             }
             foreach (string filePath in filesList)
             {
@@ -621,7 +845,8 @@ namespace ModSync.Core
                     string fileName = _fileSystemProvider.GetFileName(filePath);
                     _ = Logger.LogAsync($"Deleted file: '{fileName}'");
                     string baseName = Path.GetFileNameWithoutExtension(fileName);
-                    int count = fileNameCounts[baseName] - 1;
+                    string groupKey = BuildDuplicateGroupKey(filePath, baseName);
+                    int count = fileNameCounts[groupKey] - 1;
                     _ = Logger.LogVerboseAsync(
                         $"Leaving alone '{count.ToString(System.Globalization.CultureInfo.InvariantCulture)}' file(s) with the same name of '{baseName}'."
                     );
@@ -636,13 +861,14 @@ namespace ModSync.Core
                 string fileName = _fileSystemProvider?.GetFileName(filePath);
                 string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
                 string fileExtensionFromFile = Path.GetExtension(fileName);
+                string groupKey = BuildDuplicateGroupKey(filePath, fileNameWithoutExtension);
                 if (string.IsNullOrEmpty(fileNameWithoutExtension))
                 {
                     _ = Logger.LogWarningAsync(
                         $"Skipping '{fileName}' Reason: fileNameWithoutExtension is null/empty somehow?"
                     );
                 }
-                else if (!fileNameCounts.TryGetValue(fileNameWithoutExtension, out int value))
+                else if (!fileNameCounts.TryGetValue(groupKey, out int value))
                 {
                     _ = Logger.LogVerboseAsync(
                         $"Skipping '{fileName}' Reason: Not present in dictionary, ergo does not have a desired extension."
@@ -670,6 +896,208 @@ namespace ModSync.Core
                 return false;
             }
         }
+
+        /// <summary>
+        /// Builds the key used to decide whether two files are "the same file, different
+        /// extension": the containing directory plus the filename without its extension.
+        /// Duplicate detection is intentionally scoped per-directory -- two same-named files that
+        /// live in different subfolders of Override are not duplicates of one another.
+        /// </summary>
+        private static string BuildDuplicateGroupKey([NotNull] string filePath, [CanBeNull] string fileNameWithoutExtension)
+        {
+            string directoryPart = Path.GetDirectoryName(filePath) ?? string.Empty;
+            return directoryPart + "|" + fileNameWithoutExtension;
+        }
+
+        /// <summary>
+        /// Groups every file under a pre-enumerated file list by its containing directory plus
+        /// filename (without extension), restricted to files whose extension is one of
+        /// <paramref name="compatibleExtensions"/>. Shared between <see cref="DeleteDuplicateFile"/>
+        /// (single-extension purge, driven by a per-instruction <c>Arguments</c> value) and
+        /// <see cref="RunFinalDuplicateSweepAsync"/> (purges whatever extensions the guide's own
+        /// DelDuplicate instructions named, run once after every component in a guide has
+        /// installed) so both duplicate-detection paths agree on what counts as "the same file,
+        /// different extension".
+        /// </summary>
+        private static Dictionary<string, List<string>> GroupFilesByBaseNameForCompatibleExtensions(
+            [NotNull] Services.FileSystem.IFileSystemProvider fileSystemProvider,
+            [NotNull][ItemNotNull] List<string> filesList,
+            [NotNull] IReadOnlyList<string> compatibleExtensions,
+            bool caseInsensitive)
+        {
+            Dictionary<string, List<string>> groups = caseInsensitive
+                ? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+            foreach (string filePath in filesList)
+            {
+                string fileName = fileSystemProvider.GetFileName(filePath);
+                string thisExtension = Path.GetExtension(fileName);
+                bool compatibleExtensionFound = caseInsensitive
+                    ? compatibleExtensions.Any(ext => ext.Equals(thisExtension, StringComparison.OrdinalIgnoreCase))
+                    : compatibleExtensions.Contains(thisExtension, StringComparer.Ordinal);
+                if (!compatibleExtensionFound)
+                {
+                    continue;
+                }
+
+                string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
+                if (string.IsNullOrEmpty(fileNameWithoutExtension))
+                {
+                    continue;
+                }
+
+                string groupKey = BuildDuplicateGroupKey(filePath, fileNameWithoutExtension);
+                if (!groups.TryGetValue(groupKey, out List<string> group))
+                {
+                    group = new List<string>();
+                    groups[groupKey] = group;
+                }
+
+                group.Add(filePath);
+            }
+
+            return groups;
+        }
+
+        /// <summary>
+        /// Final post-install safety-net sweep for duplicate texture-override pairs.
+        /// <para>
+        /// <see cref="DeleteDuplicateFile"/> (the <c>DelDuplicate</c> instruction) runs once, at a
+        /// fixed point in a guide's install order, and only purges duplicates that exist in
+        /// <paramref name="directoryFullName"/> at that exact moment. Components that run
+        /// <em>after</em> it can (and do) write fresh files that recreate duplicate extension pairs
+        /// for the same basename -- those never get cleaned up because dedup never runs again.
+        /// </para>
+        /// <para>
+        /// This method re-applies the same "does this basename have 2+ files across
+        /// <paramref name="compatibleExtensions"/>" detection <see cref="DeleteDuplicateFile"/>
+        /// already uses (via <see cref="GroupFilesByBaseNameForCompatibleExtensions"/>). For every
+        /// duplicate group found, it deletes whichever files match an extension in
+        /// <paramref name="purgeExtensions"/> -- the same extension(s) the guide's own
+        /// <c>DelDuplicate</c> instructions already named via their <c>Arguments</c> value -- and
+        /// keeps everything else. This mirrors the per-instruction path exactly instead of
+        /// re-deriving a "which extension wins" rule from <paramref name="compatibleExtensions"/>'s
+        /// order: that list is only ever a co-occurrence/membership set (e.g. ".dds"/".tpc"/".tga"
+        /// are "the same override texture, different format"), not a survival-priority ordering.
+        /// Stems with only one compatible extension present are left untouched entirely -- there is
+        /// nothing to dedupe there, which is what correctly leaves already-resolved
+        /// legitimate-exception stems alone.
+        /// </para>
+        /// Intended to be invoked once, by the overall install loop, after every component in the
+        /// guide has finished installing. It is deliberately NOT wired into
+        /// <c>InstallationService</c> yet: an unconditional end-of-install sweep has no VFS
+        /// dry-run parity and can delete files a later mod ships on purpose. See
+        /// <c>docs/knowledgebase/instruction-format.md</c> (DelDuplicate final sweep) for the follow-up.
+        /// </summary>
+        /// <param name="fileSystemProvider">Provider used to enumerate and delete files.</param>
+        /// <param name="directoryFullName">Directory to sweep (e.g. the game's Override folder).</param>
+        /// <param name="purgeExtensions">
+        /// The extension(s) to remove from a duplicate group when found alongside at least one
+        /// other compatible-extension file, collected from the guide's own DelDuplicate
+        /// instructions. If empty, the sweep is a no-op.
+        /// </param>
+        /// <param name="compatibleExtensions">
+        /// The co-occurrence set used to detect duplicate groups. Defaults to
+        /// <see cref="Data.Game.TextureOverridePriorityList"/>.
+        /// </param>
+        /// <returns>The number of files deleted by the sweep.</returns>
+        public static async Task<int> RunFinalDuplicateSweepAsync(
+            [NotNull] Services.FileSystem.IFileSystemProvider fileSystemProvider,
+            [NotNull] string directoryFullName,
+            [NotNull] IReadOnlyCollection<string> purgeExtensions,
+            [CanBeNull] IReadOnlyList<string> compatibleExtensions = null,
+            bool caseInsensitive = true)
+        {
+            if (fileSystemProvider is null)
+            {
+                throw new ArgumentNullException(nameof(fileSystemProvider));
+            }
+
+            if (string.IsNullOrEmpty(directoryFullName))
+            {
+                throw new ArgumentException(message: "Invalid directory path.", nameof(directoryFullName));
+            }
+
+            if (purgeExtensions is null)
+            {
+                throw new ArgumentNullException(nameof(purgeExtensions));
+            }
+
+            if (purgeExtensions.Count == 0 || !fileSystemProvider.DirectoryExists(directoryFullName))
+            {
+                return 0;
+            }
+
+            IReadOnlyList<string> extensions = compatibleExtensions ?? Data.Game.TextureOverridePriorityList;
+            if (extensions is null || extensions.Count == 0)
+            {
+                return 0;
+            }
+
+            List<string> filesList = fileSystemProvider.GetFilesInDirectory(directoryFullName, "*.*", SearchOption.AllDirectories);
+            Dictionary<string, List<string>> fileGroups = GroupFilesByBaseNameForCompatibleExtensions(
+                fileSystemProvider, filesList, extensions, caseInsensitive);
+
+            StringComparison extensionComparison = caseInsensitive
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+            int deletedCount = 0;
+            foreach (List<string> group in fileGroups.Values)
+            {
+                if (group.Count <= 1)
+                {
+                    // Only one compatible extension present for this stem -- nothing to dedupe.
+                    // This is also what naturally leaves already-single-extension stems (e.g.
+                    // legitimate guide exceptions already resolved by their own DelDuplicate pass)
+                    // untouched.
+                    continue;
+                }
+
+                List<string> toDelete = group.Where(filePath => purgeExtensions.Any(ext =>
+                    string.Equals(Path.GetExtension(fileSystemProvider.GetFileName(filePath)), ext, extensionComparison))).ToList();
+                if (toDelete.Count == 0)
+                {
+                    continue;
+                }
+
+                if (toDelete.Count == group.Count)
+                {
+                    // Guard: never empty a duplicate group entirely. If every file in the group
+                    // matches a purge extension (e.g. a guide purges both ".tpc" and ".tga" and a
+                    // stem only ever had those two), leave the group alone rather than delete the
+                    // last surviving file -- that would be strictly worse than doing nothing.
+                    continue;
+                }
+
+                List<string> survivors = group.Except(toDelete, StringComparer.Ordinal).ToList();
+                string survivorNames = string.Join(", ", survivors.Select(fileSystemProvider.GetFileName));
+
+                foreach (string filePath in toDelete)
+                {
+                    try
+                    {
+                        await fileSystemProvider.DeleteFileAsync(filePath).ConfigureAwait(false);
+                        string fileName = fileSystemProvider.GetFileName(filePath);
+                        string stem = Path.GetFileNameWithoutExtension(fileName);
+                        await Logger.LogWarningAsync(
+                            $"Final duplicate sweep: removed '{fileName}' (stem '{stem}') because a later " +
+                            $"component recreated a duplicate after the guide's own DelDuplicate instruction " +
+                            $"already ran; keeping '{survivorNames}'."
+                        ).ConfigureAwait(false);
+                        deletedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogException(ex);
+                    }
+                }
+            }
+
+            return deletedCount;
+        }
+
         /// <summary>
         /// Executes a cleanlist operation: reads a CSV file where each line contains a mod name and files to delete,
         /// and deletes those files if the corresponding mod is selected.
@@ -718,17 +1146,31 @@ namespace ModSync.Core
                     throw new ArgumentException("No target directory specified for cleanlist operation.", nameof(targetDirectory));
                 }
 
-                // Check if cleanlist file exists
-                if (!_fileSystemProvider.FileExists(cleanlistPath))
+                // Check if cleanlist file exists. The guide hosts these under
+                // mod-builds/scripts/, not the archive store; VFS dry-run cannot see them
+                // at <<modDirectory>>\cleanlist_k1.txt.
+                string cleanlistContent = null;
+                if (_fileSystemProvider.FileExists(cleanlistPath))
                 {
-                    await Logger.LogErrorAsync($"Cleanlist file not found: {cleanlistPath}").ConfigureAwait(false);
-                    return ActionExitCode.FileNotFoundPost;
+                    cleanlistContent = await _fileSystemProvider.ReadFileAsync(cleanlistPath).ConfigureAwait(false);
+                }
+                else
+                {
+                    string fallback = FindGuideScriptFile(Path.GetFileName(cleanlistPath));
+                    if (string.IsNullOrEmpty(fallback) || !File.Exists(fallback))
+                    {
+                        await Logger.LogErrorAsync($"Cleanlist file not found: {cleanlistPath}").ConfigureAwait(false);
+                        return ActionExitCode.FileNotFoundPost;
+                    }
+
+                    cleanlistPath = fallback;
+                    cleanlistContent = await NetFrameworkCompatibility.ReadAllTextAsync(fallback).ConfigureAwait(false);
+                    await Logger.LogVerboseAsync(
+                        $"[CleanList] Using guide script '{fallback}' (not present in the extract tree).")
+                        .ConfigureAwait(false);
                 }
 
                 await Logger.LogAsync($"Reading cleanlist from: {Path.GetFileName(cleanlistPath)}").ConfigureAwait(false);
-
-                // Read cleanlist file
-                string cleanlistContent = await _fileSystemProvider.ReadFileAsync(cleanlistPath).ConfigureAwait(false);
                 string[] lines = cleanlistContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
                 int processedMods = 0;
@@ -761,7 +1203,19 @@ namespace ModSync.Core
                         }
                     }
 
-                    // Check if this mod is selected
+                    // Ask the actual mod-selection state (isModSelectedFunc) whether the mod
+                    // this row is about was selected/installed in this run. Previously, when
+                    // the destination was the extracted payload directory ("payloadMode"),
+                    // this check was bypassed in favor of a FileExists(Override/fileName)
+                    // proxy on the theory that Override already having a same-named file
+                    // implied the competing mod was selected. That proxy is unsound: another
+                    // component (e.g. duplicate-texture dedup) can independently delete the
+                    // Override copy before CleanList runs, making FileExists false even
+                    // though the competing mod WAS selected — which caused this file's
+                    // "losing" duplicate to be kept/re-added, undoing the dedup. Use
+                    // isModSelectedFunc for every destination; see IsModSelected in
+                    // ModComponent.cs for the fuzzy name/author matching that resolves a
+                    // cleanlist row's free-text mod description to a selected component.
                     bool isSelected = isModSelectedFunc?.Invoke(modName) ?? true;
 
                     if (!isSelected)
@@ -824,6 +1278,36 @@ namespace ModSync.Core
 
             return exitCode;
         }
+
+        [CanBeNull]
+        private static string FindGuideScriptFile([CanBeNull] string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return null;
+            }
+
+            string cwd = Directory.GetCurrentDirectory();
+            for (int depth = 0; depth < 6 && !string.IsNullOrEmpty(cwd); depth++)
+            {
+                string underModBuilds = Path.Combine(cwd, "mod-builds", "scripts", fileName);
+                if (File.Exists(underModBuilds))
+                {
+                    return underModBuilds;
+                }
+
+                string underScripts = Path.Combine(cwd, "scripts", fileName);
+                if (File.Exists(underScripts))
+                {
+                    return underScripts;
+                }
+
+                cwd = Directory.GetParent(cwd)?.FullName;
+            }
+
+            return null;
+        }
+
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0051:Method is too long", Justification = "<Pending>")]
         public ActionExitCode DeleteFile(
                 [ItemNotNull][NotNull] IReadOnlyList<string> sourcePaths = null
@@ -1341,9 +1825,23 @@ namespace ModSync.Core
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*LookupGameFolder\s*=\s*1\s*$", replacement: "LookupGameFolder=0");
                     IniHelper.ReplaceIniPattern(tslPatcherDirectory, pattern: @"^\s*ConfirmMessage\s*=\s*.*$", replacement: "ConfirmMessage=N/A");
 
+                    tslPatcherDirectory = SanitizeLinuxHoloNamespaces(tslPatcherDirectory);
+                    EnsureInfoRtfBesideChangesIni(tslPatcherDirectory);
+                    _ = IniHelper.DropDangling2daRowReferences(tslPatcherDirectory);
+
+                    // Holo 1.5.1's Unix NSS builtin crashes ('str' object has no attribute 'info').
+                    // The K1/K2 manuals recovered with wine nwnnsscomp.exe; do that here so fail-closed
+                    // installs can complete the same CompileList mods instead of rolling back.
+                    if (Services.UnixNssCompileRecovery.HostNeedsWineCompiler())
+                    {
+                        Services.UnixNssCompileRecovery.EnableSaveProcessedScripts(tslPatcherDirectory);
+                        Services.UnixNssCompileRecovery.EnsureNwscriptInPatcherTree(tslPatcherDirectory);
+                        _ = Services.UnixNssCompileRecovery.TryRewriteTokenFreeCompileList(tslPatcherDirectory, Arguments);
+                    }
+
                     string engine = MainConfig.PatcherEngine ?? PatcherEngines.Holopatcher;
                     bool useKpatcher = string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase);
-                    bool useOdyPatcher = string.Equals(engine, PatcherEngines.OdyPatcher, StringComparison.OrdinalIgnoreCase);
+                    bool useOdyPatcher = PatcherEngines.IsBioFamily(engine);
                     bool useExternalPatcher = useKpatcher || useOdyPatcher;
 
                     // OdyPatcher rejects --flag=value (and shell/ProcessStartInfo quote collapsing of
@@ -1415,24 +1913,173 @@ namespace ModSync.Core
                                     args
                                 ).ConfigureAwait(false);
                         }
-                        else
+                        else if (_fileSystemProvider?.IsDryRun == true)
                         {
                             (exitCode, output, error) = await _fileSystemProvider.ExecuteProcessAsync(
                                 holopatcherPath,
                                 args
                             ).ConfigureAwait(false);
                         }
+                        else
+                        {
+                            (exitCode, output, error) = await PlatformAgnosticMethods.ExecuteProcessAsync(
+                                holopatcherPath,
+                                args,
+                                logLinePrefix: "[Patcher] "
+                            ).ConfigureAwait(false);
+                        }
                     }
 
+                    await PipePatcherLogIntoModSyncAsync(tslPatcherDirectory.FullName, output, error).ConfigureAwait(false);
                     await Logger.LogAsync($"Patcher exited with exit code {exitCode}").ConfigureAwait(false);
+                    bool nssRecovered = false;
+                    string patcherText = (output ?? string.Empty) + Environment.NewLine + (error ?? string.Empty);
+                    if (!useExternalPatcher && IsHoloListIndexParseFailure(patcherText))
+                    {
+                        // Holo 1.5.x rejects TSLPatcher's TypeId=ListIndex (struct id = list
+                        // index). BioPatcher 1.0.0 parses it. Retry once so fail-closed
+                        // installs are not stuck on a Holo config-reader gap.
+                        var bioArgList = new List<string>
+                        {
+                            "--install",
+                            "--cli",
+                            "-y",
+                            "--game-dir",
+                            gameDirArg,
+                            "--tslpatchdata",
+                            tslPatchDataArg,
+                        };
+                        if (!string.IsNullOrEmpty(Arguments))
+                        {
+                            bioArgList.Add("--namespace-option-index");
+                            bioArgList.Add(Arguments.Trim());
+                        }
+
+                        string bioArgs = string.Join(separator: " ", bioArgList);
+                        await Logger.LogWarningAsync(
+                                "HoloPatcher cannot parse TypeId=ListIndex. Retrying this patch with BioPatcher.")
+                            .ConfigureAwait(false);
+                        (string bioPath, bool bioFound) = await Services.InstallationService.FindOdyPatcherExecutableAsync(
+                                baseDir,
+                                resourcesDir)
+                            .ConfigureAwait(false);
+                        if (!bioFound)
+                        {
+                            await Logger.LogErrorAsync(
+                                    "BioPatcher retry skipped: executable not found. Set --odypatcher-path or install biopatcher on PATH.")
+                                .ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await Logger.LogAsync($"Using BioPatcher CLI: '{bioPath}' {bioArgs}").ConfigureAwait(false);
+                            if (_fileSystemProvider?.IsDryRun == true)
+                            {
+                                (exitCode, output, error) = await _fileSystemProvider.ExecuteProcessAsync(bioPath, bioArgs)
+                                    .ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                (exitCode, output, error) = await PlatformAgnosticMethods.ExecuteProcessAsync(
+                                        bioPath,
+                                        bioArgs,
+                                        logLinePrefix: "[Patcher] ")
+                                    .ConfigureAwait(false);
+                            }
+                        }
+                        await PipePatcherLogIntoModSyncAsync(tslPatcherDirectory.FullName, output, error)
+                            .ConfigureAwait(false);
+                        await Logger.LogAsync($"BioPatcher retry exited with exit code {exitCode}").ConfigureAwait(false);
+                        patcherText = (output ?? string.Empty) + Environment.NewLine + (error ?? string.Empty);
+                    }
+                    if (exitCode != 0
+                        && Services.UnixNssCompileRecovery.HostNeedsWineCompiler()
+                        && Services.UnixNssCompileRecovery.IsBuiltinNssCrash(patcherText))
+                    {
+                        nssRecovered = Services.UnixNssCompileRecovery.TryInstallCompiledScripts(
+                            tslPatcherDirectory,
+                            MainConfig.DestinationPath?.FullName,
+                            Arguments);
+                        if (nssRecovered)
+                        {
+                            await Logger.LogAsync(
+                                    "Recovered Holo Unix NSS builtin crash with wine nwnnsscomp.exe; compiled scripts are in Override.")
+                                .ConfigureAwait(false);
+                            exitCode = 0;
+                        }
+                    }
+
                     if (exitCode != 0)
                     {
-                        return ActionExitCode.PatcherError;
+                        bool intended = IsGuideDirectedTslPatchdataDeleteOutcome(patcherText);
+                        if (!intended)
+                        {
+                            try
+                            {
+                                List<string> logErrors = await VerifyInstall().ConfigureAwait(false);
+                                intended = logErrors.Count > 0
+                                    && logErrors.All(IsGuideDirectedTslPatchdataDeleteError);
+                            }
+                            catch (Exception)
+                            {
+                                intended = false;
+                            }
+                        }
+
+                        if (intended)
+                        {
+                            await Logger.LogAsync(
+                                    "Patcher exited non-zero after a guide-directed tslpatchdata delete (intended missing-source error); treating as success.")
+                                .ConfigureAwait(false);
+                            exitCode = 0;
+                        }
+                        else
+                        {
+                            return ActionExitCode.PatcherError;
+                        }
+                    }
+
+                    // The patcher reported success, but its exit code alone does not prove that every
+                    // declared [InstallList] destination file (streamwaves/streamsounds/streammusic/
+                    // movies/data — the folders it silently overwrites without going through Override or
+                    // modules) actually landed on disk. This is visibility only: it never changes exitCode,
+                    // it only makes an otherwise-silent data loss diagnosable.
+                    try
+                    {
+                        IReadOnlyList<string> missingInstallListFiles = await InstallListDestinationVerifier.VerifyAsync(
+                                _fileSystemProvider,
+                                tslPatcherDirectory,
+                                MainConfig.DestinationPath?.FullName,
+                                Arguments)
+                            .ConfigureAwait(false);
+                        if (missingInstallListFiles.Count > 0)
+                        {
+                            string componentName = GetParentComponent()?.Name ?? tslPatcherDirectory.FullName;
+                            await Logger.LogWarningAsync(
+                                    $"[InstallList] Component '{componentName}' patcher run at '{tslPatcherDirectory.FullName}'"
+                                    + " reported success, but the following declared InstallList destination file(s) are"
+                                    + " missing after install: " + string.Join(", ", missingInstallListFiles))
+                                .ConfigureAwait(false);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        await Logger.LogExceptionAsync(ex).ConfigureAwait(false);
                     }
 
                     try
                     {
                         List<string> installErrors = await VerifyInstall().ConfigureAwait(false);
+                        if (nssRecovered)
+                        {
+                            installErrors = installErrors
+                                .Where(line => !Services.UnixNssCompileRecovery.IsRecoveredNssSupportError(line))
+                                .ToList();
+                        }
+
+                        installErrors = installErrors
+                            .Where(line => !IsGuideDirectedTslPatchdataDeleteError(line))
+                            .ToList();
+
                         if (installErrors.Count <= 0)
                         {
                             continue;
@@ -1499,6 +2146,18 @@ namespace ModSync.Core
                 {
                     try
                     {
+                        ActionExitCode? rerouted = await TryRunWindowsInstallerWithoutExecAsync(sourcePath)
+                            .ConfigureAwait(false);
+                        if (rerouted.HasValue)
+                        {
+                            if (rerouted.Value == ActionExitCode.Success)
+                            {
+                                continue;
+                            }
+
+                            return rerouted.Value;
+                        }
+
                         (int childExitCode, string output, string error) =
                             await _fileSystemProvider.ExecuteProcessAsync(
                                 sourcePath,
@@ -1532,6 +2191,399 @@ namespace ModSync.Core
                 return ActionExitCode.UnknownError;
             }
         }
+        /// <summary>
+        /// Handles an <c>Execute</c> whose target is a Windows Inno Setup installer on a platform
+        /// that cannot run it. Returns null when the executable should be launched normally.
+        /// <para>
+        /// TSLRCM, the foundation mod of the K2 build, is exactly this: an Inno Setup <c>.exe</c>
+        /// that died with <c>Win32Exception ... Permission denied</c> on a native-Linux game tree.
+        /// It is a prebuilt asset drop, so unpacking it and copying the game folders out is the
+        /// whole install.
+        /// </para>
+        /// </summary>
+        private async Task<ActionExitCode?> TryRunWindowsInstallerWithoutExecAsync([CanBeNull] string sourcePath)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath)
+                || !sourcePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                || Services.InnoSetupInstallerService.HostRunsWindowsExecutables())
+            {
+                return null;
+            }
+
+            // This path calls InnoSetupInstallerService directly against the real game
+            // directory instead of going through _fileSystemProvider — the abstraction every
+            // other action type relies on to become a no-op under VirtualFileSystemProvider
+            // during dry-run. Without this guard, dry-run validation genuinely re-extracts the
+            // installer's full payload (dialog.tlk/2da files included) onto a live tree that may
+            // already be many components further along, silently reintroducing the installer's
+            // own bundled versions of files later components have already modified.
+            if (_fileSystemProvider?.IsDryRun == true)
+            {
+                await Logger.LogVerboseAsync(
+                    $"[DryRun] Skipping real Inno Setup extraction of '{Path.GetFileName(sourcePath)}': "
+                    + "this path writes directly to the real game directory and cannot be simulated "
+                    + "through the VFS, so it must not run during validation.").ConfigureAwait(false);
+                return ActionExitCode.Success;
+            }
+
+            bool isInno = Services.InnoSetupInstallerService.IsInnoSetupInstaller(sourcePath);
+            Services.ExeExecutionPlan plan = Services.InnoSetupInstallerService.PlanExeExecution(
+                isWindows: false,
+                isInnoSetup: isInno,
+                innoExtractAvailable: Services.InnoSetupInstallerService.IsInnoExtractAvailable());
+
+            if (plan == Services.ExeExecutionPlan.ExecuteDirectly)
+            {
+                return null;
+            }
+
+            if (plan == Services.ExeExecutionPlan.MissingInnoExtract)
+            {
+                await Logger.LogErrorAsync(
+                    Services.InnoSetupInstallerService.MissingToolMessage(sourcePath)).ConfigureAwait(false);
+                return ActionExitCode.ChildProcessError;
+            }
+
+            // Always the game root: the unpacked tree carries its own Override/modules/lips layout,
+            // so anything else would nest the whole game folder inside a subdirectory.
+            DirectoryInfo gameDirectory = MainConfig.DestinationPath;
+            if (gameDirectory is null)
+            {
+                await Logger.LogErrorAsync(
+                    $"Cannot unpack '{Path.GetFileName(sourcePath)}': no game directory is configured.")
+                    .ConfigureAwait(false);
+                return ActionExitCode.ChildProcessError;
+            }
+
+            bool installed = await Services.InnoSetupInstallerService
+                .ExtractAndInstallAsync(sourcePath, gameDirectory).ConfigureAwait(false);
+
+            return installed ? ActionExitCode.Success : ActionExitCode.ChildProcessError;
+        }
+
+        /// <summary>
+        /// Linux HoloPatcher 1.5.1 imports <c>rte_editor.py</c> whenever a namespace <c>InfoName</c>
+        /// is a <c>.rte</c>. That module calls <c>ctypes.windll</c> at import time and pops a blocking
+        /// GUI <c>AttributeError</c>. Convert every namespace's info file to <c>.rtf</c> and fill
+        /// missing <c>IniName</c>/<c>Description</c>/<c>InfoName</c> keys before Holo ever reads
+        /// <c>namespaces.ini</c>. Holo 1.5.1 treats a missing <c>InfoName</c> as a blocking
+        /// <c>KeyError</c> dialog even when <c>info.rtf</c> already sits beside <c>changes.ini</c>
+        /// (K1 JC's Mandalorian Armor).
+        /// Do not point Holo directly at a flattened namespace <c>DataPath</c> instead: its CLI
+        /// requires <c>--tslpatchdata</c> to be the directory containing <c>namespaces.ini</c>, or it
+        /// refuses with "No mod chosen: Select your mod directory first." (K1 Sentinel Sneak Attack).
+        /// </summary>
+        [NotNull]
+        private static DirectoryInfo SanitizeLinuxHoloNamespaces([NotNull] DirectoryInfo tslPatcherDirectory)
+        {
+            if (tslPatcherDirectory is null || !tslPatcherDirectory.Exists)
+            {
+                return tslPatcherDirectory;
+            }
+
+            FileInfo namespacesIni;
+            try
+            {
+                namespacesIni = tslPatcherDirectory
+                    .GetFiles("namespaces.ini", SearchOption.AllDirectories)
+                    .FirstOrDefault();
+            }
+            catch (Exception)
+            {
+                return tslPatcherDirectory;
+            }
+
+            if (namespacesIni is null || namespacesIni.Directory is null)
+            {
+                ConvertRteInfoDocuments(tslPatcherDirectory);
+                return tslPatcherDirectory;
+            }
+
+            DirectoryInfo namespacesRoot = namespacesIni.Directory;
+            Dictionary<string, Dictionary<string, string>> sections;
+            try
+            {
+                using (var reader = new StreamReader(namespacesIni.FullName))
+                {
+                    sections = IniHelper.ParseNamespacesIni(reader);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not parse '{namespacesIni.FullName}': {ex.Message}");
+                ConvertRteInfoDocuments(tslPatcherDirectory);
+                return tslPatcherDirectory;
+            }
+
+            if (sections is null || sections.Count == 0)
+            {
+                ConvertRteInfoDocuments(tslPatcherDirectory);
+                return tslPatcherDirectory;
+            }
+
+            Dictionary<string, string> indexSection;
+            sections.TryGetValue("Namespaces", out indexSection);
+            var namespaceOrder = new List<string>();
+            if (indexSection != null)
+            {
+                foreach (KeyValuePair<string, string> entry in indexSection.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrWhiteSpace(entry.Value) && !namespaceOrder.Contains(entry.Value, StringComparer.OrdinalIgnoreCase))
+                    {
+                        namespaceOrder.Add(entry.Value);
+                    }
+                }
+            }
+
+            foreach (KeyValuePair<string, Dictionary<string, string>> section in sections)
+            {
+                if (section.Key.Equals("Namespaces", StringComparison.OrdinalIgnoreCase) || section.Value is null)
+                {
+                    continue;
+                }
+
+                string dataPath = section.Value.TryGetValue("DataPath", out string dataPathValue)
+                    ? dataPathValue.Trim()
+                    : section.Key;
+                string sectionDir = string.IsNullOrWhiteSpace(dataPath)
+                    ? namespacesRoot.FullName
+                    : Path.Combine(namespacesRoot.FullName, dataPath.Replace('/', Path.DirectorySeparatorChar));
+
+                if (!section.Value.ContainsKey("IniName"))
+                {
+                    section.Value["IniName"] = "changes.ini";
+                }
+
+                if (!section.Value.ContainsKey("Description"))
+                {
+                    string name = section.Value.TryGetValue("Name", out string named) ? named : section.Key;
+                    section.Value["Description"] = string.IsNullOrWhiteSpace(name) ? section.Key : name;
+                }
+
+                string infoName = section.Value.TryGetValue("InfoName", out string infoValue)
+                    ? infoValue.Trim()
+                    : "info.rtf";
+                if (string.IsNullOrWhiteSpace(infoName))
+                {
+                    infoName = "info.rtf";
+                }
+
+                if (infoName.EndsWith(".rte", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConvertRteInfoDocument(sectionDir, infoName);
+                    infoName = Path.ChangeExtension(infoName, ".rtf");
+                }
+                else
+                {
+                    ConvertRteInfoDocuments(new DirectoryInfo(sectionDir));
+                }
+
+                // Holo 1.5.1 always reads this key (KeyError if absent). Write it even when the
+                // info document already exists beside changes.ini.
+                section.Value["InfoName"] = infoName;
+                EnsureNamedInfoDocument(sectionDir, infoName);
+            }
+
+            try
+            {
+                WriteNamespacesIni(namespacesIni.FullName, sections, indexSection, namespaceOrder);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not rewrite '{namespacesIni.FullName}': {ex.Message}");
+            }
+
+            // Do NOT point Holo at the selected namespace's flattened DataPath directly: its CLI
+            // requires --tslpatchdata to be the directory containing namespaces.ini (with
+            // --namespace-option-index selecting from it) or it refuses with "No mod chosen:
+            // Select your mod directory first." and exits without patching anything. The .rte ->
+            // .rtf conversion above already ran for every section (including the selected one),
+            // which is what actually prevents the rte_editor/ctypes.windll import crash - Holo
+            // reading namespaces.ini normally afterward is safe once no section names a .rte.
+            ConvertRteInfoDocuments(tslPatcherDirectory);
+            return tslPatcherDirectory;
+        }
+
+        private static void ConvertRteInfoDocuments([CanBeNull] DirectoryInfo directory)
+        {
+            if (directory is null || !directory.Exists)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (FileInfo rte in directory.GetFiles("*.rte", SearchOption.AllDirectories))
+                {
+                    ConvertRteInfoDocument(rte.DirectoryName, rte.Name);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not convert .rte info documents under '{directory.FullName}': {ex.Message}");
+            }
+        }
+
+        private static void ConvertRteInfoDocument([CanBeNull] string directory, [CanBeNull] string infoName)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(infoName))
+            {
+                return;
+            }
+
+            string rtePath = Path.Combine(directory, infoName);
+            if (!infoName.EndsWith(".rte", StringComparison.OrdinalIgnoreCase))
+            {
+                rtePath = Path.Combine(directory, Path.ChangeExtension(infoName, ".rte"));
+            }
+
+            if (!File.Exists(rtePath))
+            {
+                return;
+            }
+
+            string rtfPath = Path.ChangeExtension(rtePath, ".rtf");
+            const string MinimalRtf = @"{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\par}";
+            try
+            {
+                if (!File.Exists(rtfPath))
+                {
+                    File.WriteAllText(rtfPath, MinimalRtf);
+                }
+
+                File.Delete(rtePath);
+                Logger.LogVerbose($"[Patcher] Converted '{Path.GetFileName(rtePath)}' to '{Path.GetFileName(rtfPath)}' so Linux HoloPatcher will not import rte_editor (ctypes.windll).");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not convert '{rtePath}' to RTF: {ex.Message}");
+            }
+        }
+
+        private static void EnsureNamedInfoDocument([CanBeNull] string directory, [CanBeNull] string infoName)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(infoName))
+            {
+                return;
+            }
+
+            try
+            {
+                if (!Directory.Exists(directory))
+                {
+                    return;
+                }
+
+                string infoPath = Path.Combine(directory, infoName);
+                if (File.Exists(infoPath))
+                {
+                    return;
+                }
+
+                const string MinimalRtf = @"{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\par}";
+                File.WriteAllText(infoPath, MinimalRtf);
+                Logger.LogVerbose($"[Patcher] Wrote placeholder '{infoName}' in '{directory}' so Linux HoloPatcher has InfoName.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Patcher] Could not ensure info document '{infoName}' in '{directory}': {ex.Message}");
+            }
+        }
+
+        private static void WriteNamespacesIni(
+            [NotNull] string path,
+            [NotNull] Dictionary<string, Dictionary<string, string>> sections,
+            [CanBeNull] Dictionary<string, string> indexSection,
+            [NotNull] IReadOnlyList<string> namespaceOrder)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("[Namespaces]");
+            if (indexSection != null)
+            {
+                foreach (KeyValuePair<string, string> entry in indexSection)
+                {
+                    sb.Append(entry.Key).Append('=').AppendLine(entry.Value);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < namespaceOrder.Count; i++)
+                {
+                    sb.Append("Namespace").Append(i + 1).Append('=').AppendLine(namespaceOrder[i]);
+                }
+            }
+
+            foreach (KeyValuePair<string, Dictionary<string, string>> section in sections)
+            {
+                if (section.Key.Equals("Namespaces", StringComparison.OrdinalIgnoreCase) || section.Value is null)
+                {
+                    continue;
+                }
+
+                sb.AppendLine();
+                sb.Append('[').Append(section.Key).AppendLine("]");
+                foreach (KeyValuePair<string, string> entry in section.Value)
+                {
+                    sb.Append(entry.Key).Append('=').AppendLine(entry.Value);
+                }
+            }
+
+            File.WriteAllText(path, sb.ToString());
+        }
+
+        /// <summary>
+        /// TSLPatcher-family installers expect an information document beside every <c>changes.ini</c>
+        /// (<c>info.rtf</c> by default, see <c>PatcherNamespace.DefaultInfoFilename</c>) and abort when it
+        /// is absent. Some mods ship without one -- or ship only the namespace subfolders' copies -- which
+        /// fails the install for a purely cosmetic file that is never read for patch data. Write a minimal
+        /// placeholder for any <c>changes.ini</c> that lacks one.
+        /// <para>
+        /// The placeholder is a minimal well-formed RTF document rather than a zero-byte file: an empty
+        /// file is not valid RTF and a strict reader can fail on it, which would trade one abort for
+        /// another. Existing files are never touched -- a mod's real notes always win.
+        /// </para>
+        /// </summary>
+        private static void EnsureInfoRtfBesideChangesIni([CanBeNull] DirectoryInfo tslPatcherDirectory)
+        {
+            if (tslPatcherDirectory is null || !tslPatcherDirectory.Exists)
+            {
+                return;
+            }
+
+            // Matches PatcherNamespace.DefaultInfoFilename in the patcher tree; duplicated as a
+            // literal so Core does not take a dependency on the legacy HoloPatcher projects.
+            const string InfoDocumentFilename = "info.rtf";
+            const string MinimalRtf = @"{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\par}";
+
+            try
+            {
+                foreach (FileInfo changesIni in tslPatcherDirectory.GetFiles("changes.ini", SearchOption.AllDirectories))
+                {
+                    string directory = changesIni.DirectoryName;
+                    if (string.IsNullOrEmpty(directory))
+                    {
+                        continue;
+                    }
+
+                    // A namespace may declare a different information filename, and some mods ship .rte
+                    // instead of .rtf. Only synthesize when the folder has no information document at all.
+                    if (Directory.EnumerateFiles(directory, "info.*", SearchOption.TopDirectoryOnly).Any())
+                    {
+                        continue;
+                    }
+
+                    string infoPath = Path.Combine(directory, InfoDocumentFilename);
+                    File.WriteAllText(infoPath, MinimalRtf);
+                    Logger.LogVerbose($"[Patcher] Wrote placeholder '{InfoDocumentFilename}' beside '{changesIni.FullName}' (mod shipped none).");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Never fail an install over a cosmetic file; the patcher will report it if it truly matters.
+                Logger.LogWarning($"[Patcher] Could not ensure an info document beside changes.ini: {ex.Message}");
+            }
+        }
+
         [NotNull]
         /// <summary>
         /// Quote a path for <see cref="System.Diagnostics.ProcessStartInfo.Arguments"/> so spaces
@@ -1551,6 +2603,105 @@ namespace ModSync.Core
             }
 
             return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
+        internal static bool IsHoloListIndexParseFailure([CanBeNull] string patcherText)
+        {
+            if (string.IsNullOrEmpty(patcherText))
+            {
+                return false;
+            }
+
+            return patcherText.IndexOf("Invalid TypeId", StringComparison.OrdinalIgnoreCase) >= 0
+                && patcherText.IndexOf("ListIndex", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool IsGuideDirectedTslPatchdataDeleteOutcome([CanBeNull] string patcherText)
+        {
+            if (string.IsNullOrEmpty(patcherText))
+            {
+                return false;
+            }
+
+            bool completed = patcherText.IndexOf("Successfully completed", StringComparison.OrdinalIgnoreCase) >= 0
+                || patcherText.IndexOf("Total patches:", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!completed)
+            {
+                return false;
+            }
+
+            List<string> errors = patcherText
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.IndexOf("[Error]", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("Error: ", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("FileNotFoundError", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("Could not locate resource to patch", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("Could not load source file to patch", StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+            return errors.Count > 0 && errors.All(IsGuideDirectedTslPatchdataDeleteError);
+        }
+
+        private bool IsGuideDirectedTslPatchdataDeleteError([CanBeNull] string line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return false;
+            }
+
+            if (!HasGuideDirectedTslPatchdataDelete())
+            {
+                return false;
+            }
+
+            // Holo splits the missing-source pair: this line has no filename, the
+            // next line names the deleted tslpatchdata file (e.g. keblastore.utm).
+            if (line.IndexOf("Could not load source file to patch", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            string directions = _parentComponent?.Directions ?? string.Empty;
+            return Regex.Matches(line, @"[\w.-]+\.\w+", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1))
+                .Cast<Match>()
+                .Select(m => m.Value)
+                .Any(name =>
+                    name.IndexOf("installlog", StringComparison.OrdinalIgnoreCase) < 0
+                    && name.IndexOf("FileNotFound", StringComparison.OrdinalIgnoreCase) < 0
+                    && (directions.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0
+                        || ComponentDeletesTslPatchdataFile(name)));
+        }
+
+        private bool HasGuideDirectedTslPatchdataDelete()
+        {
+            string directions = _parentComponent?.Directions;
+            if (!string.IsNullOrWhiteSpace(directions)
+                && directions.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase) >= 0
+                && directions.IndexOf("delete", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return _parentComponent?.Instructions?.Any(instruction =>
+                       instruction != null
+                       && instruction.Action == ActionType.Delete
+                       && instruction.Source != null
+                       && instruction.Source.Any(source =>
+                           !string.IsNullOrWhiteSpace(source)
+                           && source.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase) >= 0))
+                   == true;
+        }
+
+        private bool ComponentDeletesTslPatchdataFile([NotNull] string fileName)
+        {
+            return _parentComponent?.Instructions?.Any(instruction =>
+                       instruction != null
+                       && instruction.Action == ActionType.Delete
+                       && instruction.Source != null
+                       && instruction.Source.Any(source =>
+                           !string.IsNullOrWhiteSpace(source)
+                           && source.IndexOf("tslpatchdata", StringComparison.OrdinalIgnoreCase) >= 0
+                           && source.IndexOf(fileName, StringComparison.OrdinalIgnoreCase) >= 0))
+                   == true;
         }
 
         private async Task<List<string>> VerifyInstall([ItemNotNull] IReadOnlyList<string> sourcePaths = null)
@@ -1600,6 +2751,104 @@ namespace ModSync.Core
             }
             await Logger.LogVerboseAsync("No errors found in TSLPatcher installation log file").ConfigureAwait(false);
             return allErrorLines;
+        }
+
+        /// <summary>
+        /// Copies the patcher's install log (or leftover stdout/stderr) into the ModSync log
+        /// stream with a <c>[Patcher]</c> prefix. Lines already captured from the process are
+        /// skipped so live-prefixed stdout is not replayed.
+        /// </summary>
+        private static async Task PipePatcherLogIntoModSyncAsync(
+            [CanBeNull] string tslPatcherDirectory,
+            [CanBeNull] string stdout,
+            [CanBeNull] string stderr)
+        {
+            var alreadyLogged = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string line in SplitPatcherLogLines(stdout))
+            {
+                if (line.Length > 0)
+                {
+                    _ = alreadyLogged.Add(line);
+                }
+            }
+
+            foreach (string line in SplitPatcherLogLines(stderr))
+            {
+                if (line.Length > 0)
+                {
+                    _ = alreadyLogged.Add(line);
+                }
+            }
+
+            string fileText = TryReadPatcherInstallLog(tslPatcherDirectory);
+            IEnumerable<string> sourceLines = !string.IsNullOrWhiteSpace(fileText)
+                ? SplitPatcherLogLines(fileText)
+                : SplitPatcherLogLines(stdout).Concat(SplitPatcherLogLines(stderr));
+
+            foreach (string line in sourceLines)
+            {
+                if (line.Length == 0 || alreadyLogged.Contains(line))
+                {
+                    continue;
+                }
+
+                await Logger.LogAsync("[Patcher] " + line).ConfigureAwait(false);
+            }
+        }
+
+        [NotNull]
+        private static IEnumerable<string> SplitPatcherLogLines([CanBeNull] string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                yield break;
+            }
+
+            foreach (string raw in text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string line = raw.Trim();
+                if (line.Length > 0)
+                {
+                    yield return line;
+                }
+            }
+        }
+
+        [CanBeNull]
+        private static string TryReadPatcherInstallLog([CanBeNull] string tslPatcherDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(tslPatcherDirectory) || !Directory.Exists(tslPatcherDirectory))
+            {
+                return null;
+            }
+
+            string txt = Path.Combine(tslPatcherDirectory, "installlog.txt");
+            if (File.Exists(txt))
+            {
+                try
+                {
+                    return File.ReadAllText(txt);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogVerbose($"[Patcher] Could not read '{txt}': {ex.Message}");
+                }
+            }
+
+            string rtf = Path.Combine(tslPatcherDirectory, "installlog.rtf");
+            if (File.Exists(rtf))
+            {
+                try
+                {
+                    return File.ReadAllText(rtf);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogVerbose($"[Patcher] Could not read '{rtf}': {ex.Message}");
+                }
+            }
+
+            return null;
         }
         public event PropertyChangedEventHandler PropertyChanged;
         private void OnPropertyChanged([CallerMemberName][CanBeNull] string propertyName = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

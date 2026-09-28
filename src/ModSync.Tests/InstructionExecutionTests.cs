@@ -44,11 +44,14 @@ namespace ModSync.Tests
                 sourcePath = new DirectoryInfo(_modDirectory),
                 destinationPath = new DirectoryInfo(_kotorDirectory)
             };
+            MainConfig.ExtractScratchPath = null;
         }
 
         [TearDown]
         public void TearDown()
         {
+            MainConfig.ExtractScratchPath = null;
+            MainConfig.AllComponents = new List<ModComponent>();
             try
             {
                 if (Directory.Exists(_testDirectory))
@@ -99,6 +102,92 @@ namespace ModSync.Tests
                 Assert.That(Directory.Exists(Path.Combine(_modDirectory, "extracted")), Is.True, "Extraction destination directory should exist");
                 Assert.That(Directory.Exists(Path.Combine(_modDirectory, "extracted", "subdir")), Is.True, "Subdirectory should be created during extraction");
             });
+        }
+
+        [Test]
+        public async Task Extract_WithoutExplicitDestination_WritesToExtractScratch_NotBesideArchive()
+        {
+            string zipPath = CreateTestZip("UltimatePlanetHR.zip", new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                { "Override/floor.tpc", "texture" },
+            });
+            string scratch = Path.Combine(_testDirectory, "extract_scratch");
+            Directory.CreateDirectory(scratch);
+            MainConfig.ExtractScratchPath = new DirectoryInfo(scratch);
+
+            var instruction = new Instruction
+            {
+                Action = Instruction.ActionType.Extract,
+                Source = new List<string> { $"<<modDirectory>>/{Path.GetFileName(zipPath)}" },
+            };
+
+            var component = new ModComponent { Name = "Ultimate Planet HR", Guid = Guid.NewGuid() };
+            component.Instructions.Add(instruction);
+            instruction.SetParentComponent(component);
+            var fileSystemProvider = new RealFileSystemProvider();
+            instruction.SetFileSystemProvider(fileSystemProvider);
+            _config.sourcePath = new DirectoryInfo(_modDirectory);
+            _config.destinationPath = new DirectoryInfo(_kotorDirectory);
+
+            var result = await component.ExecuteSingleInstructionAsync(instruction, 0, new List<ModComponent> { component }, fileSystemProvider);
+
+            string besideArchive = Path.Combine(_modDirectory, "UltimatePlanetHR");
+            string inScratch = Path.Combine(scratch, "UltimatePlanetHR", "Override", "floor.tpc");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result, Is.EqualTo(Instruction.ActionExitCode.Success));
+                Assert.That(File.Exists(inScratch), Is.True, "Extracted TPC must land in extract scratch");
+                Assert.That(Directory.Exists(besideArchive), Is.False, "Must not write extracted trees beside the archive");
+            });
+        }
+
+        [Test]
+        public void SetRealPaths_OptionPatcher_RemapsInstallerFromArchiveStoreToExtractScratch()
+        {
+            // Reproduce K1 Ported Alien VO Replacements: Extract is on the outer component;
+            // Patcher lives on a Choose option. Installer.exe exists only under extract scratch.
+            string scratch = Path.Combine(_testDirectory, "extract_scratch");
+            string folderName = "K1 PAVOR v1.3.2";
+            string installerInScratch = Path.Combine(scratch, folderName, "Installer.exe");
+            Directory.CreateDirectory(Path.GetDirectoryName(installerInScratch)!);
+            File.WriteAllText(installerInScratch, "fake-patcher");
+            MainConfig.ExtractScratchPath = new DirectoryInfo(scratch);
+
+            var extract = new Instruction
+            {
+                Action = Instruction.ActionType.Extract,
+                Source = new List<string> { $"<<modDirectory>>/{folderName}.zip" },
+            };
+            var patcher = new Instruction
+            {
+                Action = Instruction.ActionType.Patcher,
+                Source = new List<string> { $"<<modDirectory>>\\{folderName}\\Installer.exe" },
+            };
+
+            var option = new Option { Name = "Default", Guid = Guid.NewGuid() };
+            option.Instructions.Add(patcher);
+            patcher.SetParentComponent(option);
+
+            var component = new ModComponent { Name = "K1 Ported Alien VO Replacements", Guid = Guid.NewGuid() };
+            component.Instructions.Add(extract);
+            extract.SetParentComponent(component);
+            component.Options.Add(option);
+
+            MainConfig.AllComponents = new List<ModComponent> { component };
+            _config.sourcePath = new DirectoryInfo(_modDirectory);
+            _config.destinationPath = new DirectoryInfo(_kotorDirectory);
+
+            var fileSystemProvider = new RealFileSystemProvider();
+            patcher.SetFileSystemProvider(fileSystemProvider);
+            patcher.SetRealPaths();
+
+            Assert.That(patcher.TryGetResolvedSourcePaths(out IReadOnlyList<string> resolved), Is.True);
+            Assert.That(
+                resolved.Single(),
+                Is.EqualTo(Path.GetFullPath(installerInScratch)),
+                "Option-scoped Patcher must resolve Installer.exe under extract scratch, not the archive store"
+            );
         }
 
         [Test]

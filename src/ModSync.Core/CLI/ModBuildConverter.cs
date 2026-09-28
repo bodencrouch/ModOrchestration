@@ -118,6 +118,13 @@ namespace ModSync.Core.CLI
 
     public static class ModBuildConverter
     {
+        /// <summary>
+        /// Process exit code for an install that applied its files but finished completed-unverified
+        /// (<c>--skip-validation</c>, <c>--no-checkpoint</c>, or <c>--best-effort</c>): there is no
+        /// published install PASS, so it is never reported as 0 / Success.
+        /// </summary>
+        public const int CompletedUnverifiedExitCode = 2;
+
         private static MainConfig s_config;
         private static ConsoleProgressDisplay s_progressDisplay;
         private static DownloadCacheService s_globalDownloadCache;
@@ -380,6 +387,9 @@ namespace ModSync.Core.CLI
 
             [Option("non-interactive", Required = false, HelpText = "Force non-interactive FOMOD behavior (warn-continue or choices file).")]
             public bool NonInteractive { get; set; }
+
+            [Option("interpretation-file", Required = false, HelpText = "Overlay TOML for guide-interpretation policy (regex, tokens, exceptions). Merges over bundled defaults and AppData/ModSync/guide-interpretation.toml.")]
+            public string InterpretationFile { get; set; }
         }
 
         [Verb("convert", HelpText = "Convert between formats or merge instruction sets, output to stdout or file")]
@@ -400,7 +410,7 @@ namespace ModSync.Core.CLI
             [Option('d', "download", Required = false, HelpText = "Download all mod files to source-path before processing (requires --source-path)")]
             public bool Download { get; set; }
 
-            [Option('s', "select", Required = false, HelpText = "Select components by category or tier (format: 'category:Name' or 'tier:Name'). Can be specified multiple times.")]
+            [Option('s', "select", Required = false, HelpText = "Select components by category, tier, or mod name (format: 'category:Name', 'tier:Name', or 'mod:Name'). Can be specified multiple times.")]
             public IEnumerable<string> Select { get; set; }
 
             [Option("source-path", Required = false, HelpText = "Path to source directory containing downloaded mod files")]
@@ -500,7 +510,7 @@ namespace ModSync.Core.CLI
             [Option('d', "download", Required = false, HelpText = "Download all mod files to source-path before processing (requires --source-path)")]
             public bool Download { get; set; }
 
-            [Option('s', "select", Required = false, HelpText = "Select components by category or tier (format: 'category:Name' or 'tier:Name'). Can be specified multiple times.")]
+            [Option('s', "select", Required = false, HelpText = "Select components by category, tier, or mod name (format: 'category:Name', 'tier:Name', or 'mod:Name'). Can be specified multiple times.")]
             public IEnumerable<string> Select { get; set; }
 
             [Option("source-path", Required = false, HelpText = "Path to source directory containing downloaded mod files")]
@@ -579,7 +589,7 @@ namespace ModSync.Core.CLI
             [Option('s', "source-dir", Required = false, HelpText = "Source directory containing mod files (for file existence checks)")]
             public string SourceDirectory { get; set; }
 
-            [Option("select", Required = false, HelpText = "Select components to validate (format: 'category:Name' or 'tier:Name'). Can be specified multiple times.")]
+            [Option("select", Required = false, HelpText = "Select components to validate (format: 'category:Name', 'tier:Name', or 'mod:Name'). Can be specified multiple times.")]
             public IEnumerable<string> Select { get; set; }
 
             [Option("full", Required = false, Default = false, HelpText = "Perform full validation including environment checks (requires --game-dir and --source-dir)")]
@@ -616,7 +626,7 @@ namespace ModSync.Core.CLI
             [Option('s', "source-dir", Required = false, HelpText = "Source directory containing mod files (defaults to input file directory)")]
             public string SourceDirectory { get; set; }
 
-            [Option("select", Required = false, HelpText = "Select components to install (format: 'category:Name' or 'tier:Name'). Can be specified multiple times.")]
+            [Option("select", Required = false, HelpText = "Select components to install (format: 'category:Name', 'tier:Name', or 'mod:Name'). Can be specified multiple times.")]
             public IEnumerable<string> Select { get; set; }
 
             [Option("use-file-selection", Required = false, Default = false, HelpText = "Only install components with IsSelected=true in the file. Default (without this flag and without --select): select all components (full-build style).")]
@@ -655,7 +665,7 @@ namespace ModSync.Core.CLI
             [Option("continue-on-mod-failure", Required = false, Default = false, HelpText = "If a mod install fails (e.g. patcher error), log and continue with the rest instead of aborting")]
             public bool ContinueOnModFailure { get; set; }
 
-            [Option("best-effort", Required = false, Default = false, HelpText = "Install everything possible: same as --continue-on-missing-sources --continue-on-mod-failure -y (skips missing archives and failed mods, exits 0 with warnings)")]
+            [Option("best-effort", Required = false, Default = false, HelpText = "Install everything possible: same as --continue-on-missing-sources --continue-on-mod-failure -y (skips missing archives and failed mods; exits 2, completed-unverified, with warnings)")]
             public bool BestEffort { get; set; }
 
             [Option("nexus-api-key", Required = false, HelpText = "Nexus Mods API key for automated Nexus downloads (or set KOTOR_MODSYNC_NEXUS_API_KEY / NEXUS_MODS_API_KEY)")]
@@ -762,7 +772,11 @@ namespace ModSync.Core.CLI
             {
                 Logger.Initialize();
 
-                var parser = new Parser(with => with.HelpWriter = Console.Out);
+                var parser = new Parser(with =>
+                {
+                    with.HelpWriter = Console.Out;
+                    with.AllowMultiInstance = true;
+                });
 
                 return parser.ParseArguments<ConvertOptions, MergeOptions, ValidateOptions, InstallOptions, SetNexusApiKeyOptions, InstallPythonDepsOptions, HolopatcherOptions, ProfileOptions, SettingsOptions>(args)
                 .MapResult(
@@ -1115,9 +1129,22 @@ namespace ModSync.Core.CLI
             await FomodPostDownloadOrchestrator.ProcessAsync(components, modDirectory, host).ConfigureAwait(false);
         }
 
-        private static async Task<DownloadCacheService> DownloadAllModFilesAsync(List<ModComponent> components, string destinationDirectory, bool verbose, bool sequential = true, CancellationToken cancellationToken = default)
+        private static async Task<DownloadCacheService> DownloadAllModFilesAsync(
+            List<ModComponent> components,
+            string destinationDirectory,
+            bool verbose,
+            bool sequential = true,
+            CancellationToken cancellationToken = default,
+            bool downloadSelectedOnly = false)
         {
-            int componentCount = components.Count(c => c.ResourceRegistry != null && c.ResourceRegistry.Count > 0);
+            IEnumerable<ModComponent> candidates = components.Where(c => c.ResourceRegistry != null && c.ResourceRegistry.Count > 0);
+            if (downloadSelectedOnly)
+            {
+                candidates = candidates.Where(c => c.IsSelected);
+            }
+
+            var componentsToProcess = candidates.ToList();
+            int componentCount = componentsToProcess.Count;
             if (componentCount == 0)
             {
                 if (s_progressDisplay != null)
@@ -1239,9 +1266,6 @@ namespace ModSync.Core.CLI
 
             try
             {
-                var componentsToProcess = components.Where(c => c.ResourceRegistry != null && c.ResourceRegistry.Count > 0).ToList();
-
-
                 await Logger.LogVerboseAsync($"[Download] Processing {componentsToProcess.Count} components with concurrency limit of 10").ConfigureAwait(false);
 
                 using (var semaphore = new SemaphoreSlim(10))
@@ -1367,7 +1391,7 @@ componentName: null,
             return downloadCache;
         }
 
-        private static void ApplySelectionFilters(
+        internal static void ApplySelectionFilters(
             List<ModComponent> components,
             IEnumerable<string> selections)
         {
@@ -1387,6 +1411,7 @@ componentName: null,
 
             var selectedCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var selectedTiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var selectedModNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (string selection in selections)
             {
@@ -1398,7 +1423,7 @@ componentName: null,
                 string[] parts = selection.Split(new[] { ':' }, 2);
                 if (parts.Length != 2)
                 {
-                    Logger.LogWarning($"Invalid selection format: '{selection}'. Expected format: 'category:Name' or 'tier:Name'");
+                    Logger.LogWarning($"Invalid selection format: '{selection}'. Expected format: 'category:Name', 'tier:Name', or 'mod:Name'");
                     continue;
                 }
 
@@ -1415,9 +1440,14 @@ componentName: null,
                     selectedTiers.Add(value);
                     Logger.LogVerbose($"Added tier filter: {value}");
                 }
+                else if (string.Equals(type, "mod", StringComparison.Ordinal) || string.Equals(type, "name", StringComparison.Ordinal))
+                {
+                    selectedModNames.Add(value);
+                    Logger.LogVerbose($"Added mod name filter: {value}");
+                }
                 else
                 {
-                    Logger.LogWarning($"Unknown selection type: '{type}'. Use 'category' or 'tier'");
+                    Logger.LogWarning($"Unknown selection type: '{type}'. Use 'category', 'tier', or 'mod'");
                 }
             }
 
@@ -1436,6 +1466,19 @@ componentName: null,
             {
                 bool includeByCategory = false;
                 bool includeByTier = false;
+                bool includeByModName = false;
+
+                if (selectedModNames.Count > 0)
+                {
+                    includeByModName = selectedModNames.Any(filter =>
+                        string.Equals(component.Name, filter, StringComparison.OrdinalIgnoreCase)
+                        || (!string.IsNullOrEmpty(component.Name)
+                            && component.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0));
+                }
+                else
+                {
+                    includeByModName = true;
+                }
 
                 if (selectedCategories.Count > 0)
                 {
@@ -1482,7 +1525,7 @@ componentName: null,
                     includeByTier = true;
                 }
 
-                if (includeByCategory && includeByTier)
+                if (includeByModName && includeByCategory && includeByTier)
                 {
                     component.IsSelected = true;
                     selectedCount++;
@@ -1494,6 +1537,10 @@ componentName: null,
             }
 
             Logger.LogVerbose($"Selection filters applied: {selectedCount}/{components.Count} components selected");
+            if (selectedModNames.Count > 0)
+            {
+                Logger.LogVerbose($"Mod names: {string.Join(", ", selectedModNames)}");
+            }
             if (selectedCategories.Count > 0)
             {
                 Logger.LogVerbose($"Categories: {string.Join(", ", selectedCategories)}");
@@ -2227,7 +2274,7 @@ componentName: null,
                     }
                 }
 
-                await ApplyAutoGenerateLocalIfRequestedAsync(components, opts.AutoGenerateLocal, opts.SourcePath).ConfigureAwait(false);
+                await ApplyAutoGenerateLocalIfRequestedAsync(components, opts.AutoGenerateLocal, opts.SourcePath, opts.InputPath).ConfigureAwait(false);
 
                 ApplySelectionFilters(components, opts.Select);
 
@@ -2668,7 +2715,7 @@ componentName: null,
                     }
                 }
 
-                await ApplyAutoGenerateLocalIfRequestedAsync(components, opts.AutoGenerateLocal, opts.SourcePath).ConfigureAwait(false);
+                await ApplyAutoGenerateLocalIfRequestedAsync(components, opts.AutoGenerateLocal, opts.SourcePath, opts.IncomingPath ?? opts.ExistingPath).ConfigureAwait(false);
 
                 ApplySelectionFilters(components, opts.Select);
 
@@ -2807,7 +2854,8 @@ componentName: null,
         private static async Task ApplyAutoGenerateLocalIfRequestedAsync(
             List<ModComponent> components,
             bool autoGenerateLocal,
-            string sourcePath)
+            string sourcePath,
+            string inputPath = null)
         {
             if (!autoGenerateLocal)
             {
@@ -2816,7 +2864,48 @@ componentName: null,
 
             EnsureConfigInitialized();
             s_config.sourcePath = new DirectoryInfo(sourcePath);
+            EnsureTargetGameKnown(inputPath);
             await ComponentProcessingService.TryGenerateFromLocalArchivesAsync(components).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// A conversion has no installed game to inspect and Markdown carries no `game` field, so
+        /// <see cref="MainConfig.TargetGame"/> stays empty and every wrong-game guard in the archive
+        /// resolver is silently inert. Measured: a K1 build resolved "Trandoshans Rescaled" to the
+        /// KOTOR 2 mod "Rescaled Trandoshans.zip" because nothing knew which game was being built.
+        /// </summary>
+        private static void EnsureTargetGameKnown(string inputPath)
+        {
+            if (!string.IsNullOrWhiteSpace(MainConfig.TargetGame))
+            {
+                return;
+            }
+
+            string documentText = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(inputPath) && File.Exists(inputPath))
+                {
+                    // Only the title is consulted, so a few lines are enough.
+                    documentText = string.Join("\n", File.ReadLines(inputPath).Take(40));
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                Logger.LogVerbose($"[Convert] Could not read '{inputPath}' for game inference: {ex.Message}");
+            }
+
+            string inferred = BuildTargetGameInference.Infer(documentText, inputPath);
+            if (string.IsNullOrEmpty(inferred))
+            {
+                Logger.LogWarning(
+                    "Could not determine whether this build targets KOTOR 1 or TSL; wrong-game archive "
+                    + "protection is disabled for this run.");
+                return;
+            }
+
+            MainConfig.TargetGame = inferred;
+            Logger.Log($"Build targets {inferred} (inferred from the instruction document).");
         }
 
         private static async Task LogValidationPipelineOutputAsync(
@@ -3276,6 +3365,43 @@ componentName: null,
             }
         }
 
+        /// <summary>
+        /// Logs a completed-unverified install. A clean unverified run gets one warning; a run that
+        /// continued past failed components or skipped missing archives gets its own
+        /// "unverified, with N component failures" line so real mod failures are not hidden behind
+        /// the shared exit code.
+        /// </summary>
+        private static async Task LogCompletedUnverifiedAsync([NotNull] InstallationPipelineResult installResult)
+        {
+            int failed = installResult.FailedComponentCount;
+            int skipped = installResult.SkippedComponentCount;
+            bool hadFailures = failed > 0
+                || installResult.InstallLoopExitCode == ModComponent.InstallExitCode.CompletedWithFailures;
+
+            if (hadFailures)
+            {
+                await Logger.LogWarningAsync(
+                    $"Installation finished unverified, with {failed} component failure(s)"
+                    + (skipped > 0 ? $" and {skipped} component(s) skipped for missing archives" : string.Empty)
+                    + ". Review the failed mods above and re-run them; the game directory is not a verified install."
+                ).ConfigureAwait(false);
+            }
+            else if (skipped > 0
+                     || installResult.InstallLoopExitCode == ModComponent.InstallExitCode.MissingSourceFiles)
+            {
+                await Logger.LogWarningAsync(
+                    $"Installation finished unverified, with {skipped} component(s) skipped for missing archives. "
+                    + "Add the downloads and re-run those mods."
+                ).ConfigureAwait(false);
+            }
+
+            await Logger.LogWarningAsync(
+                "Installation finished completed-unverified: files were applied, but --skip-validation, "
+                + "--no-checkpoint, --best-effort, or --continue-on-* means there is no published install PASS. "
+                + $"Exiting with code {CompletedUnverifiedExitCode}; re-run without those flags for a verified install."
+            ).ConfigureAwait(false);
+        }
+
         private static async Task<int> RunInstallAsync(InstallOptions opts)
         {
             SetVerboseMode(opts.Verbose);
@@ -3291,11 +3417,9 @@ componentName: null,
                         return 1;
                     }
 
-                    // Strict default: checkpoints + validation + stop-on-error.
-                    // Automation may opt into --no-checkpoint / --skip-validation / --best-effort
-                    // (and related continue flags) — log a warning but do not hard-reject, otherwise
-                    // unattended installs hang forever on zip/git baselines (see F1) or cannot run
-                    // at all against incomplete archive sets.
+                    // A direct guide install is a reference/parity operation. Weakening checkpoint,
+                    // validation, or stop-on-error guarantees would create an output that looks complete
+                    // while violating guide order, so reject those combinations before any game writes.
                     if (opts.Download || opts.Managed || opts.UseFileSelection
                         || (opts.Select != null && opts.Select.Any()))
                     {
@@ -3308,10 +3432,12 @@ componentName: null,
                     if (opts.NoCheckpoint || opts.SkipValidation || opts.BestEffort
                         || opts.ContinueOnMissingSources || opts.ContinueOnModFailure)
                     {
-                        await Logger.LogWarningAsync(
-                            "Direct Markdown automation overrides active (--no-checkpoint / --skip-validation / --best-effort / continue-*). "
-                            + "Guide order is preserved, but fail-closed checkpoint/validation guarantees are weakened."
+                        await Logger.LogErrorAsync(
+                            "Direct Markdown mode is fail-closed and does not support --no-checkpoint, "
+                            + "--skip-validation, --best-effort, --continue-on-missing-sources, or "
+                            + "--continue-on-mod-failure."
                         ).ConfigureAwait(false);
+                        return 1;
                     }
                 }
 
@@ -3355,6 +3481,19 @@ componentName: null,
                 EnsureConfigInitialized();
                 s_config.sourcePath = new DirectoryInfo(sourceDir);
                 s_config.destinationPath = new DirectoryInfo(resolvedGameDir);
+                MainConfig.EnsureExtractScratchAwayFromSource();
+                if (MainConfig.ExtractScratchPath != null)
+                {
+                    await Logger.LogAsync(
+                        $"Extract scratch: {MainConfig.ExtractScratchPath.FullName} (archives stay on {sourceDir}; extracted trees do not write back to the archive store)."
+                    ).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Logger.LogWarningAsync(
+                        $"Extract scratch is unset; Extract will unpack beside archives in '{sourceDir}'. Ultimate HR packs must not write TPC trees back to a USB archive store."
+                    ).ConfigureAwait(false);
+                }
 
                 if (opts.BestEffort)
                 {
@@ -3382,14 +3521,14 @@ componentName: null,
                     await Logger.LogVerboseAsync($"OdyPatcher path override: {opts.OdyPatcherPath.Trim()}").ConfigureAwait(false);
                 }
 
-                if (opts.DirectMarkdown
-                    && !string.Equals(MainConfig.PatcherEngine, PatcherEngines.OdyPatcher, StringComparison.OrdinalIgnoreCase))
-                {
-                    await Logger.LogErrorAsync(
-                        "Direct Markdown mode requires --patcher-engine OdyPatcher."
-                    ).ConfigureAwait(false);
-                    return 1;
-                }
+                // Direct Markdown mode describes where install instructions come from (the guide's prose
+                // and structure); it says nothing about which patcher backend should run them. Forcing
+                // OdyPatcher here made it impossible to reproduce a hand install with the CLI, because a
+                // person following the guide runs the patcher each mod actually ships (HoloPatcher /
+                // TSLPatcher). The two engines do not agree byte-for-byte -- notably TLK Replace vs
+                // append-all -- so pinning the automated path to a different engine than the manual one
+                // guarantees a diff that no parser fix can close. Engine selection stays with
+                // --patcher-engine.
 
                 s_config.continueInstallOnMissingSources = opts.ContinueOnMissingSources;
                 s_config.continueInstallOnModFailure = opts.ContinueOnModFailure;
@@ -3438,67 +3577,6 @@ componentName: null,
                     ApplySelectionFilters(components, opts.Select);
                 }
 
-                if (opts.DirectMarkdown)
-                {
-                    DirectMarkdownInstallPreflightResult directResult = DirectMarkdownInstallPreflight.Apply(components);
-                    await Logger.LogAsync(
-                        $"Direct Markdown NLP: draftedFromProse={directResult.DraftedFromProse}, 4GB Patcher skipped={directResult.SkippedFourGb}, widescreen skipped={directResult.SkippedWidescreen}."
-                    ).ConfigureAwait(false);
-
-                    if (!directResult.IsReady)
-                    {
-                        bool allowPartial = opts.BestEffort || opts.ContinueOnModFailure;
-                        if (!allowPartial)
-                        {
-                            await Logger.LogErrorAsync(
-                                $"Direct Markdown preflight stopped before game writes: {directResult.UnresolvedComponents.Count} selected component(s) have no reviewed executable actions in the Markdown."
-                            ).ConfigureAwait(false);
-                            foreach (string componentName in directResult.UnresolvedComponents.Take(25))
-                            {
-                                await Logger.LogErrorAsync($"  - {componentName}").ConfigureAwait(false);
-                            }
-
-                            if (directResult.UnresolvedComponents.Count > 25)
-                            {
-                                await Logger.LogErrorAsync(
-                                    $"  - ... and {directResult.UnresolvedComponents.Count - 25} more"
-                                ).ConfigureAwait(false);
-                            }
-                            return 1;
-                        }
-
-                        // Best-effort / continue-on-failure: install what NLP drafted; skip the rest.
-                        var unresolvedNames = new HashSet<string>(
-                            directResult.UnresolvedComponents,
-                            StringComparer.OrdinalIgnoreCase);
-                        int deselected = 0;
-                        foreach (ModComponent component in components)
-                        {
-                            if (component.IsSelected
-                                && unresolvedNames.Contains(component.Name ?? string.Empty))
-                            {
-                                component.IsSelected = false;
-                                deselected++;
-                            }
-                        }
-
-                        await Logger.LogWarningAsync(
-                            $"Direct Markdown NLP coverage incomplete: deselected {deselected} component(s) with no executable actions; continuing with drafted mods (--best-effort / --continue-on-mod-failure)."
-                        ).ConfigureAwait(false);
-                        foreach (string componentName in directResult.UnresolvedComponents.Take(15))
-                        {
-                            await Logger.LogWarningAsync($"  - skipped (undrafted): {componentName}").ConfigureAwait(false);
-                        }
-
-                        if (directResult.UnresolvedComponents.Count > 15)
-                        {
-                            await Logger.LogWarningAsync(
-                                $"  - ... and {directResult.UnresolvedComponents.Count - 15} more"
-                            ).ConfigureAwait(false);
-                        }
-                    }
-                }
-
                 if (opts.BestEffort && string.IsNullOrWhiteSpace(MainConfig.NexusModsApiKey))
                 {
                     int nexusSkipped = DeselectComponentsWithNexusUrlsWithoutApiKey(components);
@@ -3528,7 +3606,8 @@ componentName: null,
                             sourceDir,
                             opts.Verbose,
                             sequential: !opts.Concurrent,
-                            downloadCts.Token).ConfigureAwait(false);
+                            downloadCts.Token,
+                            downloadSelectedOnly: true).ConfigureAwait(false);
                     }
 
                     LogAllErrors(s_globalDownloadCache, forceConsoleOutput: true);
@@ -3573,35 +3652,6 @@ componentName: null,
                     }
                 }
 
-                if (!opts.SkipValidation)
-                {
-                    await Logger.LogAsync("Running full installation validation (wizard-equivalent pipeline)...").ConfigureAwait(false);
-
-                    var pipelineOptions = ValidationPipelineOptions.WizardFull;
-                    pipelineOptions.MainConfig = s_config;
-                    pipelineOptions.UseFileSelection = true;
-                    pipelineOptions.ConfirmationCallback = BuildInstallConfirmationCallback(opts);
-
-                    ValidationPipelineResult pipelineResult = await InstallationValidationPipeline.RunAsync(
-                        components,
-                        pipelineOptions).ConfigureAwait(false);
-
-                    await LogValidationPipelineOutputAsync(
-                        pipelineResult,
-                        selectedCount,
-                        errorsOnly: false,
-                        dryRunOnly: false).ConfigureAwait(false);
-
-                    if (!pipelineResult.IsSuccess)
-                    {
-                        await Logger.LogErrorAsync("Validation failed. Fix issues above before installing.").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    await Logger.LogAsync("Validation passed.").ConfigureAwait(false);
-                    await Logger.LogAsync().ConfigureAwait(false);
-                }
-
                 await Logger.LogAsync("Starting installation...").ConfigureAwait(false);
                 await Logger.LogAsync(new string('=', 50)).ConfigureAwait(false);
 
@@ -3626,17 +3676,53 @@ componentName: null,
                     ).ConfigureAwait(false);
                 }
 
-                ModComponent.InstallExitCode exitCode = await InstallationService.InstallAllSelectedComponentsAsync(
-                    components,
-                    async (currentIndex, total, componentName) =>
+                var validationOptions = ValidationPipelineOptions.WizardFull;
+                validationOptions.MainConfig = s_config;
+                validationOptions.UseFileSelection = true;
+                validationOptions.ConfirmationCallback = BuildInstallConfirmationCallback(opts);
+                InstallationInputKind inputKind = InstallationPipelineService.ClassifyInputKind(components);
+
+                var pipelineRequest = new InstallationPipelineRequest(components)
+                {
+                    Frontend = InstallationFrontend.Cli,
+                    Mode = inputKind == InstallationInputKind.MarkdownGuide
+                        ? InstallationPipelineMode.Reference
+                        : InstallationPipelineMode.Standard,
+                    InputKind = inputKind,
+                    Phase = InstallationPhase.AllSelected,
+                    RunValidation = !opts.SkipValidation,
+                    PreserveInputOrder = inputKind == InstallationInputKind.MarkdownGuide,
+                    ValidationOptions = validationOptions,
+                    InstallationProgress = (currentIndex, total, componentName) =>
                     {
-                        await Logger.LogAsync($"[{currentIndex + 1}/{total}] Installing: {componentName}").ConfigureAwait(false);
+                        _ = Logger.LogAsync($"[{currentIndex + 1}/{total}] Installing: {componentName}");
                     },
-                    cancellationToken: default,
-                    profileOverride: profileOverride,
-                    managedDeploymentOverride: managedOverride,
-                    preserveInputOrder: opts.DirectMarkdown
-                ).ConfigureAwait(false);
+                    ProfileOverride = profileOverride,
+                    ManagedDeploymentOverride = managedOverride,
+                };
+
+                InstallationPipelineResult installResult = await InstallationPipelineService
+                    .RunAsync(pipelineRequest)
+                    .ConfigureAwait(false);
+
+                if (installResult.ValidationResult != null)
+                {
+                    await LogValidationPipelineOutputAsync(
+                        installResult.ValidationResult,
+                        selectedCount,
+                        errorsOnly: false,
+                        dryRunOnly: false).ConfigureAwait(false);
+                    if (!installResult.ValidationResult.IsSuccess)
+                    {
+                        await Logger.LogErrorAsync("Validation failed. Fix issues above before installing.").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    await Logger.LogAsync($"Validation passed. Plan fingerprint: {installResult.Plan.Fingerprint}")
+                        .ConfigureAwait(false);
+                }
+
+                ModComponent.InstallExitCode exitCode = installResult.ExitCode;
 
                 if (InstallationService.LastManagedInstallResult != null)
                 {
@@ -3653,22 +3739,14 @@ componentName: null,
                     return 0;
                 }
 
-                if (exitCode == ModComponent.InstallExitCode.MissingSourceFiles &&
-                    (opts.ContinueOnMissingSources || opts.BestEffort))
+                // No exit-0 shortcuts for --best-effort / --continue-on-*: a run that finished under
+                // those flags (or --skip-validation / --no-checkpoint) is completed-unverified and exits
+                // CompletedUnverifiedExitCode (witness plan R9, U4.3). Component failures and skipped
+                // archives are reported on their own line so they stay visible.
+                if (exitCode == ModComponent.InstallExitCode.CompletedUnverified)
                 {
-                    await Logger.LogWarningAsync(
-                        "Installation finished with one or more mods skipped (missing archives). Add downloads and re-run for those mods."
-                    ).ConfigureAwait(false);
-                    return 0;
-                }
-
-                if (exitCode == ModComponent.InstallExitCode.CompletedWithFailures &&
-                    (opts.ContinueOnModFailure || opts.BestEffort))
-                {
-                    await Logger.LogWarningAsync(
-                        "Installation finished with one or more mod failures; review logs and re-run or fix failed mods."
-                    ).ConfigureAwait(false);
-                    return 0;
+                    await LogCompletedUnverifiedAsync(installResult).ConfigureAwait(false);
+                    return CompletedUnverifiedExitCode;
                 }
 
                 await Logger.LogErrorAsync($"Installation failed with exit code: {exitCode}").ConfigureAwait(false);

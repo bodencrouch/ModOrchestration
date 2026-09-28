@@ -172,6 +172,93 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public async Task Install_FinalDuplicateSweep_CatchesLateReintroducedDuplicate()
+        {
+            // Regression test for the "Remove Duplicate TGA/TPC" late-reintroduction bug:
+            // DelDuplicate runs once, mid-sequence, and only purges duplicates that exist at that
+            // exact moment. A component installed *after* it can recreate a duplicate pair for a
+            // different stem, which never gets cleaned up unless a final sweep runs after every
+            // component has finished.
+            Directory.CreateDirectory(Path.Combine(_workingDirectory.FullName, "Override"));
+
+            // Stem "texture1": already-duplicated pair that Mod A's own DelDuplicate instruction
+            // will resolve, exactly as today.
+            File.WriteAllText(Path.Combine(_workingDirectory.FullName, "Override", "texture1.tga"), "tga1");
+            File.WriteAllText(Path.Combine(_workingDirectory.FullName, "Override", "texture1.tpc"), "tpc1");
+
+            // Stem "untouched": only a single priority-listed extension present. Must never be
+            // touched by either DelDuplicate or the final sweep.
+            File.WriteAllText(Path.Combine(_workingDirectory.FullName, "Override", "untouched.tga"), "solo");
+
+            // Stem "texture2": a .tga already sits in Override; Mod B (installed after Mod A) will
+            // extract a fresh .tpc for the same stem, recreating a duplicate pair that Mod A's
+            // DelDuplicate instruction never sees because it already ran.
+            File.WriteAllText(Path.Combine(_workingDirectory.FullName, "Override", "texture2.tga"), "tga2");
+
+            // Stem "texture3": .dds and .tga already sit in Override; Mod B also extracts a fresh
+            // .tpc for this stem. Pins 5b: with all three priority-listed extensions present, the
+            // sweep must purge only the extension the guide's own DelDuplicate instruction named
+            // (.tpc) and leave both other files alone -- not pick a single "winner" by list order.
+            File.WriteAllText(Path.Combine(_workingDirectory.FullName, "Override", "texture3.dds"), "dds3");
+            File.WriteAllText(Path.Combine(_workingDirectory.FullName, "Override", "texture3.tga"), "tga3");
+
+            var modA = new ModComponent { Name = "Mod A - Dedup", Guid = Guid.NewGuid(), IsSelected = true };
+            modA.Instructions.Add(new Instruction
+            {
+                Action = Instruction.ActionType.DelDuplicate,
+                Source = new List<string> { ".tpc", ".tga" },
+                Destination = "<<kotorDirectory>>/Override",
+                Arguments = ".tpc"
+            });
+
+            string archivePath = CreateTestZip("late_duplicate.zip", new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                { "texture2.tpc", "tpc2 content" },
+                { "texture3.tpc", "tpc3 content" }
+            });
+
+            var modB = new ModComponent { Name = "Mod B - Late Duplicate", Guid = Guid.NewGuid(), IsSelected = true };
+            modB.Dependencies = new List<Guid> { modA.Guid };
+            modB.Instructions.Add(new Instruction
+            {
+                Action = Instruction.ActionType.Extract,
+                Source = new List<string> { $"<<modDirectory>>/{Path.GetFileName(archivePath)}" },
+                Destination = "<<kotorDirectory>>/Override"
+            });
+
+            _mainConfigInstance.allComponents = new List<ModComponent> { modA, modB };
+
+            var coordinator = new InstallCoordinator();
+            ResumeResult resume = await coordinator.InitializeAsync(MainConfig.AllComponents, MainConfig.DestinationPath, CancellationToken.None);
+
+            var ordered = resume.OrderedComponents.Where(c => c.IsSelected).ToList();
+            var exitCode = await InstallationService.InstallAllSelectedComponentsAsync(ordered, progressCallback: null, CancellationToken.None);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(ModComponent.InstallExitCode.Success), "Install should succeed");
+                Assert.That(File.Exists(Path.Combine(_workingDirectory.FullName, "Override", "texture1.tga")), Is.True,
+                    "texture1.tga should remain (Mod A's own DelDuplicate keeps it)");
+                Assert.That(File.Exists(Path.Combine(_workingDirectory.FullName, "Override", "texture1.tpc")), Is.False,
+                    "texture1.tpc should already be deleted by Mod A's own DelDuplicate instruction");
+                Assert.That(File.Exists(Path.Combine(_workingDirectory.FullName, "Override", "texture2.tga")), Is.True,
+                    "texture2.tga should remain: the sweep purges .tpc (the extension DelDuplicate named), not .tga");
+                Assert.That(File.Exists(Path.Combine(_workingDirectory.FullName, "Override", "texture2.tpc")), Is.False,
+                    "texture2.tpc was recreated by Mod B *after* Mod A's DelDuplicate already ran; only the final " +
+                    "post-install duplicate sweep can catch and remove it");
+                Assert.That(File.Exists(Path.Combine(_workingDirectory.FullName, "Override", "untouched.tga")), Is.True,
+                    "untouched.tga is a single-extension stem with nothing to dedupe; the final sweep must leave it alone");
+                Assert.That(File.Exists(Path.Combine(_workingDirectory.FullName, "Override", "texture3.dds")), Is.True,
+                    "texture3.dds should remain: the sweep only purges .tpc, never .dds");
+                Assert.That(File.Exists(Path.Combine(_workingDirectory.FullName, "Override", "texture3.tga")), Is.True,
+                    "texture3.tga should remain: the sweep only purges .tpc, never .tga");
+                Assert.That(File.Exists(Path.Combine(_workingDirectory.FullName, "Override", "texture3.tpc")), Is.False,
+                    "texture3.tpc was recreated by Mod B alongside two other compatible extensions (.dds/.tga); the " +
+                    "sweep must purge only .tpc, not pick a single positional \"winner\" among all three");
+            });
+        }
+
+        [Test]
         public async Task Install_ModChainWithDependencies_InstallsInCorrectOrder()
         {
             // Base mod

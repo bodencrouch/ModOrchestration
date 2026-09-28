@@ -435,3 +435,22 @@ namespace ModSync.Core.Utility
     }
 }
 
+#if NETFRAMEWORK
+namespace ModSync.Core
+{
+    /// <summary>
+    /// .NET Framework 4.8 polyfills for string overloads that exist on .NET Core 2.1+/.NET 5+.
+    /// Declared in the root ModSync.Core namespace so every ModSync.Core.* call site binds to them
+    /// without extra usings; on modern targets the instance methods exist and this class is not compiled.
+    /// </summary>
+    internal static class NetFrameworkStringExtensions
+    {
+        [NotNull]
+        public static string Replace([NotNull] this string str, [NotNull] string oldValue, [CanBeNull] string newValue, StringComparison comparisonType) =>
+            Utility.NetFrameworkCompatibility.Replace(str, oldValue, newValue ?? string.Empty, comparisonType);
+
+        public static bool Contains([NotNull] this string str, [NotNull] string value, StringComparison comparisonType) =>
+            Utility.NetFrameworkCompatibility.Contains(str, value, comparisonType);
+    }
+}
+#endif

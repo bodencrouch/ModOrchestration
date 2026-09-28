@@ -687,6 +687,40 @@ Exception Type: {ex.GetType().FullName}";
             return (null, false);
         }
 
+        /// <summary>
+        /// Accepts a workspace or cargo target directory (not only the binary).
+        /// Prefers <c>target/release/odypatcher</c> over debug when a repo root is given.
+        /// </summary>
+        internal static string TryResolveOdyPatcherFromDirectory(string configured)
+        {
+            if (string.IsNullOrWhiteSpace(configured) || !Directory.Exists(configured))
+            {
+                return null;
+            }
+
+            string[] names = { "odypatcher", "odypatcher.exe", "OdyPatcher", "OdyPatcher.exe" };
+            string[] searchDirs =
+            {
+                configured,
+                Path.Combine(configured, "target", "release"),
+                Path.Combine(configured, "target", "debug"),
+            };
+
+            foreach (string dir in searchDirs)
+            {
+                foreach (string name in names)
+                {
+                    string candidate = Path.Combine(dir, name);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return null;
+        }
+
         /// <summary>Resolves the OdyPatcher CLI executable from its configured path, PATH, or app directories.</summary>
         public static async Task<(string path, bool found)> FindOdyPatcherExecutableAsync(string baseDir = null, string resourcesDir = null)
         {
@@ -697,6 +731,13 @@ Exception Type: {ex.GetType().FullName}";
                 {
                     await Logger.LogVerboseAsync($"[OdyPatcher] Using configured executable: {configured}").ConfigureAwait(false);
                     return (configured, true);
+                }
+
+                string fromDir = TryResolveOdyPatcherFromDirectory(configured);
+                if (fromDir != null)
+                {
+                    await Logger.LogVerboseAsync($"[OdyPatcher] Using executable from workspace: {fromDir}").ConfigureAwait(false);
+                    return (fromDir, true);
                 }
 
                 await Logger.LogWarningAsync($"[OdyPatcher] Configured path not found: {configured}").ConfigureAwait(false);
@@ -760,12 +801,12 @@ Exception Type: {ex.GetType().FullName}";
 
                 string odyArgs = args.TrimStart();
                 await Logger.LogVerboseAsync($"[OdyPatcher] {odyPath} {odyArgs}").ConfigureAwait(false);
-                if (fileSystemProvider != null)
+                if (fileSystemProvider != null && fileSystemProvider.IsDryRun)
                 {
                     return await fileSystemProvider.ExecuteProcessAsync(odyPath, odyArgs).ConfigureAwait(false);
                 }
 
-                return await PlatformAgnosticMethods.ExecuteProcessAsync(odyPath, odyArgs).ConfigureAwait(false);
+                return await PlatformAgnosticMethods.ExecuteProcessAsync(odyPath, odyArgs, logLinePrefix: "[Patcher] ").ConfigureAwait(false);
             }
 
             if (string.Equals(engine, PatcherEngines.KPatcher, StringComparison.OrdinalIgnoreCase))
@@ -779,12 +820,12 @@ Exception Type: {ex.GetType().FullName}";
                 string prefix = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? string.Empty : "--console ";
                 string fullArgs = prefix + args.TrimStart();
                 await Logger.LogVerboseAsync($"[KPatcher] {kPath} {fullArgs}").ConfigureAwait(false);
-                if (fileSystemProvider != null)
+                if (fileSystemProvider != null && fileSystemProvider.IsDryRun)
                 {
                     return await fileSystemProvider.ExecuteProcessAsync(kPath, fullArgs).ConfigureAwait(false);
                 }
 
-                return await PlatformAgnosticMethods.ExecuteProcessAsync(kPath, fullArgs).ConfigureAwait(false);
+                return await PlatformAgnosticMethods.ExecuteProcessAsync(kPath, fullArgs, logLinePrefix: "[Patcher] ").ConfigureAwait(false);
             }
 
             return await RunHolopatcherAsync(args).ConfigureAwait(false);
@@ -1006,7 +1047,21 @@ Exception Type: {ex.GetType().FullName}";
 
                     var validator = new ComponentValidation(component, MainConfig.AllComponents);
                     await Logger.LogVerboseAsync($" == Validating '{component.Name}' == ").ConfigureAwait(false);
-                    individuallyValidated &= validator.Run();
+                    bool componentValid = validator.Run();
+                    if (!componentValid)
+                    {
+                        foreach (string error in validator.GetErrors())
+                        {
+                            await Logger.LogErrorAsync($"Validation failed for '{component.Name}': {error}").ConfigureAwait(false);
+                        }
+
+                        if (validator.GetErrors().Count == 0)
+                        {
+                            await Logger.LogErrorAsync($"Validation failed for '{component.Name}' (no specific error captured).").ConfigureAwait(false);
+                        }
+                    }
+
+                    individuallyValidated &= componentValid;
                 }
 
                 await Logger.LogVerboseAsync("Finished validating all components.").ConfigureAwait(false);
@@ -1149,7 +1204,9 @@ Exception Type: {ex.GetType().FullName}";
             CancellationToken cancellationToken = default,
             [CanBeNull] string profileOverride = null,
             bool? managedDeploymentOverride = null,
-            bool preserveInputOrder = false)
+            bool preserveInputOrder = false,
+            bool failClosed = false,
+            bool enableGitCheckpoints = true)
         {
             if (allComponents is null)
             {
@@ -1161,7 +1218,9 @@ Exception Type: {ex.GetType().FullName}";
                     allComponents,
                     progressCallback,
                     cancellationToken,
-                    preserveInputOrder),
+                    preserveInputOrder,
+                    failClosed,
+                    enableGitCheckpoints),
                 profileOverride,
                 managedDeploymentOverride).ConfigureAwait(false);
         }
@@ -1170,7 +1229,9 @@ Exception Type: {ex.GetType().FullName}";
             [NotNull][ItemNotNull] List<ModComponent> allComponents,
             [CanBeNull] Action<int, int, string> progressCallback,
             CancellationToken cancellationToken,
-            bool preserveInputOrder)
+            bool preserveInputOrder,
+            bool failClosed,
+            bool enableGitCheckpoints = true)
         {
             if (allComponents is null)
             {
@@ -1215,7 +1276,8 @@ Exception Type: {ex.GetType().FullName}";
                     allComponents,
                     destination,
                     cancellationToken,
-                    preserveInputOrder).ConfigureAwait(false);
+                    preserveInputOrder,
+                    enableGitCheckpoints).ConfigureAwait(false);
                 var orderedComponents = resume.OrderedComponents.Where(component => component.IsSelected).ToList();
                 int total = orderedComponents.Count;
                 ModComponent.InstallExitCode exitCode = ModComponent.InstallExitCode.Success;
@@ -1254,8 +1316,8 @@ Exception Type: {ex.GetType().FullName}";
                         await Logger.LogAsync($"Install of '{component.Name}' succeeded.").ConfigureAwait(false);
 
                         // Create checkpoint after successful installation (skipped entirely when
-                        // --no-checkpoint disabled the git-based checkpoint system, since
-                        // coordinator.CheckpointService is never created in that case).
+                        // Git checkpoints are disabled via --no-checkpoint or enableGitCheckpoints=false,
+                        // since coordinator.CheckpointService is never created in that case).
                         if (!MainConfig.NoCheckpoint && coordinator.CheckpointService != null)
                         {
                             try
@@ -1272,6 +1334,17 @@ Exception Type: {ex.GetType().FullName}";
                             }
                             catch (Exception ex)
                             {
+                                if (failClosed)
+                                {
+                                    await RestoreFailedComponentAsync(
+                                        coordinator,
+                                        destination,
+                                        component,
+                                        cancellationToken,
+                                        $"checkpoint creation failed: {ex.Message}").ConfigureAwait(false);
+                                    return ModComponent.InstallExitCode.InvalidOperation;
+                                }
+
                                 await Logger.LogWarningAsync($"Failed to create checkpoint for '{component.Name}': {ex.Message}").ConfigureAwait(false);
                             }
                         }
@@ -1280,7 +1353,29 @@ Exception Type: {ex.GetType().FullName}";
                         {
                             // PromoteSnapshotAsync does a full recursive copy + zip of the whole
                             // game directory — skip entirely when checkpointing is disabled.
-                            await coordinator.CheckpointManager.PromoteSnapshotAsync(destination, cancellationToken).ConfigureAwait(false);
+                            // A snapshot I/O failure (tmpfs quota, disk full) must not abort a
+                            // mod that already installed successfully; git checkpoints remain.
+                            try
+                            {
+                                await coordinator.CheckpointManager.PromoteSnapshotAsync(destination, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                if (failClosed)
+                                {
+                                    await RestoreFailedComponentAsync(
+                                        coordinator,
+                                        destination,
+                                        component,
+                                        cancellationToken,
+                                        $"snapshot promotion failed: {ex.Message}").ConfigureAwait(false);
+                                    return ModComponent.InstallExitCode.InvalidOperation;
+                                }
+
+                                await Logger.LogWarningAsync(
+                                    $"Failed to promote backup snapshot after '{component.Name}': {ex.Message}"
+                                ).ConfigureAwait(false);
+                            }
                         }
                     }
                     else if (exitCode == ModComponent.InstallExitCode.MissingSourceFiles && MainConfig.ContinueInstallOnMissingSources)
@@ -1319,6 +1414,17 @@ Exception Type: {ex.GetType().FullName}";
                     else
                     {
                         await Logger.LogErrorAsync($"Install of '{component.Name}' failed with exit code {exitCode}").ConfigureAwait(false);
+                        if (failClosed)
+                        {
+                            await RestoreFailedComponentAsync(
+                                coordinator,
+                                destination,
+                                component,
+                                cancellationToken,
+                                $"component returned {exitCode}").ConfigureAwait(false);
+                            return exitCode;
+                        }
+
                         InstallCoordinator.MarkBlockedDescendants(orderedComponents, component.Guid);
                         foreach (ModComponent blocked in orderedComponents.Where(c => c.InstallState == ModComponent.ComponentInstallState.Blocked))
                         {
@@ -1357,7 +1463,9 @@ Exception Type: {ex.GetType().FullName}";
             CancellationToken cancellationToken = default,
             [CanBeNull] string profileOverride = null,
             bool? managedDeploymentOverride = null,
-            bool preserveInputOrder = false)
+            bool preserveInputOrder = false,
+            bool failClosed = false,
+            bool enableGitCheckpoints = true)
         {
             if (allComponents is null)
             {
@@ -1370,7 +1478,43 @@ Exception Type: {ex.GetType().FullName}";
                 cancellationToken,
                 profileOverride,
                 managedDeploymentOverride,
-                preserveInputOrder);
+                preserveInputOrder,
+                failClosed,
+                enableGitCheckpoints);
+        }
+
+        private static async Task RestoreFailedComponentAsync(
+            [NotNull] InstallCoordinator coordinator,
+            [NotNull] DirectoryInfo destination,
+            [NotNull] ModComponent component,
+            CancellationToken cancellationToken,
+            [NotNull] string reason)
+        {
+            await Logger.LogErrorAsync(
+                $"Fail-closed install stopped at '{component.Name}' because {reason}. Restoring the pre-component snapshot.")
+                .ConfigureAwait(false);
+            try
+            {
+                await coordinator.CheckpointManager.RestoreSnapshotAsync(destination, cancellationToken)
+                    .ConfigureAwait(false);
+                component.InstallState = ModComponent.ComponentInstallState.Pending;
+                coordinator.CheckpointManager.State.ComponentCheckpoints.Remove(component.Guid);
+                coordinator.CheckpointManager.UpdateComponentState(component);
+                await coordinator.CheckpointManager.SaveAsync().ConfigureAwait(false);
+                await Logger.LogAsync(
+                    $"Pre-component snapshot restored for '{component.Name}'. No later component was installed.")
+                    .ConfigureAwait(false);
+            }
+            catch (Exception restoreException)
+            {
+                await Logger.LogExceptionAsync(
+                    restoreException,
+                    $"Fail-closed restore failed for '{component.Name}'. The install state is unsafe and must not continue.")
+                    .ConfigureAwait(false);
+                throw new InvalidOperationException(
+                    $"Could not restore the pre-component snapshot for '{component.Name}'.",
+                    restoreException);
+            }
         }
 
     }

@@ -36,13 +36,27 @@ namespace ModSync.Core.Installation
             [NotNull] IList<ModComponent> components,
             [NotNull] DirectoryInfo destinationPath,
             CancellationToken cancellationToken,
-            bool preserveInputOrder = false)
+            bool preserveInputOrder = false,
+            bool enableGitCheckpoints = true)
         {
             await CheckpointManager.InitializeAsync(components, destinationPath).ConfigureAwait(false);
             if (!MainConfig.NoCheckpoint)
             {
-                // EnsureSnapshotAsync does a full recursive copy + zip of the whole game
-                // directory — skip it entirely when checkpointing is disabled.
+                // Always take a fresh snapshot here (PromoteSnapshotAsync), never
+                // EnsureSnapshotAsync's lazy "reuse whatever's already on disk" path.
+                // EnsureSnapshotAsync only checks File.Exists(BackupPath) — it has no way to
+                // know whether an existing zip actually reflects the current game-directory
+                // state. A relaunch after a killed/crashed prior run (or after a checkpoint
+                // restore) leaves a stale zip sitting there from whatever state existed when
+                // it was written, possibly mid-corruption from that prior run. Fail-closed
+                // restore trusts this zip completely (RestoreSnapshotAsync does a real
+                // wipe-and-replace from it) — reusing a stale one means "restoring the
+                // pre-component snapshot" silently restores the wrong snapshot instead, which
+                // is indistinguishable from success until someone diffs the result. A full
+                // recursive copy + zip on every launch costs real time on large/slow installs,
+                // but a silently-wrong snapshot costs correctness, which is the bar this whole
+                // pipeline exists to hold.
+                //
                 // On slow external disks this can look like a hang (near-zero CPU, futex wait
                 // on I/O) with no log lines after "Starting installation...".
                 await Logger.LogAsync(
@@ -50,18 +64,20 @@ namespace ModSync.Core.Installation
                     + "This can take several minutes on large installs or slow disks; "
                     + "use --no-checkpoint to skip."
                 ).ConfigureAwait(false);
-                await CheckpointManager.EnsureSnapshotAsync(destinationPath, cancellationToken).ConfigureAwait(false);
+                await CheckpointManager.PromoteSnapshotAsync(destinationPath, cancellationToken).ConfigureAwait(false);
                 await Logger.LogAsync("Install backup snapshot ready.").ConfigureAwait(false);
             }
 
             ReleaseCheckpointService();
 
-            if (MainConfig.NoCheckpoint)
+            if (MainConfig.NoCheckpoint || !enableGitCheckpoints)
             {
-                // Checkpoint system explicitly disabled (--no-checkpoint): skip the git-based
-                // baseline snapshot entirely (it re-syncs the whole game directory and is
+                // Git checkpoints disabled (--no-checkpoint, or the caller opted out): skip the
+                // git-based baseline snapshot entirely (it re-syncs the whole game directory and is
                 // prohibitively slow on large installs / slow storage). No rollback capability
-                // is available for this session.
+                // is available for this session, but the install_session.json resume record is
+                // still written so the wizard can offer Resume/Start over.
+                await CheckpointManager.SaveAsync().ConfigureAwait(false);
                 List<ModComponent> orderedNoCheckpoint = preserveInputOrder
                     ? components.ToList()
                     : GetOrderedInstallList(components);

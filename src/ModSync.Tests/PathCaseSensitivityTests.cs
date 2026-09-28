@@ -372,6 +372,29 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public void FindCaseInsensitiveDuplicates_SkipsInstallMetadataFolders()
+        {
+            if (UtilityHelper.GetOperatingSystem() == OSPlatform.Windows)
+            {
+                TestContext.Progress.WriteLine(
+                    "FindCaseInsensitiveDuplicates_SkipsInstallMetadataFolders: Test is not possible on Windows."
+                );
+                return;
+            }
+
+            string installMeta = Path.Combine(s_testDirectory, ".modsync", "checkpoints", "override");
+            _ = Directory.CreateDirectory(installMeta);
+            File.WriteAllText(Path.Combine(s_testDirectory, "override.txt"), "live");
+            File.WriteAllText(Path.Combine(installMeta, "OVERRIDE.TXT"), "meta");
+            File.WriteAllText(Path.Combine(installMeta, "override.txt"), "meta-pair");
+
+            var result = PathHelper.FindCaseInsensitiveDuplicates(new DirectoryInfo(s_testDirectory), includeSubFolders: true)
+                .ToList();
+
+            Assert.That(result, Is.Empty);
+        }
+
+        [Test]
         public void TestInvalidPath() =>
             _ = Assert.Throws<ArgumentException>(
 
@@ -471,6 +494,20 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public void GetCaseSensitivePath_OverrideSibling_RemapsToExistingLowercaseOverride()
+        {
+            string steamassets = Path.Combine(s_testDirectory, "steamassets");
+            string realOverride = Path.Combine(steamassets, "override");
+            _ = Directory.CreateDirectory(realOverride);
+
+            DirectoryInfo result = PathHelper.GetCaseSensitivePath(
+                new DirectoryInfo(Path.Combine(steamassets, "Override")));
+
+            Assert.That(result.FullName, Is.EqualTo(realOverride));
+            Assert.That(Directory.Exists(Path.Combine(steamassets, "Override")), Is.False);
+        }
+
+        [Test]
         public void GetCaseSensitivePath_EntirePathCaseIncorrect_ReturnsCorrectPath()
         {
 
@@ -545,6 +582,29 @@ namespace ModSync.Tests
                 Assert.That(result, Is.EqualTo(Path.Combine(s_testDirectory, nonExistentRelPath.ToUpperInvariant())),
                     "Non-existent directory should return uppercase path");
             });
+        }
+
+        [TestCase("pfbbl.mdl", "PFBBL*", ExpectedResult = true, TestName = "WildcardPathMatch_LowercaseFile_MatchesUppercasePattern")]
+        [TestCase("PFBBL.mdl", "PFBBL*", ExpectedResult = true, TestName = "WildcardPathMatch_UppercaseFile_MatchesUppercasePattern")]
+        [TestCase("PfBbL.MDL", "PFBBL*", ExpectedResult = true, TestName = "WildcardPathMatch_MixedCaseFile_MatchesUppercasePattern")]
+        [TestCase("pmbbl.mdx", "PFBBL*", ExpectedResult = false, TestName = "WildcardPathMatch_NonMatchingPrefix_DoesNotMatch")]
+        public bool WildcardPathMatch_IsCaseInsensitive(string fileName, string pattern) =>
+            PathHelper.WildcardPathMatch(fileName, pattern);
+
+        [Test]
+        public void WildcardPathMatch_FullPath_MatchesLowercaseFileAgainstUppercasePrefixPattern()
+        {
+            // Exact repro from mission notes/29 (Republic Soldier Fix under-match):
+            // the parser emits a full-path, prefix-scoped wildcard, and the archive's
+            // real file is lowercase even though the guide/pattern is uppercase.
+            const string input = "/x/Player Clothing/pfbbl.mdl";
+            const string pattern = "/x/Player Clothing/PFBBL*";
+
+            bool result = PathHelper.WildcardPathMatch(input, pattern);
+
+            Assert.That(result, Is.True,
+                "A prefix wildcard should match a same-named file that differs only in case, " +
+                "including within an unchanged-case directory segment.");
         }
     }
 }

@@ -346,7 +346,9 @@ Destination = ""<<kotorDirectory>>\\Override""
                 "-y",
             });
 
-            Assert.That(exitCode, Is.EqualTo(0));
+            // --skip-validation finishes completed-unverified (witness semantics): the conflicting mod
+            // is still auto-deselected and b.txt installed, but the CLI must not exit 0 as Success.
+            Assert.That(exitCode, Is.EqualTo(ModBuildConverter.CompletedUnverifiedExitCode));
             Assert.That(File.Exists(Path.Combine(gameDir, "Override", "b.txt")), Is.True);
         }
     }

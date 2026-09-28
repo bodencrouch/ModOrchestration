@@ -11,8 +11,9 @@ using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using ModSync.Core;
+using ModSync.Core.Services.Installation;
+using ModSync.Core.Services.Validation;
 using ModSync.Dialogs.WizardPages;
-using ModSync.Tests.TestHelpers;
 using Xunit;
 
 namespace ModSync.Tests.HeadlessUITests
@@ -20,67 +21,328 @@ namespace ModSync.Tests.HeadlessUITests
     [Collection(HeadlessTestApp.CollectionName)]
     public sealed class InstallingPageHeadlessTests
     {
-        [AvaloniaFact(DisplayName = "Installing page completes shared pipeline install", Skip = "Headless timing flake; see triage plan 2026-07-13-003")]
-        public async Task InstallingPage_CompletesSharedPipelineInstall()
+        [AvaloniaFact(DisplayName = "Installing page success enables Next and hides Resume")]
+        public async Task InstallingPage_Success_EnablesNext_HidesResume()
         {
-            string tempRoot = Path.Combine(Path.GetTempPath(), "ModSync_InstallingPageTests", Guid.NewGuid().ToString("N"));
-            DirectoryInfo workingDirectory = Directory.CreateDirectory(tempRoot);
+            var completed = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "DoneMod",
+                IsSelected = true,
+                InstallState = ModComponent.ComponentInstallState.Pending,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { completed });
+            page.InstallRunner = async (components, progress, token) =>
+            {
+                progress?.Invoke(0, 1, completed.Name);
+                completed.InstallState = ModComponent.ComponentInstallState.Completed;
+                progress?.Invoke(1, 1, completed.Name);
+                await Task.Yield();
+                return ModComponent.InstallExitCode.Success;
+            };
+
+            Window window = await HostInWindowAsync(page);
             try
             {
-                ModComponent component = TestComponentFactory.CreateComponent("InstallingPageComponent", workingDirectory);
-                var components = new List<ModComponent> { component };
-                var mainConfig = new MainConfig
-                {
-                    destinationPath = workingDirectory,
-                    sourcePath = workingDirectory,
-                    allComponents = components,
-                };
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.InstallationSucceeded), TimeSpan.FromSeconds(5));
 
-                InstallingPage page = await Dispatcher.UIThread.InvokeAsync(
-                    () => new InstallingPage(components, mainConfig, new CancellationTokenSource()),
-                    DispatcherPriority.Background);
-
-                Window window = await HostInWindowAsync(page);
-                try
-                {
-                    await page.OnNavigatedToAsync(CancellationToken.None);
-
-                    await WaitForAsync(async () =>
-                    {
-                        (bool isValid, string _) = await page.ValidateAsync(CancellationToken.None);
-                        return isValid;
-                    }, timeout: TimeSpan.FromSeconds(15));
-
-                    TextBlock currentModText = page.FindControl<TextBlock>("CurrentModText");
-                    TextBlock countText = page.FindControl<TextBlock>("CountText");
-
-                    Assert.NotNull(currentModText);
-                    Assert.NotNull(countText);
-                    Assert.Contains("complete", currentModText.Text ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-                    Assert.Contains("1/1", countText.Text ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-
-                    string extractedDirectory = Path.Combine(workingDirectory.FullName, "extracted", "InstallingPageComponent");
-                    Assert.True(Directory.Exists(extractedDirectory), "Installing page should execute the shared installation pipeline.");
-                }
-                finally
-                {
-                    await CloseWindowAsync(window);
-                }
+                (bool isValid, string _) = await page.ValidateAsync(CancellationToken.None);
+                Assert.True(isValid);
+                Assert.False(page.IsFailurePanelVisible);
+                Assert.False(page.IsResumeRetryVisible);
+                Assert.Contains("succeeded", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
             }
             finally
             {
-                if (Directory.Exists(tempRoot))
-                {
-                    try
-                    {
-                        Directory.Delete(tempRoot, recursive: true);
-                    }
-                    catch
-                    {
-                        // Best effort cleanup.
-                    }
-                }
+                await CloseWindowAsync(window);
             }
+        }
+
+        [AvaloniaFact(DisplayName = "Installing page failure shows completed vs remaining and Resume")]
+        public async Task InstallingPage_PartialFailure_ShowsResume()
+        {
+            var done = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "Done",
+                IsSelected = true,
+            };
+            var fail = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "Fail",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { done, fail });
+            int runCount = 0;
+            page.InstallRunner = async (components, progress, token) =>
+            {
+                runCount++;
+                progress?.Invoke(0, 2, done.Name);
+                done.InstallState = ModComponent.ComponentInstallState.Completed;
+                progress?.Invoke(1, 2, fail.Name);
+                fail.InstallState = ModComponent.ComponentInstallState.Failed;
+                await Task.Yield();
+                return ModComponent.InstallExitCode.UnknownError;
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(
+                    () => Task.FromResult(page.IsFailurePanelVisible && page.IsResumeRetryVisible),
+                    TimeSpan.FromSeconds(5));
+
+                (bool isValid, string error) = await page.ValidateAsync(CancellationToken.None);
+                Assert.False(isValid);
+                Assert.Contains("Resume", error ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("1 of 2", page.FailureSummaryDisplayText, StringComparison.Ordinal);
+                Assert.Contains("remaining", page.FailureSummaryDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("does not restore a pristine", page.FailureSummaryDisplayText, StringComparison.OrdinalIgnoreCase);
+
+                Button resume = page.FindControl<Button>("ResumeRetryButton");
+                Assert.NotNull(resume);
+                resume.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+
+                await WaitForAsync(() => Task.FromResult(runCount >= 2 && page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+                Assert.Equal(2, runCount);
+                Assert.Equal(ModComponent.ComponentInstallState.Completed, done.InstallState);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
+        [AvaloniaFact(DisplayName = "Installing page cancel does not claim success")]
+        public async Task InstallingPage_Cancel_DoesNotClaimSuccess()
+        {
+            var mod = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "CancelMe",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { mod });
+            page.InstallRunner = async (components, progress, token) =>
+            {
+                progress?.Invoke(0, 1, mod.Name);
+                await Task.Yield();
+                return ModComponent.InstallExitCode.UserCancelledInstall;
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+
+                Assert.False(page.InstallationSucceeded);
+                (bool isValid, _) = await page.ValidateAsync(CancellationToken.None);
+                Assert.False(isValid);
+                Assert.Contains("cancelled", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("complete!", page.FindControl<TextBlock>("CurrentModText")?.Text ?? string.Empty,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
+        [AvaloniaFact(DisplayName = "Installing page hides Resume/Retry after an explicit Stop Install")]
+        public async Task InstallingPage_StopInstallCancellation_HidesResumeRetry()
+        {
+            var mod = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "StoppedMod",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { mod });
+            page.InstallRunner = async (components, progress, token) =>
+            {
+                progress?.Invoke(0, 1, mod.Name);
+                await Task.Yield();
+                throw new OperationCanceledException();
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+
+                // A real Stop Install click cancels the wizard dialog's single-lifetime
+                // CancellationTokenSource, which stays cancelled for the rest of the dialog's
+                // life. Re-invoking install with that same token would hang immediately
+                // (Task.Run never runs its delegate for an already-cancelled token), so
+                // in-page Resume/Retry must not be offered after this kind of cancellation.
+                Assert.False(page.IsResumeRetryVisible);
+                Assert.Contains("reopen this wizard", page.FailureSummaryDisplayText, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
+        [AvaloniaFact(DisplayName = "Installing page shows the blocked UI when validation blocks the install")]
+        public async Task InstallingPage_ValidationBlocked_ShowsBlockedRetryUi()
+        {
+            var mod = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "BlockedMod",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { mod });
+            page.PipelineRunner = request =>
+            {
+                InstallationPlan plan = InstallationPipelineService.BuildPlan(request);
+                var validation = new ValidationPipelineResult { IsSuccess = false, ErrorCount = 2 };
+                return Task.FromResult(new InstallationPipelineResult(
+                    plan,
+                    validation,
+                    ModComponent.InstallExitCode.InvalidOperation));
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+
+                Assert.Equal(InstallingPage.TerminalOutcome.Blocked, page.LastOutcome);
+                Assert.False(page.InstallationSucceeded);
+                Assert.Equal(
+                    "Installation blocked. Fix the reported issue and retry.",
+                    page.FindControl<TextBlock>("CurrentModText")?.Text);
+                Assert.Contains("blocked", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("Validation did not pass", page.FailureSummaryDisplayText, StringComparison.Ordinal);
+                Assert.True(page.IsResumeRetryVisible);
+                (bool isValid, string error) = await page.ValidateAsync(CancellationToken.None);
+                Assert.False(isValid);
+                Assert.Contains("Installation blocked", error ?? string.Empty, StringComparison.Ordinal);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
+        [AvaloniaFact(DisplayName = "Installing page blocks a Success-shaped run whose witness PASS failed")]
+        public async Task InstallingPage_WitnessPassFailed_ShowsBlockedNotSuccess()
+        {
+            var mod = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "WitnessMod",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { mod });
+            page.PipelineRunner = request =>
+            {
+                InstallationPlan plan = InstallationPipelineService.BuildPlan(request);
+                mod.InstallState = ModComponent.ComponentInstallState.Completed;
+                return Task.FromResult(new InstallationPipelineResult(
+                    plan,
+                    new ValidationPipelineResult { IsSuccess = true },
+                    ModComponent.InstallExitCode.Success,
+                    WitnessVerdict.PublishedPassFailed));
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+
+                Assert.Equal(InstallingPage.TerminalOutcome.Blocked, page.LastOutcome);
+                Assert.False(page.InstallationSucceeded);
+                Assert.Contains("blocked", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("Completed Successfully", page.FailureSummaryDisplayText, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
+        [AvaloniaFact(DisplayName = "Installing page shows completed-unverified wording, not Failed")]
+        public async Task InstallingPage_CompletedUnverified_ShowsUnverifiedNotFailed()
+        {
+            var done = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "AppliedMod",
+                IsSelected = true,
+            };
+            var failed = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "FailedMod",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { done, failed });
+            page.PipelineRunner = request =>
+            {
+                InstallationPlan plan = InstallationPipelineService.BuildPlan(request);
+                done.InstallState = ModComponent.ComponentInstallState.Completed;
+                failed.InstallState = ModComponent.ComponentInstallState.Failed;
+                return Task.FromResult(new InstallationPipelineResult(
+                    plan,
+                    new ValidationPipelineResult { IsSuccess = true },
+                    ModComponent.InstallExitCode.CompletedUnverified,
+                    WitnessVerdict.CompletedUnverified,
+                    ModComponent.InstallExitCode.CompletedWithFailures));
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+
+                Assert.Equal(InstallingPage.TerminalOutcome.CompletedUnverified, page.LastOutcome);
+                Assert.False(page.InstallationSucceeded);
+                Assert.Contains("completed, unverified", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("failed", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.NotEqual("Failed", page.FindControl<TextBlock>("CurrentOperationText")?.Text);
+                Assert.Contains("unverified, with 1 component failure", page.FailureSummaryDisplayText, StringComparison.Ordinal);
+                (bool isValid, string error) = await page.ValidateAsync(CancellationToken.None);
+                Assert.False(isValid);
+                Assert.Contains("unverified", error ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
+        private static async Task<InstallingPage> CreatePageAsync(List<ModComponent> components)
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "ModSync_InstallingPage", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            var mainConfig = new MainConfig
+            {
+                destinationPath = new DirectoryInfo(temp),
+                sourcePath = new DirectoryInfo(temp),
+                allComponents = components,
+            };
+
+            return await Dispatcher.UIThread.InvokeAsync(
+                () => new InstallingPage(components, mainConfig, new CancellationTokenSource()),
+                DispatcherPriority.Background);
         }
 
         private static async Task<Window> HostInWindowAsync(Control control)

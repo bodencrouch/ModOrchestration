@@ -34,6 +34,12 @@ namespace ModSync.Tests
                 destinationPath = _workingDirectory,
                 sourcePath = _workingDirectory,
                 allComponents = new List<ModComponent>(),
+
+                // These are process-wide statics that CLI runs (--no-checkpoint, --best-effort)
+                // and other fixtures can leave set; these tests assume the defaults.
+                noCheckpoint = false,
+                continueInstallOnModFailure = false,
+                continueInstallOnMissingSources = false,
             };
             InstallCoordinator.ClearSessionForTests(_workingDirectory);
         }

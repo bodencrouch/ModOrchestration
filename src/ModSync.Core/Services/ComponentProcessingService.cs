@@ -40,12 +40,25 @@ namespace ModSync.Core.Services
         {
             int generatedCount = 0;
 
+            // Namespace option selection needs the full build to resolve "if using HQ Blasters".
+            if (components != null)
+            {
+                MainConfig.AllComponents = components;
+            }
+
+            // The canonical library lives on cold/removable storage. Enumerating it for every
+            // component multiplies metadata I/O by the number of guide steps (186 for K1, 145 for
+            // K2). Snapshot once, then resolve every component against the in-memory index.
+            ArchiveLibrarySnapshot libraryEntries = AutoInstructionGenerator.SnapshotLibraryEntries();
+
             foreach (ModComponent component in components)
             {
 
                 int initialInstructionCount = component.Instructions.Count;
 
-                bool success = AutoInstructionGenerator.TryGenerateInstructionsFromArchive(component);
+                bool success = AutoInstructionGenerator.TryGenerateInstructionsFromArchive(
+                    component,
+                    libraryEntries);
                 if (!success)
                 {
                     continue;
@@ -57,6 +70,15 @@ namespace ModSync.Core.Services
                     int newInstructions = component.Instructions.Count - initialInstructionCount;
 
                     await Logger.LogAsync($"Added {newInstructions} instruction(s) from local archive for '{component.Name}': {component.InstallationMethod}").ConfigureAwait(false);
+                }
+            }
+
+            // Re-apply guide-driven namespace selection now that every component is present.
+            foreach (ModComponent component in components)
+            {
+                if (component.Options != null && component.Options.Count > 0)
+                {
+                    AutoInstructionGenerator.SelectNamespaceOptionsFromGuide(component, components);
                 }
             }
 

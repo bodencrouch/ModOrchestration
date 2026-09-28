@@ -131,10 +131,14 @@ namespace ModSync.Services
                 }
 
 #pragma warning disable MA0004 // Use Task.
-                IReadOnlyList<ModComponent> parsed = await Core.Services.ModComponentSerializationService.DeserializeModComponentFromStringAsync(content, detectedFormat);
+                Core.Ports.Guides.GuideIngestResult ingestResult = await Task.Run(() =>
+                    Core.Ports.Guides.GuideIngestService.Instance.IngestFromText(
+                        content,
+                        detectedFormat,
+                        parseDirections: false));
 #pragma warning restore MA0004 // Use Task.
 
-                var newComponents = parsed.ToList();
+                var newComponents = ingestResult.Components.ToList();
                 ProcessModLinks(newComponents);
 
 #pragma warning disable MA0004 // Use Task.
@@ -408,6 +412,11 @@ namespace ModSync.Services
 #pragma warning disable MA0004 // Use Task.
                     await GenerateDraftInstructionsFromProseAsync(parseResult.Components);
 #pragma warning restore MA0004 // Use Task.
+                }
+
+                foreach (ModComponent component in parseResult.Components ?? new List<ModComponent>())
+                {
+                    component.SourceFormat = "markdown";
                 }
 
                 _mainConfig.preambleContent = parseResult.PreambleContent ?? string.Empty;

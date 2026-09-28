@@ -38,6 +38,40 @@ namespace ModSync.Tests
         }
 
         [Test]
+        public void FindOdyPatcherExecutableAsync_ResolvesReleaseBinary_WhenWorkspaceDirectoryGiven()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "ModSync_ody_ws_" + Path.GetRandomFileName());
+            string releaseDir = Path.Combine(root, "target", "release");
+            string debugDir = Path.Combine(root, "target", "debug");
+            Directory.CreateDirectory(releaseDir);
+            Directory.CreateDirectory(debugDir);
+            string releaseExe = Path.Combine(releaseDir, "odypatcher");
+            string debugExe = Path.Combine(debugDir, "odypatcher");
+            File.WriteAllText(releaseExe, "release");
+            File.WriteAllText(debugExe, "debug");
+            try
+            {
+                MainConfig.Instance.patcherEngine = PatcherEngines.OdyPatcher;
+                MainConfig.Instance.odyPatcherExecutablePath = root;
+
+                (string path, bool found) = InstallationService.FindOdyPatcherExecutableAsync().GetAwaiter().GetResult();
+
+                Assert.That(found, Is.True);
+                Assert.That(path, Is.EqualTo(releaseExe));
+            }
+            finally
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        [Test]
         public void FindOdyPatcherExecutableAsync_UsesConfiguredPath_WhenFileExists()
         {
             string tempExe = Path.Combine(Path.GetTempPath(), "ModSync_odypatcher_test_" + Path.GetRandomFileName());
@@ -76,6 +110,9 @@ namespace ModSync.Tests
                 var fileSystem = new Mock<IFileSystemProvider>(MockBehavior.Strict);
                 // Space-separated: OdyPatcher rejects --flag=value (and quote-collapsed equivalents).
                 const string args = "--install --game-dir game --tslpatchdata mod --cli -y";
+                // Only dry-run providers route the patcher process through the provider; a real
+                // install launches the executable directly.
+                _ = fileSystem.SetupGet(provider => provider.IsDryRun).Returns(true);
                 _ = fileSystem
                     .Setup(provider => provider.ExecuteProcessAsync(tempExe, args))
                     .ReturnsAsync((0, "ok", string.Empty));
