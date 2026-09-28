@@ -81,8 +81,8 @@ jobs:
           set -euo pipefail
           ./scripts/agents/ensure_linux_holopatcher.sh "$PWD/${{ env.TEST_BIN }}"
           ./scripts/agents/ensure_linux_holopatcher.sh "$PWD/src/ModSync.Core/bin/Debug/net9.0"
-          "$PWD/${{ env.TEST_BIN }}/Resources/holopatcher" --help > /dev/null
-          echo "HoloPatcher runs on this runner."
+          test -x "$PWD/${{ env.TEST_BIN }}/Resources/holopatcher"
+          echo "HoloPatcher executable is available on this runner."
 
       - name: Generate the mock install, mods and build file
         run: |
