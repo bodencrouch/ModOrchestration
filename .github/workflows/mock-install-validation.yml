@@ -109,7 +109,7 @@ jobs:
           set -euo pipefail
           # No pipe: piping into tee would mask the CLI's exit status behind tee's.
           set +e
-          dotnet "${{ env.CORE_DLL }}" install \
+          xvfb-run -a dotnet "${{ env.CORE_DLL }}" install \
             -i "$RUNNER_TEMP/mock/mock_build.toml" \
             -g "$RUNNER_TEMP/mock/game" \
             -s "$RUNNER_TEMP/mock/mods" \
