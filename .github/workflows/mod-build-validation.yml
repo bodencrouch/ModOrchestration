@@ -109,7 +109,7 @@ jobs:
 
       - name: Build
         if: steps.hash.outputs.changed == 'true'
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build ModSync.sln --configuration Release --no-restore /p:TargetFramework=net9.0
 
       - name: Copy test file
         if: steps.hash.outputs.changed == 'true'
@@ -134,18 +134,23 @@ jobs:
         if: steps.hash.outputs.changed == 'true'
         id: convert
         run: |
-          dotnet run --project src/ModSync.Tests/ModSync.Tests.csproj \
-            -- convert-to-toml \
+          mkdir -p temp_output
+          dotnet run --project src/ModSync.Core/ModSync.Core.csproj \
+            --configuration Release --no-build --framework net9.0 \
+            -- convert \
             --input "${{ steps.download.outputs.md_path }}" \
+            --format toml \
             --output "temp_output/${{ matrix.build.filename }}.toml"
         continue-on-error: true
 
       - name: Generate documentation
         if: steps.hash.outputs.changed == 'true'
         run: |
-          dotnet run --project src/ModSync.Tests/ModSync.Tests.csproj \
-            -- generate-docs \
+          dotnet run --project src/ModSync.Core/ModSync.Core.csproj \
+            --configuration Release --no-build --framework net9.0 \
+            -- convert \
             --input "${{ steps.download.outputs.md_path }}" \
+            --format markdown \
             --output "temp_output/${{ matrix.build.filename }}_regenerated.md"
         continue-on-error: true
 

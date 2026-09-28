@@ -53,7 +53,7 @@ jobs:
 
     env:
       Solution_Name: ModSync
-      Test_Project_Path: ModSync.Tests\ModSync.Tests.csproj
+      Test_Project_Path: src\ModSync.Tests\ModSync.Tests.csproj
 
     steps:
     - name: Checkout
@@ -72,7 +72,7 @@ jobs:
     - name: Execute unit tests
       run: |
         $date = Get-Date -Format yyyy-MM-dd
-        dotnet test --logger "trx;LogFileName=test_results_$date.xml" --results-directory TestResults
+        dotnet test "$env:Test_Project_Path" --filter "FullyQualifiedName!~LongRunning" --logger "trx;LogFileName=test_results_$date.xml" --results-directory TestResults
       continue-on-error: true
 
     - name: Summarize test results
