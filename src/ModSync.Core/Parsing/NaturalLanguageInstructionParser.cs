@@ -42,12 +42,12 @@ namespace ModSync.Core.Parsing
                 Instruction.ActionType.Copy,
                 RegexOptions.IgnoreCase
             ),
-			new InstructionPattern(
+            new InstructionPattern(
                 @"make\s+a\s+copy\s+of\s+(?:the\s+)?(?:file\s+)?[""']?(?<source>[\w\-_.]+?)[""']?\s+(?:and\s+)?paste\s+it\s+into\s+the\s+same\s+(?:directory|folder|location)(?:.*?)rename\s+(?:this\s+duplicate|it)\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
                 Instruction.ActionType.Copy,
                 RegexOptions.IgnoreCase | RegexOptions.Singleline
             ),
-			new InstructionPattern(
+            new InstructionPattern(
                 @"make\s+a\s+copy\s+of\s+(?:the\s+)?(?:file\s+)?[""']?(?<source>[\w\-_.]+?)[""']?\s+and\s+rename\s+(?:it\s+)?(?:to\s+)?[""']?(?<destination>[\w\-_.]+)[""']?",
                 Instruction.ActionType.Copy,
                 RegexOptions.IgnoreCase
@@ -58,32 +58,32 @@ namespace ModSync.Core.Parsing
                 Instruction.ActionType.Copy,
                 RegexOptions.IgnoreCase
             ),
-			new InstructionPattern(
+            new InstructionPattern(
                 @"copy\s+(?:the\s+)?(?:file\s+)?[""'](?<source>[\w\-_.]+)[""']\s+and\s+make\s+a\s+duplicate.*?rename\s+(?:this\s+)?duplicate\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
                 Instruction.ActionType.Copy,
                 RegexOptions.IgnoreCase | RegexOptions.Singleline
             ),
-			new InstructionPattern(
+            new InstructionPattern(
                 @"copy\s+(?:the\s+)?(?:file\s+)?[""'](?<source>[\w\-_.]+)[""']\s+and\s+make\s+a\s+duplicate",
                 Instruction.ActionType.Copy,
                 RegexOptions.IgnoreCase
             ),
-			new InstructionPattern(
+            new InstructionPattern(
                 @"(?:copy|duplicate)\s+(?:the\s+)?(?:file\s+)?(?<source>[\w\-_.]+?).*?rename\s+(?:it|that|this\s+duplicate)\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
                 Instruction.ActionType.Copy,
                 RegexOptions.IgnoreCase | RegexOptions.Singleline
             ),
-			new InstructionPattern(
+            new InstructionPattern(
                 @"rename\s+(?:this\s+|the\s+|that\s+)?(?:duplicate|copy|file)(?:\s+file)?\s+to\s+[""']?(?<destination>[\w\-_.]+)[""']?",
                 Instruction.ActionType.Rename,
                 RegexOptions.IgnoreCase
             ),
-			new InstructionPattern(
+            new InstructionPattern(
                 @"rename\s+(?:the\s+)?files?\s+[""']?(?<source>[\w\-_.]+?)[""']?\s+(?:to|as)\s+[""']?(?<destination>[\w\-_.]+)[""']?",
                 Instruction.ActionType.Rename,
                 RegexOptions.IgnoreCase
             ),
-			new InstructionPattern(
+            new InstructionPattern(
                 @"rename\s+(?<source>[\w\-_.]+?)\s+to\s+(?<destination>[\w\-_.]+)",
                 Instruction.ActionType.Rename,
                 RegexOptions.IgnoreCase
