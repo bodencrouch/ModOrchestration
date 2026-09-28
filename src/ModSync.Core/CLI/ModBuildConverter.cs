@@ -118,6 +118,13 @@ namespace ModSync.Core.CLI
 
     public static class ModBuildConverter
     {
+        /// <summary>
+        /// Process exit code for an install that applied its files but finished completed-unverified
+        /// (<c>--skip-validation</c>, <c>--no-checkpoint</c>, or <c>--best-effort</c>): there is no
+        /// published install PASS, so it is never reported as 0 / Success.
+        /// </summary>
+        public const int CompletedUnverifiedExitCode = 2;
+
         private static MainConfig s_config;
         private static ConsoleProgressDisplay s_progressDisplay;
         private static DownloadCacheService s_globalDownloadCache;
@@ -3711,6 +3718,16 @@ componentName: null,
                         "Installation finished with one or more mod failures; review logs and re-run or fix failed mods."
                     ).ConfigureAwait(false);
                     return 0;
+                }
+
+                if (exitCode == ModComponent.InstallExitCode.CompletedUnverified)
+                {
+                    await Logger.LogWarningAsync(
+                        "Installation finished completed-unverified: files were applied, but --skip-validation, "
+                        + "--no-checkpoint, or --best-effort means there is no published install PASS. "
+                        + $"Exiting with code {CompletedUnverifiedExitCode}; re-run without those flags for a verified install."
+                    ).ConfigureAwait(false);
+                    return CompletedUnverifiedExitCode;
                 }
 
                 await Logger.LogErrorAsync($"Installation failed with exit code: {exitCode}").ConfigureAwait(false);

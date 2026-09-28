@@ -102,7 +102,12 @@ namespace ModSync.Tests
 
             Assert.Multiple(() =>
             {
-                Assert.That(exitCode, Is.EqualTo(0), "CLI install should exit successfully");
+                // --skip-validation finishes completed-unverified (witness semantics): the archive is
+                // still extracted, but the CLI must not report Success.
+                Assert.That(
+                    exitCode,
+                    Is.EqualTo(ModSync.Core.CLI.ModBuildConverter.CompletedUnverifiedExitCode),
+                    "Unverified CLI install should exit completed-unverified");
                 Assert.That(File.Exists(outputFilePath), Is.True, "CLI install should extract archive contents into the game directory");
                 Assert.That(File.ReadAllText(outputFilePath), Is.EqualTo("cli install content"));
             });

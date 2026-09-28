@@ -95,6 +95,8 @@ Install selected mods from an instruction file.
 | `--no-managed` | No | Force classic install for this run (ignore `managedDeploymentEnabled`) |
 | `--profile` | No | Profile name for managed deploy (overrides `activeProfileName` for this run) |
 
+**Exit codes:** `0` = verified install (published PASS); `2` = completed-unverified — files were applied, but `--skip-validation`, `--no-checkpoint`, or `--best-effort` means there is no published PASS; `1` = failure.
+
 **Managed deploy:** fail-closed when `--managed` is set without a resolvable profile. See [managed-deployment.md](managed-deployment.md) and [install-profiles.md](install-profiles.md).
 
 **Example (best-effort full list):** see `scripts/agents/install_best_effort.sh` (also passes `--skip-validation`).

@@ -127,7 +127,10 @@ jobs:
           tail -n 60 "$RUNNER_TEMP/mock/install.log"
           echo "install exit status: $install_status"
 
-          if [ "$install_status" -ne 0 ]; then
+          # --skip-validation/--no-checkpoint installs finish completed-unverified: the CLI exits
+          # with its dedicated code 2 instead of 0 (no published install PASS). Any other non-zero
+          # status is a real failure. The steps below still prove the game directory changed.
+          if [ "$install_status" -ne 0 ] && [ "$install_status" -ne 2 ]; then
             echo "::error::ModSync install exited with status $install_status"
             exit 1
           fi

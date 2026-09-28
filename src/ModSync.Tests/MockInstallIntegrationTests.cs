@@ -105,7 +105,12 @@ namespace ModSync.Tests
 
             Assert.Multiple(() =>
             {
-                Assert.That(exitCode, Is.EqualTo(0), "The install must report success.");
+                // --skip-validation --no-checkpoint finishes completed-unverified (witness semantics):
+                // it must not report Success, but it must not be a failure either.
+                Assert.That(
+                    exitCode,
+                    Is.EqualTo(ModSync.Core.CLI.ModBuildConverter.CompletedUnverifiedExitCode),
+                    "The install must finish completed-unverified.");
 
                 // A successful exit with an untouched game directory is the failure mode this
                 // fixture exists to catch, so the counts are asserted independently of the code.

@@ -841,7 +841,10 @@ ___
 
             Assert.Multiple(() =>
             {
-                Assert.That(installExit, Is.EqualTo(0), "CLI install should succeed for ingested Silent Sion draft");
+                // --skip-validation/--best-effort installs finish completed-unverified (witness
+                // semantics): files are applied, but the CLI must not report Success. The file
+                // assertions below prove the drafted instructions installed.
+                Assert.That(installExit, Is.EqualTo(ModBuildConverter.CompletedUnverifiedExitCode), "Ingested Silent Sion draft install should finish completed-unverified");
                 Assert.That(File.Exists(installedDlg), Is.True, "Move draft should place 153sion.dlg in Override");
                 Assert.That(File.ReadAllText(installedDlg), Is.EqualTo("silent sion dlg"));
             });
@@ -893,7 +896,10 @@ ___
 
             Assert.Multiple(() =>
             {
-                Assert.That(installExit, Is.EqualTo(0));
+                // --skip-validation/--best-effort installs finish completed-unverified (witness
+                // semantics): files are applied, but the CLI must not report Success. The file
+                // assertions below prove the drafted instructions installed.
+                Assert.That(installExit, Is.EqualTo(ModBuildConverter.CompletedUnverifiedExitCode), "Install should finish completed-unverified");
                 Assert.That(File.Exists(Path.Combine(kotorDir, "Override", "153sion.dlg")), Is.True,
                     "Move draft should find 153sion.dlg after extract-style nesting");
             });
@@ -1003,7 +1009,10 @@ ___
 
             Assert.Multiple(() =>
             {
-                Assert.That(installExit, Is.EqualTo(0));
+                // --skip-validation/--best-effort installs finish completed-unverified (witness
+                // semantics): files are applied, but the CLI must not report Success. The file
+                // assertions below prove the drafted instructions installed.
+                Assert.That(installExit, Is.EqualTo(ModBuildConverter.CompletedUnverifiedExitCode), "Install should finish completed-unverified");
                 Assert.That(File.Exists(Path.Combine(kotorDir, "Override", "prestige_fix.2da")), Is.True,
                     "Folder Move draft should find prestige_fix.2da after extract-style nesting");
             });
@@ -1060,7 +1069,10 @@ ___
 
             Assert.Multiple(() =>
             {
-                Assert.That(installExit, Is.EqualTo(0));
+                // --skip-validation/--best-effort installs finish completed-unverified (witness
+                // semantics): files are applied, but the CLI must not report Success. The file
+                // assertions below prove the drafted instructions installed.
+                Assert.That(installExit, Is.EqualTo(ModBuildConverter.CompletedUnverifiedExitCode), "Install should finish completed-unverified");
                 Assert.That(File.Exists(Path.Combine(kotorDir, "Override", "153sion.dlg")), Is.True);
                 Assert.That(File.Exists(Path.Combine(kotorDir, "Override", "prestige_fix.2da")), Is.True);
             });

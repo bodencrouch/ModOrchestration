@@ -107,9 +107,15 @@ fi
 
 echo "==> install --select mod:$INSTALL_MOD"
 strip_dependencies_for_mods "$TOML" "$INSTALL_MOD"
+# --skip-validation/--best-effort finish completed-unverified: the CLI exits 2, not 0.
+install_status=0
 dotnet run --project "$ROOT/src/ModSync.Tests/ModSync.Tests.csproj" -f net9.0 --no-build -- \
   install --input "$TOML" --game-dir "$KOTOR_DIR" --source-dir "$MOD_DIR" \
-  --select "mod:$INSTALL_MOD" --skip-validation --best-effort -y
+  --select "mod:$INSTALL_MOD" --skip-validation --best-effort -y || install_status=$?
+if [[ "$install_status" -ne 0 && "$install_status" -ne 2 ]]; then
+  echo "Install failed with exit status $install_status" >&2
+  exit "$install_status"
+fi
 
 echo "Install complete for mod:$INSTALL_MOD"
 echo "  KOTOR Override: $KOTOR_DIR/Override"
