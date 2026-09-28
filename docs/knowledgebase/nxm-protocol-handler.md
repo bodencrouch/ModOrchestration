@@ -42,10 +42,30 @@ Sources: `src/ModSync.Core/Services/Download/NxmUrl.cs`, `src/ModSync.Core/Servi
 
 `[UI]` Desktop E2E still recommended (browser click, single-instance, macOS `.app` bundle).
 
+## Phase 5 (Plan 117)
+
+`[REPO]` `NxmHandlerProbe` reads the active `nxm://` handler on Windows (`reg.exe` query of `HKCU\Software\Classes\nxm\shell\open\command`) and Linux (`xdg-mime query default x-scheme-handler/nxm` + `.desktop` `Exec=`). Classifies MO2, Vortex, ModSync, or other.
+
+`[UI]` Settings → Download Settings shows `RegisterNxmProtocolStatusText` (OS status) separately from the checkbox helper. When a competitor is active and the user enables registration, `ConfirmationDialog` asks before calling `Register()`. Save also re-applies registration when ModSync has an entry but is not the default handler.
+
+`[REPO]` macOS unchanged: informational status block only; no runtime conflict probe.
+
+## Phase 6 (Plan 118)
+
+`[REPO]` `NxmHandoffService` calls `DownloadOrchestrationService.DownloadModFromUrlWithProgressUiAsync`, which shows `SingleUrlDownloadDialog`, forwards `DownloadProgress` updates, and toggles `IsDownloadInProgress` so Getting Started download indicators reflect nxm hand-off downloads.
+
+`[UI]` Desktop E2E still recommended for browser-click → progress dialog → mod workspace copy.
+
+## Phase 7 (Plan 119)
+
+`[REPO]` Release workflow (`build-and-release.yml`) publishes macOS builds with `-t:BundleApp` (Dotnet.Bundle), runs `scripts/ci/bundle-macos-app.ps1` to install the versioned `Info.plist` (with `CFBundleURLTypes` → `nxm`) and icon, and packages `ModSync.app` into release zips instead of a flat folder.
+
+`[UI]` Desktop E2E still recommended after downloading a macOS release artifact.
+
 ## Still deferred
 
-`[REPO]` Handler conflict detection; macOS release `.app` bundling in CI; in-progress nxm download UI integration.
+`[REPO]` macOS code signing / notarization; desktop E2E.
 
 ## Tests
 
-`[REPO]` `NxmUrlTests`, `NxmProtocolRegistrationServiceTests`, `SingleInstanceServiceTests`, `NexusModsDownloadHandlerTests` in `src/ModSync.Tests`.
+`[REPO]` `NxmUrlTests`, `NxmProtocolRegistrationServiceTests`, `NxmHandlerProbeTests`, `SingleInstanceServiceTests`, `NexusModsDownloadHandlerTests` in `src/ModSync.Tests`.

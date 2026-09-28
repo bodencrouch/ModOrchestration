@@ -46,6 +46,7 @@ Use these when citing findings in plans, PRs, or audits:
 - [Download system](download-system.md) — ResourceRegistry, handler order, `DownloadCacheService`, GUI vs CLI
 - [Install profiles](install-profiles.md) — named loadouts, `ProfileService` capture/apply, `ProfileManagerDialog`
 - [FOMOD installer support](fomod-support.md) — ModuleConfig parser, mapping to Option/Choose model, deferred GUI slice
+- [File-level conflicts](file-conflicts.md) — `FileConflictAnalyzer` dry-run VFS attribution and `ConflictsDialog` results UI
 - [nxm protocol handler](nxm-protocol-handler.md) — nxm:// URL parsing, OS scheme registration, single-instance hand-off, free-user download path
 
 ### Architecture and agent parity
