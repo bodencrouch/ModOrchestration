@@ -985,7 +985,10 @@ namespace ModSync.Core
         /// legitimate-exception stems alone.
         /// </para>
         /// Intended to be invoked once, by the overall install loop, after every component in the
-        /// guide has finished installing.
+        /// guide has finished installing. It is deliberately NOT wired into
+        /// <c>InstallationService</c> yet: an unconditional end-of-install sweep has no VFS
+        /// dry-run parity and can delete files a later mod ships on purpose. See
+        /// <c>docs/knowledgebase/instruction-format.md</c> (DelDuplicate final sweep) for the follow-up.
         /// </summary>
         /// <param name="fileSystemProvider">Provider used to enumerate and delete files.</param>
         /// <param name="directoryFullName">Directory to sweep (e.g. the game's Override folder).</param>
@@ -1093,62 +1096,6 @@ namespace ModSync.Core
             }
 
             return deletedCount;
-        }
-
-        /// <summary>
-        /// Runs <see cref="RunFinalDuplicateSweepAsync"/> once after a guide finishes installing,
-        /// re-applying every DelDuplicate purge that the installed components (and their selected
-        /// options) actually executed, against the same directory each one resolved at run time.
-        /// </summary>
-        /// <returns>The total number of files the sweep deleted.</returns>
-        internal static async Task<int> RunFinalDuplicateSweepAfterInstallAsync(
-            [NotNull][ItemNotNull] IEnumerable<ModComponent> installedComponents)
-        {
-            if (installedComponents is null)
-            {
-                throw new ArgumentNullException(nameof(installedComponents));
-            }
-
-            var executed = new List<Instruction>();
-            foreach (ModComponent component in installedComponents)
-            {
-                executed.AddRange(component.Instructions.Where(i => i != null && i.Action == ActionType.DelDuplicate));
-                foreach (Option option in component.Options.Where(o => o != null && o.IsSelected))
-                {
-                    executed.AddRange(option.Instructions.Where(i => i != null && i.Action == ActionType.DelDuplicate));
-                }
-            }
-
-            int deleted = 0;
-            foreach (IGrouping<string, Instruction> byDirectory in executed
-                .Where(i => i._fileSystemProvider != null
-                    && i.RealDestinationPath != null
-                    && !string.IsNullOrWhiteSpace(i.Arguments))
-                .GroupBy(i => i.RealDestinationPath.FullName, StringComparer.OrdinalIgnoreCase))
-            {
-                var purgeExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var compatibleExtensions = new List<string>();
-                foreach (Instruction instruction in byDirectory)
-                {
-                    string extension = instruction.Arguments.Trim();
-                    _ = purgeExtensions.Add(extension.StartsWith(".", StringComparison.Ordinal) ? extension : "." + extension);
-                    if (instruction.Source != null)
-                    {
-                        compatibleExtensions.AddRange(instruction.Source.Where(e =>
-                            !string.IsNullOrWhiteSpace(e)
-                            && !compatibleExtensions.Contains(e, StringComparer.OrdinalIgnoreCase)));
-                    }
-                }
-
-                deleted += await RunFinalDuplicateSweepAsync(
-                        byDirectory.First()._fileSystemProvider,
-                        byDirectory.Key,
-                        purgeExtensions,
-                        compatibleExtensions.Count > 0 ? compatibleExtensions : null)
-                    .ConfigureAwait(false);
-            }
-
-            return deleted;
         }
 
         /// <summary>
