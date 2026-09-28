@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 using JetBrains.Annotations;
 
@@ -79,6 +80,14 @@ namespace ModSync.Core.Parsing
         [NotNull] private const string LegacyGameDirectoryPlaceholder = "<<gameDirectory>>";
 
         /// <summary>
+        /// Matches KOTOR loose-file names mentioned in guide prose (e.g. 153sion.dlg).
+        /// </summary>
+        [NotNull]
+        private static readonly Regex s_looseFileNamePattern = new Regex(
+            @"\b([\w\.\-]+\.(?:dlg|2da|tga|tpc|utc|uti|utm|utd|ute|uts|utw|ssf|bwm|mdl|mdx|txi|lip|lyt|vis|pth|ncs|gui))\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>
         /// Generates draft instructions for every component that has natural-language Directions prose
         /// but no authored instructions. Components that already have instructions are never touched.
         /// </summary>
@@ -105,42 +114,64 @@ namespace ModSync.Core.Parsing
 
             foreach (ModComponent component in components)
             {
-                if (component.Instructions.Count > 0 || string.IsNullOrWhiteSpace(component.Directions))
+                if (component.Instructions.Count > 0)
                 {
-                    continue;
-                }
-
-                ObservableCollection<Instruction> parsed;
-                IReadOnlyList<string> unparsedGaps;
-                IReadOnlyList<string> conditionalDrafts;
-                try
-                {
-                    parsed = parser.ParseInstructions(
-                        component.Directions,
-                        string.IsNullOrWhiteSpace(component.DownloadInstructions) ? null : component.DownloadInstructions,
-                        component,
-                        out unparsedGaps,
-                        out conditionalDrafts);
-                }
-                catch (Exception ex)
-                {
-                    // Graceful degradation: unparseable prose keeps today's behavior (no instructions drafted).
-                    verbose($"[DraftInstructions] Failed to parse prose for '{component.Name}': {ex.Message}");
                     continue;
                 }
 
                 int added = 0;
-                foreach (Instruction instruction in parsed)
+                bool hasDirections = !string.IsNullOrWhiteSpace(component.Directions);
+                IReadOnlyList<string> unparsedGaps = Array.Empty<string>();
+                IReadOnlyList<string> conditionalDrafts = Array.Empty<string>();
+
+                if (hasDirections)
                 {
-                    if (!TrySanitizeInstruction(instruction))
+                    ObservableCollection<Instruction> parsed;
+                    try
                     {
-                        verbose($"[DraftInstructions] Dropped non-sandboxed draft ({instruction.Action}) for '{component.Name}'");
-                        continue;
+                        parsed = parser.ParseInstructions(
+                            component.Directions,
+                            string.IsNullOrWhiteSpace(component.DownloadInstructions) ? null : component.DownloadInstructions,
+                            component,
+                            out unparsedGaps,
+                            out conditionalDrafts);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Graceful degradation: unparseable prose may still get an InstallationMethod fallback.
+                        verbose($"[DraftInstructions] Failed to parse prose for '{component.Name}': {ex.Message}");
+                        parsed = new ObservableCollection<Instruction>();
+                        unparsedGaps = Array.Empty<string>();
+                        conditionalDrafts = Array.Empty<string>();
                     }
 
-                    instruction.SetParentComponent(component);
-                    component.Instructions.Add(instruction);
-                    added++;
+                    foreach (Instruction instruction in parsed)
+                    {
+                        if (!TrySanitizeInstruction(instruction))
+                        {
+                            verbose($"[DraftInstructions] Dropped non-sandboxed draft ({instruction.Action}) for '{component.Name}'");
+                            continue;
+                        }
+
+                        instruction.SetParentComponent(component);
+                        component.Instructions.Add(instruction);
+                        added++;
+                    }
+                }
+
+                // K2 Full and similar guides often describe TSLPatcher/HoloPatcher installs via
+                // Installation Method alone, or preference prose ("recommend the X option") that yields
+                // no regex hits. Still draft a sandboxed Patcher (or loose-file Move) for review.
+                if (added == 0)
+                {
+                    Instruction fallback = TryCreateMethodFallbackInstruction(component);
+                    if (fallback != null && TrySanitizeInstruction(fallback))
+                    {
+                        fallback.SetParentComponent(component);
+                        component.Instructions.Add(fallback);
+                        added++;
+                        verbose($"[DraftInstructions] Applied InstallationMethod fallback ({fallback.Action}) for '{component.Name}'");
+                    }
                 }
 
                 if (added > 0)
@@ -160,10 +191,266 @@ namespace ModSync.Core.Parsing
                     info($"[DraftInstructions] {conditionalDrafts.Count} draft(s) for '{component.Name}' are conditional on another mod - review needed.");
                 }
 
-                results.Add(new DraftInstructionResult(component, added, unparsedGaps, conditionalDrafts));
+                // One result per component with Directions prose (so callers can render unparsed gaps),
+                // plus any component that only received an InstallationMethod fallback draft.
+                if (hasDirections || added > 0)
+                {
+                    results.Add(new DraftInstructionResult(component, added, unparsedGaps, conditionalDrafts));
+                }
             }
 
             return results;
+        }
+
+        /// <summary>
+        /// When prose does not parse into instructions, invent a minimal sandboxed draft from
+        /// <see cref="ModComponent.InstallationMethod"/> and/or patcher keywords in Directions.
+        /// </summary>
+        [CanBeNull]
+        private static Instruction TryCreateMethodFallbackInstruction([NotNull] ModComponent component)
+        {
+            string method = component.InstallationMethod ?? string.Empty;
+            string directions = component.Directions ?? string.Empty;
+            string combined = method + " " + directions;
+
+            if (LooksLikePatcherInstall(combined))
+            {
+                return new Instruction
+                {
+                    Action = Instruction.ActionType.Patcher,
+                    Source = new List<string> { ModDirectoryPlaceholder },
+                    Destination = KotorDirectoryPlaceholder,
+                    Overwrite = true,
+                };
+            }
+
+            if (LooksLikeLooseFileInstall(method)
+                && !LooksLikePatcherInstall(directions)
+                && method.IndexOf("executable", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                string destination = directions.IndexOf("movies", StringComparison.OrdinalIgnoreCase) >= 0
+                    ? KotorDirectoryPlaceholder + @"\Movies"
+                    : KotorDirectoryPlaceholder + @"\Override";
+
+                Match fileMatch = s_looseFileNamePattern.Match(directions);
+                List<string> sources = fileMatch.Success
+                    ? BuildLooseFileMoveSources(fileMatch.Groups[1].Value)
+                    : new List<string> { ModDirectoryPlaceholder + @"\*" };
+
+                return new Instruction
+                {
+                    Action = Instruction.ActionType.Move,
+                    Source = sources,
+                    Destination = destination,
+                    Overwrite = directions.IndexOf("do not overwrite", StringComparison.OrdinalIgnoreCase) < 0
+                        && directions.IndexOf("don't overwrite", StringComparison.OrdinalIgnoreCase) < 0,
+                };
+            }
+
+            if (method.IndexOf("executable", StringComparison.OrdinalIgnoreCase) >= 0
+                || directions.IndexOf("executable", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return new Instruction
+                {
+                    Action = Instruction.ActionType.Execute,
+                    Source = new List<string> { ModDirectoryPlaceholder + @"\*" },
+                    Destination = string.Empty,
+                    Overwrite = true,
+                };
+            }
+
+            return null;
+        }
+
+        private static bool LooksLikePatcherInstall([NotNull] string text)
+        {
+            string lower = text.ToLowerInvariant();
+            return lower.IndexOf("tslpatcher", StringComparison.Ordinal) >= 0
+                || lower.IndexOf("holopatcher", StringComparison.Ordinal) >= 0
+                || lower.IndexOf("multi-run", StringComparison.Ordinal) >= 0;
+        }
+
+        private static bool LooksLikeLooseFileInstall([NotNull] string text)
+        {
+            string lower = text.ToLowerInvariant();
+            return lower.IndexOf("loose-file", StringComparison.Ordinal) >= 0
+                || lower.IndexOf("loose file", StringComparison.Ordinal) >= 0;
+        }
+
+        /// <summary>
+        /// Builds sandboxed Move sources for a named loose file, including nested paths after Extract.
+        /// </summary>
+        [NotNull]
+        internal static List<string> BuildLooseFileMoveSources([NotNull] string fileName, int maxNestedDepth = 3)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                throw new ArgumentException("File name is required.", nameof(fileName));
+            }
+
+            string trimmed = fileName.Trim().Trim('"', '\'');
+            var sources = new List<string> { $"{ModDirectoryPlaceholder}\\{trimmed}" };
+
+            for (int depth = 1; depth <= maxNestedDepth; depth++)
+            {
+                sources.Add($"{ModDirectoryPlaceholder}\\{string.Join("\\", Enumerable.Repeat("*", depth))}\\{trimmed}");
+            }
+
+            return sources;
+        }
+
+        /// <summary>
+        /// Expands existing Move sources with nested mod-directory search paths for a named file.
+        /// </summary>
+        [NotNull]
+        internal static List<string> ExpandLooseFileMoveSources(
+            [CanBeNull] IEnumerable<string> existingSources,
+            [NotNull] string fileName,
+            int maxNestedDepth = 3)
+        {
+            var merged = new List<string>();
+            if (existingSources != null)
+            {
+                merged.AddRange(existingSources.Where(source => !string.IsNullOrWhiteSpace(source)));
+            }
+
+            foreach (string source in BuildLooseFileMoveSources(fileName, maxNestedDepth))
+            {
+                if (!merged.Any(existing => string.Equals(existing, source, StringComparison.OrdinalIgnoreCase)))
+                {
+                    merged.Add(source);
+                }
+            }
+
+            return merged;
+        }
+
+        /// <summary>
+        /// Builds sandboxed Move sources for a named folder (optionally path-like prose), including nested
+        /// paths after Extract and slug/fuzzy variants when archive folders differ from guide wording.
+        /// </summary>
+        [NotNull]
+        internal static List<string> BuildFolderMoveSources([NotNull] string folderPhrase, int maxNestedDepth = 3)
+        {
+            if (string.IsNullOrWhiteSpace(folderPhrase))
+            {
+                throw new ArgumentException("Folder phrase is required.", nameof(folderPhrase));
+            }
+
+            string trimmed = folderPhrase.Trim().Trim('"', '\'', '.', ' ', ',', ';');
+            trimmed = Regex.Replace(trimmed, @"^\s*the\s+", string.Empty, RegexOptions.IgnoreCase);
+
+            var folderCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                trimmed.Replace('/', '\\'),
+            };
+
+            foreach (string slug in GenerateFolderSlugCandidates(trimmed))
+            {
+                folderCandidates.Add(slug);
+            }
+
+            var sources = new List<string>();
+            foreach (string candidate in folderCandidates)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    continue;
+                }
+
+                sources.Add($"{ModDirectoryPlaceholder}\\{candidate}\\*");
+
+                for (int depth = 1; depth <= maxNestedDepth; depth++)
+                {
+                    sources.Add($"{ModDirectoryPlaceholder}\\{string.Join("\\", Enumerable.Repeat("*", depth))}\\{candidate}\\*");
+                }
+
+                string fuzzySegment = BuildFuzzyFolderSegmentPattern(candidate);
+                if (!string.IsNullOrWhiteSpace(fuzzySegment))
+                {
+                    for (int depth = 1; depth <= maxNestedDepth; depth++)
+                    {
+                        sources.Add($"{ModDirectoryPlaceholder}\\{string.Join("\\", Enumerable.Repeat("*", depth))}\\{fuzzySegment}\\*");
+                    }
+                }
+            }
+
+            return sources;
+        }
+
+        /// <summary>
+        /// Expands existing Move sources with nested folder search paths for guide prose folder names.
+        /// </summary>
+        [NotNull]
+        internal static List<string> ExpandFolderMoveSources(
+            [CanBeNull] IEnumerable<string> existingSources,
+            [NotNull] string folderPhrase,
+            int maxNestedDepth = 3)
+        {
+            var merged = new List<string>();
+            if (existingSources != null)
+            {
+                merged.AddRange(existingSources.Where(source => !string.IsNullOrWhiteSpace(source)));
+            }
+
+            foreach (string source in BuildFolderMoveSources(folderPhrase, maxNestedDepth))
+            {
+                if (!merged.Any(existing => string.Equals(existing, source, StringComparison.OrdinalIgnoreCase)))
+                {
+                    merged.Add(source);
+                }
+            }
+
+            return merged;
+        }
+
+        [NotNull]
+        private static IEnumerable<string> GenerateFolderSlugCandidates([NotNull] string phrase)
+        {
+            string[] segments = phrase
+                .Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(segment => segment.Trim())
+                .Where(segment => segment.Length > 0)
+                .ToArray();
+
+            if (segments.Length == 0)
+            {
+                yield break;
+            }
+
+            yield return string.Join("\\", segments);
+
+            if (segments.Length >= 2)
+            {
+                string head = segments[0].Replace(" ", string.Empty).ToLowerInvariant();
+                string tail = string.Join(" ", segments.Skip(1)).ToLowerInvariant();
+                tail = Regex.Replace(tail, @"\bsith\s+lord\b", "sithlord", RegexOptions.IgnoreCase);
+                yield return $"{head}_{tail}";
+            }
+        }
+
+        [CanBeNull]
+        private static string BuildFuzzyFolderSegmentPattern([NotNull] string folderCandidate)
+        {
+            string segment = folderCandidate;
+            int lastSeparator = Math.Max(folderCandidate.LastIndexOf('\\'), folderCandidate.LastIndexOf('/'));
+            if (lastSeparator >= 0 && lastSeparator < folderCandidate.Length - 1)
+            {
+                segment = folderCandidate.Substring(lastSeparator + 1);
+            }
+
+            string merged = Regex.Replace(segment.ToLowerInvariant(), @"\bsith\s+lord\b", "sithlord");
+            string[] tokens = merged
+                .Split(new[] { ' ', '_', '-', '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(token => token.Length > 3 || string.Equals(token, "fixes", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            if (tokens.Length == 0)
+            {
+                return null;
+            }
+
+            return "*" + string.Join("*", tokens) + "*";
         }
 
         /// <summary>

@@ -16,7 +16,25 @@ Only components already marked `IsSelected = true` in the file are installed. Us
 
 ## `install` with `--select`
 
-Repeatable filters: `category:Name`, `tier:Name`. Only matching components stay selected.
+Repeatable filters: `category:Name`, `tier:Name`, `mod:Name` (case-insensitive exact or substring match on component `Name`). Only matching components stay selected. Filters combine with AND semantics when multiple types are used together. Repeat `--select` for multiple mod names (e.g. `--select mod:A --select mod:B`).
+
+## `install` with `--download`
+
+`[REPO]` On `install`, `--select` (or `--use-file-selection` / TOML `IsSelected`) is applied **before** downloads. Only components with `IsSelected == true` are fetched when `--download` is set. Use this for single-mod network smoke instead of `convert --download`, which downloads all URL-bearing components before selection filters run.
+
+Example (merged neocities K2 + golden TOML):
+
+```bash
+./scripts/agents/k2_ingested_merge_download_smoke.sh --download-mod "Silent Sion Restoration"
+```
+
+Full round-trip (golden URLs + ingested NLP → download → extract → Override install; network + `mod-builds`):
+
+```bash
+./scripts/agents/k2_merged_roundtrip_download_install_smoke.sh
+```
+
+Wraps `K2FullGuideFixture_RoundTripSilentSion_DownloadAndInstalls_LongRunning` by default; set `MOD="Prestige Class Saving Throw Fixes"` (or `FILTER=…RoundTripPrestige…`) for the Prestige Class folder-Move round-trip. NLP Move drafts for single loose files include nested `<<modDirectory>>/*…/filename` sources so post-extract paths resolve. Folder advisories (e.g. Prestige Class “only install the Jedi Master/Sith Lord fixes”) add nested folder wildcards plus slug/fuzzy variants (`jedimaster_sithlord fixes`) via `DraftInstructionService.BuildFolderMoveSources`.
 
 ## `validate` without `--select` (default)
 

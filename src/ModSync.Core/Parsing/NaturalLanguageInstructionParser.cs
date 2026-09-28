@@ -89,7 +89,51 @@ namespace ModSync.Core.Parsing
                 RegexOptions.IgnoreCase
             ),
 
-			// === HIGHLY SPECIFIC MOVE PATTERNS ===
+			// === K2 FULL / NEOCITIES COMMON PHRASES (high priority) ===
+			// "Install the files within/from the (included) Override folder/directory"
+			new InstructionPattern(
+                @"install\s+(?:the\s+)?files?\s+(?:within|from|in)\s+(?:the\s+)?(?:included\s+)?override\s+(?:folder|directory)",
+                Instruction.ActionType.Move,
+                RegexOptions.IgnoreCase
+            ),
+			// "Install the contents of every/all folder(s) but X"
+			new InstructionPattern(
+                @"install\s+(?:the\s+)?contents?\s+of\s+(?:every|all|each)\s+folders?",
+                Instruction.ActionType.Move,
+                RegexOptions.IgnoreCase
+            ),
+			// "Use the files in the \"Alternate Textures\" folder"
+			new InstructionPattern(
+                @"use\s+(?:the\s+)?files?\s+in\s+(?:the\s+)?[""'](?<source>[^""']+)[""']\s+folder",
+                Instruction.ActionType.Move,
+                RegexOptions.IgnoreCase
+            ),
+			// "Go into the NPC Replacement folder and move all the loose files to the override"
+			new InstructionPattern(
+                @"go\s+into\s+(?:the\s+)?[""']?(?<source>[\w\s\-_]+?)[""']?\s+folder\s+and\s+move\s+(?:all\s+)?(?:the\s+)?(?:loose\s+)?files?\s+to\s+(?:the\s+|your\s+)?(?<destination>[\w\s\-_/\\]+)",
+                Instruction.ActionType.Move,
+                RegexOptions.IgnoreCase
+            ),
+			// "files from this mod go in your movies folder" / "move ... to movies"
+			new InstructionPattern(
+                @"(?:files?\s+(?:from\s+this\s+mod\s+)?go\s+in\s+(?:your\s+)?movies\s+folder|(?:move|copy|place|put)\s+(?:the\s+)?(?:files?|contents?|everything)\s+(?:to|into)\s+(?:your\s+)?(?:game'?s?\s+)?movies(?:\s+folder)?)",
+                Instruction.ActionType.Move,
+                RegexOptions.IgnoreCase
+            ),
+			// Implied bulk move: "before moving the files to your override" / "moving to your Override"
+			new InstructionPattern(
+                @"(?:before\s+)?mov(?:e|ing)\s+(?:the\s+)?(?:files?|contents?)\s+to\s+(?:your\s+)?(?:game'?s?\s+)?(?<destination>override|movies)(?:\s+(?:folder|directory))?",
+                Instruction.ActionType.Move,
+                RegexOptions.IgnoreCase
+            ),
+			// "Download the .tpc/.tga variant" then install to override (common Ultimate HR phrasing)
+			new InstructionPattern(
+                @"download\s+the\s+\.?(?<variant>tpc|tga)\s+variant",
+                Instruction.ActionType.Move,
+                RegexOptions.IgnoreCase
+            ),
+
+			// === HIGHLY SPECIFIC MOVE/COPY PATTERNS (must come first) ===
 			// "Move everything from X, Y, and Z folders to override"
 			new InstructionPattern(
                 @"move\s+everything\s+from\s+the\s+(?<folders>(?:[\w\s\-_]+?,\s+)+(?:and\s+)?[\w\s\-_]+?)\s+folders?\s+to\s+(?:your\s+)?(?<destination>[\w\s\-_/\\]+)",
@@ -280,6 +324,36 @@ namespace ModSync.Core.Parsing
                 Instruction.ActionType.Patcher,
                 RegexOptions.IgnoreCase
             ),
+			// "Run the HoloPatcher/TSLPatcher" (with or without "executable")
+			new InstructionPattern(
+                @"run\s+(?:the\s+)?(?<source>holopatcher|tslpatcher)(?:\s+executable)?",
+                Instruction.ActionType.Patcher,
+                RegexOptions.IgnoreCase
+            ),
+			// "Run the installer first"
+			new InstructionPattern(
+                @"run\s+the\s+(?:installer|patcher)\s+first",
+                Instruction.ActionType.Patcher,
+                RegexOptions.IgnoreCase
+            ),
+			// Install quoted option: install "Standard." / install the "Standard + Sith Assassin Visas" option
+			new InstructionPattern(
+                @"(?:simply\s+)?install\s+(?:the\s+)?[""'](?<option>[^""']+)[""'](?:\s+option)?",
+                Instruction.ActionType.Patcher,
+                RegexOptions.IgnoreCase
+            ),
+			// "Use the 'No M4-78EP Installed' option"
+			new InstructionPattern(
+                @"use\s+(?:the\s+)?[""'](?<option>[^""']+)[""']\s+option",
+                Instruction.ActionType.Patcher,
+                RegexOptions.IgnoreCase
+            ),
+			// "Apply the main installation" / "Apply any of the following"
+			new InstructionPattern(
+                @"apply\s+(?:the\s+)?(?<option>main\s+installation|default\s+install|patch|contents?)",
+                Instruction.ActionType.Patcher,
+                RegexOptions.IgnoreCase
+            ),
 			// "Go into X folder and apply Y"
 			new InstructionPattern(
                 @"go\s+into\s+the\s+(?<folder>[\w\s\-_""']+?)\s+folder\s+and\s+(?:install|apply)\s+(?:that\s+)?(?<option>[\w\s\-_]+)",
@@ -463,6 +537,15 @@ namespace ModSync.Core.Parsing
             ["no_overwrite"] = new Regex(@"(?:do\s+not|don't)\s+overwrite", RegexOptions.IgnoreCase),
             // Multiple file types
             ["file_types"] = new Regex(@"(?<types>(?:\.[\w]+(?:\s+&\s+|,\s*|\s+and\s+))+\.[\w]+)", RegexOptions.IgnoreCase),
+        };
+
+        // Prose pronouns and generic words that must never become mod paths.
+        private static readonly HashSet<string> s_invalidSourceTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "them", "they", "it", "this", "that", "these", "those",
+            "files", "file", "contents", "content", "everything", "all",
+            "mod", "the", "two", "both", "each", "any", "some", "copies", "copy",
+            "override", "folder", "directory", "archives", "archive", "installer",
         };
 
         // Destination normalization mappings
@@ -741,6 +824,29 @@ namespace ModSync.Core.Parsing
             }
 
             CoalesceSplitCopyAsPairs(instructions);
+
+            // Overwrite guidance often appears in a neighboring sentence ("Download the .tpc variant...
+            // For this mod only, do not overwrite if prompted!"). Apply to drafted Move/Copy actions.
+            if (ActiveEntityPatterns()["no_overwrite"].IsMatch(normalizedInstructions))
+            {
+                foreach (Instruction instruction in instructions)
+                {
+                    if (instruction.Action == Instruction.ActionType.Move || instruction.Action == Instruction.ActionType.Copy)
+                    {
+                        instruction.Overwrite = false;
+                    }
+                }
+            }
+            else if (ActiveEntityPatterns()["overwrite"].IsMatch(normalizedInstructions))
+            {
+                foreach (Instruction instruction in instructions)
+                {
+                    if (instruction.Action == Instruction.ActionType.Move || instruction.Action == Instruction.ActionType.Copy)
+                    {
+                        instruction.Overwrite = true;
+                    }
+                }
+            }
 
             // Parse download instructions for options/recommendations
             if (!string.IsNullOrWhiteSpace(downloadInstructions))
@@ -1037,6 +1143,15 @@ namespace ModSync.Core.Parsing
         {
             string lower = unit.ToLowerInvariant();
 
+            // Commentary that still names an install destination is actionable (common in K2 Full).
+            bool hasInstallDestination =
+                lower.Contains("movies folder")
+                || lower.Contains("to your override")
+                || lower.Contains("to the override")
+                || lower.Contains("override folder")
+                || lower.Contains("holopatcher")
+                || lower.Contains("tslpatcher");
+
             // Commentary patterns
             if (lower.StartsWith("bear in mind", StringComparison.Ordinal) ||
                 lower.StartsWith("keep in mind", StringComparison.Ordinal) ||
@@ -1050,7 +1165,7 @@ namespace ModSync.Core.Parsing
                 lower.Contains("up to you") ||
                 lower.Contains("which of these you choose"))
             {
-                return true;
+                return !hasInstallDestination;
             }
 
             // Questions
@@ -1380,6 +1495,27 @@ namespace ModSync.Core.Parsing
                 }
             }
 
+            // Special-case: "install files within Override folder" → source is the mod's Override tree.
+            if (pattern.ActionType == Instruction.ActionType.Move
+                && Regex.IsMatch(unit, @"install\s+(?:the\s+)?files?\s+(?:within|from|in)\s+(?:the\s+)?(?:included\s+)?override", RegexOptions.IgnoreCase))
+            {
+                instruction.Source = new List<string> { @"<<modDirectory>>\Override\*" };
+                instruction.Destination = @"<<kotorDirectory>>\Override";
+            }
+
+            // Patcher/Extract/bulk-move prose often omits an explicit path. Supply sandboxed defaults.
+            EnsureDefaultSourcesAndDestination(instruction, unit, match);
+
+            // Movies destination when the unit points at the movies folder but destination was not captured.
+            if (pattern.ActionType == Instruction.ActionType.Move
+                && unit.IndexOf("movies", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (Regex.IsMatch(unit, @"movies\s+folder|to\s+(?:your\s+)?movies|go\s+in\s+(?:your\s+)?movies", RegexOptions.IgnoreCase))
+                {
+                    instruction.Destination = @"<<kotorDirectory>>\Movies";
+                }
+            }
+
             // A bare "move everything from the X folder" becomes the synthesized sweep
             // "<<modDirectory>>\X\*". The guide named a folder, not the readmes and screenshots
             // inside it, so packaging debris must not ride along into the game directory. A source
@@ -1424,6 +1560,85 @@ namespace ModSync.Core.Parsing
         }
 
         /// <summary>
+        /// Fills sandboxed default Source/Destination for actions that guides describe without paths.
+        /// </summary>
+        private static void EnsureDefaultSourcesAndDestination(
+            [NotNull] Instruction instruction,
+            [NotNull] string unit,
+            [NotNull] Match match)
+        {
+            if (instruction.Action == Instruction.ActionType.Patcher)
+            {
+                if (instruction.Source is null || instruction.Source.Count == 0)
+                {
+                    // Prefer an explicit holopatcher/tslpatcher token when captured; otherwise the mod root.
+                    if (match.Groups["source"].Success)
+                    {
+                        string raw = match.Groups["source"].Value.Trim();
+                        if (raw.Equals("holopatcher", StringComparison.OrdinalIgnoreCase)
+                            || raw.Equals("tslpatcher", StringComparison.OrdinalIgnoreCase)
+                            || raw.Equals("installer", StringComparison.OrdinalIgnoreCase)
+                            || raw.Equals("patcher", StringComparison.OrdinalIgnoreCase))
+                        {
+                            instruction.Source = new List<string> { @"<<modDirectory>>" };
+                        }
+                        else
+                        {
+                            instruction.Source = new List<string> { $"<<modDirectory>>\\{raw}" };
+                        }
+                    }
+                    else
+                    {
+                        instruction.Source = new List<string> { @"<<modDirectory>>" };
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(instruction.Destination))
+                {
+                    instruction.Destination = @"<<kotorDirectory>>";
+                }
+
+                return;
+            }
+
+            if (instruction.Action == Instruction.ActionType.Extract)
+            {
+                if (instruction.Source is null || instruction.Source.Count == 0)
+                {
+                    instruction.Source = new List<string> { @"<<modDirectory>>\*.zip" };
+                }
+
+                return;
+            }
+
+            if (instruction.Action == Instruction.ActionType.Move || instruction.Action == Instruction.ActionType.Copy)
+            {
+                if (instruction.Source is null || instruction.Source.Count == 0)
+                {
+                    // "download the .tpc variant" / bulk move with no named folder → all loose files in mod root.
+                    if (match.Groups["variant"].Success)
+                    {
+                        string variant = match.Groups["variant"].Value.Trim().ToLowerInvariant();
+                        instruction.Source = new List<string> { $"<<modDirectory>>\\*.{variant}" };
+                    }
+                    else if (match.Groups["source"].Success)
+                    {
+                        // Already handled above via ExtractSources; leave empty if that failed.
+                    }
+                    else
+                    {
+                        instruction.Source = new List<string> { @"<<modDirectory>>\*" };
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(instruction.Destination))
+                {
+                    instruction.Destination = InferDestination(unit, instruction.Action);
+                }
+            }
+        }
+
+        /// <summary>
         /// Validates that an instruction has all required fields.
         /// </summary>
         private static bool ValidateInstruction([NotNull] Instruction instruction)
@@ -1440,11 +1655,20 @@ namespace ModSync.Core.Parsing
                 instruction.Action == Instruction.ActionType.Delete ||
                 instruction.Action == Instruction.ActionType.Rename ||
                 instruction.Action == Instruction.ActionType.Extract ||
-                instruction.Action == Instruction.ActionType.Execute)
+                instruction.Action == Instruction.ActionType.Execute ||
+                instruction.Action == Instruction.ActionType.Patcher)
             {
                 if (instruction.Source is null || instruction.Source.Count == 0)
                 {
                     return false;
+                }
+
+                foreach (string source in instruction.Source)
+                {
+                    if (!IsValidSandboxedSourcePath(source))
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -1548,15 +1772,13 @@ namespace ModSync.Core.Parsing
             if (folderMatch.Success)
             {
                 string folder = folderMatch.Groups["folder"].Value.Trim();
-                // Normalize folder name
                 folder = folder.Trim('"', '\'', ' ');
-                sources.Add($"<<modDirectory>>\\{folder}\\*");
+                sources.AddRange(DraftInstructionService.BuildFolderMoveSources(folder));
 
-                // Check for second folder
                 if (folderMatch.Groups["folder2"].Success)
                 {
                     string folder2 = folderMatch.Groups["folder2"].Value.Trim().Trim('"', '\'', ' ');
-                    sources.Add($"<<modDirectory>>\\{folder2}\\*");
+                    sources.AddRange(DraftInstructionService.BuildFolderMoveSources(folder2));
                 }
                 return sources;
             }
@@ -1569,8 +1791,9 @@ namespace ModSync.Core.Parsing
                 List<string> files = ParseFileList(filesText);
                 foreach (string file in files)
                 {
-                    sources.Add($"<<modDirectory>>\\{file}");
+                    sources.AddRange(DraftInstructionService.BuildLooseFileMoveSources(file));
                 }
+
                 if (sources.Count > 0)
                 {
                     return sources;
@@ -1591,20 +1814,19 @@ namespace ModSync.Core.Parsing
             if (singleFileMatch.Success)
             {
                 string file = singleFileMatch.Groups["file"].Value.Trim('"', '\'');
-                sources.Add($"<<modDirectory>>\\{file}");
-                return sources;
+                return DraftInstructionService.BuildLooseFileMoveSources(file);
             }
 
             // === Fallback: treat as folder or pattern ===
             if (!string.IsNullOrWhiteSpace(sourceText))
             {
                 string cleaned = sourceText.Trim('"', '\'', ' ', ',', ';');
-                if (cleaned.Length > 0)
+                if (cleaned.Length > 0 && IsValidSourceToken(cleaned))
                 {
                     // Check if it looks like a file (has extension)
                     if (Path.HasExtension(cleaned))
                     {
-                        sources.Add($"<<modDirectory>>\\{cleaned}");
+                        return DraftInstructionService.BuildLooseFileMoveSources(cleaned);
                     }
                     // Check if it has wildcards
                     else if (cleaned.Contains("*") || cleaned.Contains("?"))
@@ -1615,7 +1837,7 @@ namespace ModSync.Core.Parsing
                     // filename (often quoted without extension: 'LDA_EHawk01').
                     else if (actionType == Instruction.ActionType.Move)
                     {
-                        sources.Add($"<<modDirectory>>\\{cleaned}\\*");
+                        sources.AddRange(DraftInstructionService.BuildFolderMoveSources(cleaned));
                     }
                     else if (actionType == Instruction.ActionType.Rename
                         || actionType == Instruction.ActionType.Copy)
@@ -1630,6 +1852,79 @@ namespace ModSync.Core.Parsing
             }
 
             return sources;
+        }
+
+        /// <summary>
+        /// Rejects pronouns and other non-path tokens guides use in prose ("rename them to …").
+        /// </summary>
+        private static bool IsValidSourceToken([NotNull] string token)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return false;
+            }
+
+            string cleaned = token.Trim('"', '\'', ' ', ',', ';', '.');
+            if (cleaned.Length == 0 || s_invalidSourceTokens.Contains(cleaned))
+            {
+                return false;
+            }
+
+            if (Path.HasExtension(cleaned) || cleaned.Contains("*") || cleaned.Contains("?"))
+            {
+                return true;
+            }
+
+            // Allow folder-like tokens (e.g. Straight Fixes, Override) but not bare lowercase prose.
+            return cleaned.Any(c => c == '_' || c == '-' || char.IsUpper(c));
+        }
+
+        /// <summary>
+        /// Validates each sandboxed source path, including the relative segment after the placeholder.
+        /// </summary>
+        private static bool IsValidSandboxedSourcePath([NotNull] string sourcePath)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath))
+            {
+                return false;
+            }
+
+            const string modPrefix = "<<modDirectory>>";
+            if (!sourcePath.StartsWith(modPrefix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            string remainder = sourcePath.Length > modPrefix.Length
+                ? sourcePath.Substring(modPrefix.Length).TrimStart('\\', '/')
+                : string.Empty;
+
+            if (string.IsNullOrEmpty(remainder) || remainder == "*")
+            {
+                return true;
+            }
+
+            foreach (string segment in remainder.Split('\\', '/'))
+            {
+                if (string.IsNullOrEmpty(segment) || segment == "*")
+                {
+                    continue;
+                }
+
+                string baseSegment = segment;
+                int wildcardIndex = baseSegment.IndexOf('*');
+                if (wildcardIndex >= 0)
+                {
+                    baseSegment = baseSegment.Substring(0, wildcardIndex);
+                }
+
+                if (!string.IsNullOrEmpty(baseSegment) && !IsValidSourceToken(baseSegment))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>

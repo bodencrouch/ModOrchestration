@@ -48,6 +48,31 @@ namespace ModSync.Tests
         private const string MoveExceptProse =
             "The file has the wrong readme; move all the files in the Creatures folder, except for the readme and Gizka.jpg (any .jpg/.png files are always previews and can be deleted), to the override.";
 
+        // K2 Full / neocities phrases that previously yielded 0 drafts.
+        private const string K2OverrideFolderProse =
+            "Install the files within the Override folder.";
+
+        private const string K2IncludedOverrideProse =
+            "Install the files from the included Override directory only.";
+
+        private const string K2HoloPatcherSelectProse =
+            "Run the HoloPatcher executable. Select the default install, not M4-78.";
+
+        private const string K2InstallQuotedOptionProse =
+            "If you would like to have Visas's class as Sith Assassin, install the \"Standard + Sith Assassin Visas\" option. Otherwise, simply install \"Standard.\"";
+
+        private const string K2MoviesFolderProse =
+            "Bear in mind that the files from this mod go in your movies folder, not override.";
+
+        private const string K2TpcVariantMoveProse =
+            "Download the .tpc variant of the mod. For this mod only, do not overwrite if prompted!";
+
+        private const string K2GoIntoFolderMoveProse =
+            "Ignore the \"Player Bodies\" folder. Go into the NPC Replacement folder and move all the loose files to the override directory. Ignore the optional folder.";
+
+        private const string K2CommunityPatchFoldersProse =
+            "If you are using the K2 Community Patch, install the contents of every folder but Straight Fixes (that was already in the K2CP).";
+
         private const string MarkdownGuide = @"### Guide Ingestion Test Mod
 
 **Name:** [Guide Ingestion Test Mod](https://example.com/guide-ingestion-test-mod.zip)
@@ -237,6 +262,165 @@ ___
             {
                 AssertInstructionIsSandboxed(instruction);
             }
+        }
+
+        [Test]
+        public void DraftInstructions_K2OverrideFolderProse_ProducesSandboxedMove()
+        {
+            ModComponent component = CreateComponent(K2OverrideFolderProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i =>
+                i.Action == Instruction.ActionType.Move
+                && i.Source.Any(s => s.IndexOf("Override", StringComparison.OrdinalIgnoreCase) >= 0)
+                && i.Destination.IndexOf("Override", StringComparison.OrdinalIgnoreCase) >= 0), Is.True);
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_K2IncludedOverrideProse_ProducesSandboxedMove()
+        {
+            ModComponent component = CreateComponent(K2IncludedOverrideProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Move), Is.True);
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_K2HoloPatcherSelectProse_ProducesSandboxedPatcher()
+        {
+            ModComponent component = CreateComponent(K2HoloPatcherSelectProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i =>
+                i.Action == Instruction.ActionType.Patcher
+                && i.Source.Count > 0
+                && i.Source[0].StartsWith(ModDirectoryPlaceholder, StringComparison.Ordinal)), Is.True);
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_K2InstallQuotedOptionProse_ProducesSandboxedPatcher()
+        {
+            ModComponent component = CreateComponent(K2InstallQuotedOptionProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Patcher), Is.True);
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_K2MoviesFolderProse_ProducesMoviesDestination()
+        {
+            ModComponent component = CreateComponent(K2MoviesFolderProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i =>
+                i.Action == Instruction.ActionType.Move
+                && i.Destination.IndexOf("Movies", StringComparison.OrdinalIgnoreCase) >= 0), Is.True);
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_K2TpcVariantMoveProse_ProducesSandboxedMoveWithoutOverwrite()
+        {
+            ModComponent component = CreateComponent(K2TpcVariantMoveProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i =>
+                i.Action == Instruction.ActionType.Move
+                && i.Overwrite == false), Is.True);
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_K2GoIntoFolderMoveProse_ProducesSandboxedMove()
+        {
+            ModComponent component = CreateComponent(K2GoIntoFolderMoveProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i =>
+                i.Action == Instruction.ActionType.Move
+                && i.Source.Any(s => s.IndexOf("NPC Replacement", StringComparison.OrdinalIgnoreCase) >= 0)), Is.True);
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_K2CommunityPatchFoldersProse_ProducesSandboxedMove()
+        {
+            ModComponent component = CreateComponent(K2CommunityPatchFoldersProse);
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Move), Is.True);
+
+            foreach (Instruction instruction in component.Instructions)
+            {
+                AssertInstructionIsSandboxed(instruction);
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_PatcherInstallationMethodFallback_WhenPreferenceOnlyProse()
+        {
+            var component = new ModComponent
+            {
+                Name = "Preference-Only Patcher Mod",
+                Guid = Guid.NewGuid(),
+                InstallationMethod = "HoloPatcher Mod",
+                Directions = "Recommend Drew's fix, as it preserves more of the original dialogue.",
+            };
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Patcher));
+            AssertInstructionIsSandboxed(component.Instructions[0]);
         }
 
         [Test]
@@ -482,6 +666,403 @@ ___
                     "Actionable prose that matches no pattern must surface as a reviewable gap, not silently drop");
                 Assert.That(results[0].HasUnparsedGaps, Is.True);
                 Assert.That(component.Instructions, Is.Empty);
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_EmptyDirectionsLooseFileMod_UsesInstallationMethodFallback()
+        {
+            ModComponent component = CreateComponent(string.Empty);
+            component.InstallationMethod = "Loose-File Mod";
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Move));
+            AssertInstructionIsSandboxed(component.Instructions[0]);
+        }
+
+        [Test]
+        public void DraftInstructions_EmptyDirectionsTslpatcherMod_UsesPatcherFallback()
+        {
+            ModComponent component = CreateComponent(string.Empty);
+            component.InstallationMethod = "TSLPatcher Mod";
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Patcher));
+            AssertInstructionIsSandboxed(component.Instructions[0]);
+        }
+
+        [Test]
+        public void DraftInstructions_RecommendationOnlyLooseFileProse_UsesLooseFileFallback()
+        {
+            ModComponent component = CreateComponent(
+                "Recommend the version without overlays, but it's personal preference.");
+            component.InstallationMethod = "Loose-File Mod";
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Move));
+            AssertInstructionIsSandboxed(component.Instructions[0]);
+        }
+
+        [Test]
+        public void DraftInstructions_K2SiteProsePatterns_DraftSandboxedInstructions()
+        {
+            var cases = new (string Prose, Instruction.ActionType Expected)[]
+            {
+                ("Install the files within the Override folder.", Instruction.ActionType.Move),
+                ("Download the .tpc variant of the mod. For this mod only, do not overwrite if prompted!", Instruction.ActionType.Move),
+                ("Run the HoloPatcher executable. Select the default install, not M4-78.", Instruction.ActionType.Patcher),
+                ("If you would like to have Visas's class as Sith Assassin, install the \"Standard + Sith Assassin Visas\" option. Otherwise, simply install \"Standard.\"", Instruction.ActionType.Patcher),
+            };
+
+            foreach ((string prose, Instruction.ActionType expected) in cases)
+            {
+                ModComponent component = CreateComponent(prose);
+                component.InstallationMethod = expected == Instruction.ActionType.Patcher ? "HoloPatcher Mod" : "Loose-File Mod";
+
+                IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+                Assert.That(results, Has.Count.EqualTo(1), $"Expected draft for prose: {prose}");
+                Assert.That(component.Instructions.Any(i => i.Action == expected), Is.True, $"Expected {expected} for: {prose}");
+                foreach (Instruction instruction in component.Instructions)
+                {
+                    AssertInstructionIsSandboxed(instruction);
+                }
+            }
+        }
+
+        [Test]
+        public void DraftInstructions_RenameThemProse_DoesNotUsePronounAsSource()
+        {
+            const string prose =
+                "Take the two copied files and rename them to PLC_CompPnl_b, retaining their original file extensions. "
+                + "When the files are moved to the override, you should be moving four files: PLC_CompPnl.tga, PLC_CompPnl.txi, PLC_CompPnl_b.tga, and PLC_CompPnl_b.txi";
+
+            ModComponent component = CreateComponent(prose);
+            component.InstallationMethod = "Loose-File Mod";
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.That(results, Has.Count.EqualTo(1));
+            Assert.That(component.Instructions.Any(i =>
+                i.Source.Any(s => s.IndexOf("\\them", StringComparison.OrdinalIgnoreCase) >= 0)), Is.False,
+                "Pronoun 'them' must never become a mod source path");
+            Assert.That(component.Instructions.Any(i => i.Action == Instruction.ActionType.Move), Is.True);
+        }
+
+        [Test]
+        public void K2FullGuideFixture_ValidateDryRunOnly_ExitsZero()
+        {
+            string fixturePath = Path.Combine(ResolveRepoRoot(), "src", "ModSync.Tests", "Fixtures", "k2_full_guide.md");
+            Assert.That(File.Exists(fixturePath), Is.True);
+
+            string kotorDir = Path.Combine(_testDirectory, "KOTOR");
+            string modDir = Path.Combine(_testDirectory, "Mods");
+            Directory.CreateDirectory(Path.Combine(kotorDir, "Override"));
+            File.WriteAllText(Path.Combine(kotorDir, "swkotor.exe"), "fake exe");
+            File.WriteAllText(Path.Combine(kotorDir, "dialog.tlk"), "fake dialog");
+            Directory.CreateDirectory(modDir);
+
+            string ingestedToml = Path.Combine(_testDirectory, "k2_full_ingested.toml");
+            int convertExit = ModBuildConverter.Run(new[]
+            {
+                "convert",
+                "--input", fixturePath,
+                "-f", "toml",
+                "--parse-directions",
+                "-o", ingestedToml,
+                "--plaintext",
+            });
+
+            Assert.That(convertExit, Is.EqualTo(0), "convert --parse-directions should succeed for K2 Full fixture");
+
+            int validateExit = ModBuildConverter.Run(new[]
+            {
+                "validate",
+                "--input", ingestedToml,
+                "--game-dir", kotorDir,
+                "--source-dir", modDir,
+                "--dry-run-only",
+                "--errors-only",
+            });
+
+            Assert.That(validateExit, Is.EqualTo(0), "validate --dry-run-only should pass on template dirs for ingested K2 Full TOML");
+            Assert.That(File.ReadAllText(ingestedToml), Does.Contain("thisMod"));
+        }
+
+        [Test]
+        public void K2FullGuideFixture_IngestedSilentSion_InstallsViaCli()
+        {
+            string fixturePath = Path.Combine(ResolveRepoRoot(), "src", "ModSync.Tests", "Fixtures", "k2_full_guide.md");
+            Assert.That(File.Exists(fixturePath), Is.True);
+
+            string kotorDir = Path.Combine(_testDirectory, "KOTOR");
+            string modDir = Path.Combine(_testDirectory, "Mods");
+            Directory.CreateDirectory(Path.Combine(kotorDir, "Override"));
+            File.WriteAllText(Path.Combine(kotorDir, "swkotor.exe"), "fake exe");
+            File.WriteAllText(Path.Combine(kotorDir, "dialog.tlk"), "fake dialog");
+            Directory.CreateDirectory(modDir);
+            File.WriteAllText(Path.Combine(modDir, "153sion.dlg"), "silent sion dlg");
+
+            string ingestedToml = Path.Combine(_testDirectory, "k2_full_ingested.toml");
+            int convertExit = ModBuildConverter.Run(new[]
+            {
+                "convert",
+                "--input", fixturePath,
+                "-f", "toml",
+                "--parse-directions",
+                "-o", ingestedToml,
+                "--plaintext",
+            });
+
+            Assert.That(convertExit, Is.EqualTo(0), "convert --parse-directions should succeed for K2 Full fixture");
+
+            StripDependenciesForInstallSmoke(ingestedToml, "Silent Sion Restoration");
+
+            int installExit = ModBuildConverter.Run(new[]
+            {
+                "install",
+                "--input", ingestedToml,
+                "--game-dir", kotorDir,
+                "--source-dir", modDir,
+                "--select", "mod:Silent Sion Restoration",
+                "--skip-validation",
+                "--best-effort",
+                "-y",
+            });
+
+            string installedDlg = Path.Combine(kotorDir, "Override", "153sion.dlg");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(installExit, Is.EqualTo(0), "CLI install should succeed for ingested Silent Sion draft");
+                Assert.That(File.Exists(installedDlg), Is.True, "Move draft should place 153sion.dlg in Override");
+                Assert.That(File.ReadAllText(installedDlg), Is.EqualTo("silent sion dlg"));
+            });
+        }
+
+        [Test]
+        public void K2FullGuideFixture_IngestedSilentSion_InstallsFromNestedExtractFolder()
+        {
+            string fixturePath = Path.Combine(ResolveRepoRoot(), "src", "ModSync.Tests", "Fixtures", "k2_full_guide.md");
+            Assert.That(File.Exists(fixturePath), Is.True);
+
+            string kotorDir = Path.Combine(_testDirectory, "KOTOR");
+            string modDir = Path.Combine(_testDirectory, "Mods");
+            Directory.CreateDirectory(Path.Combine(kotorDir, "Override"));
+            File.WriteAllText(Path.Combine(kotorDir, "swkotor.exe"), "fake exe");
+            File.WriteAllText(Path.Combine(kotorDir, "dialog.tlk"), "fake dialog");
+            Directory.CreateDirectory(modDir);
+
+            string nestedDlg = Path.Combine(modDir, "Silent Sion Restoration", "153sion.dlg");
+            Directory.CreateDirectory(Path.GetDirectoryName(nestedDlg)!);
+            File.WriteAllText(nestedDlg, "silent sion dlg");
+
+            string ingestedToml = Path.Combine(_testDirectory, "k2_full_ingested.toml");
+            int convertExit = ModBuildConverter.Run(new[]
+            {
+                "convert",
+                "--input", fixturePath,
+                "-f", "toml",
+                "--parse-directions",
+                "-o", ingestedToml,
+                "--plaintext",
+            });
+
+            Assert.That(convertExit, Is.EqualTo(0));
+
+            StripDependenciesForInstallSmoke(ingestedToml, "Silent Sion Restoration");
+
+            int installExit = ModBuildConverter.Run(new[]
+            {
+                "install",
+                "--input", ingestedToml,
+                "--game-dir", kotorDir,
+                "--source-dir", modDir,
+                "--select", "mod:Silent Sion Restoration",
+                "--skip-validation",
+                "--best-effort",
+                "-y",
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(installExit, Is.EqualTo(0));
+                Assert.That(File.Exists(Path.Combine(kotorDir, "Override", "153sion.dlg")), Is.True,
+                    "Move draft should find 153sion.dlg after extract-style nesting");
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_SilentSionMoveJust_IncludesNestedSearchPaths()
+        {
+            ModComponent component = new ModComponent
+            {
+                Name = "Silent Sion Restoration",
+                InstallationMethod = "Loose-File",
+                Directions = "Move just 153sion.dlg to the override.",
+            };
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Move));
+                Assert.That(component.Instructions[0].Source, Does.Contain(@"<<modDirectory>>\153sion.dlg"));
+                Assert.That(component.Instructions[0].Source, Does.Contain(@"<<modDirectory>>\*\153sion.dlg"));
+                Assert.That(component.Instructions[0].Destination, Is.EqualTo(@"<<kotorDirectory>>\Override"));
+            });
+        }
+
+        [Test]
+        public void DraftInstructions_PrestigeClassAdvisory_IncludesNestedFolderSearch()
+        {
+            ModComponent component = new ModComponent
+            {
+                Name = "Prestige Class Saving Throw Fixes",
+                InstallationMethod = "Loose-File Mod",
+                Directions = "I advise users to only install the Jedi Master/Sith Lord fixes.",
+            };
+
+            IReadOnlyList<DraftInstructionResult> results = DraftInstructionService.GenerateDraftInstructions(new[] { component });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Has.Count.EqualTo(1));
+                Assert.That(component.Instructions[0].Action, Is.EqualTo(Instruction.ActionType.Move));
+                Assert.That(
+                    component.Instructions[0].Source.Any(source =>
+                        source.IndexOf("Jedi Master", StringComparison.OrdinalIgnoreCase) >= 0
+                        && source.IndexOf('*', StringComparison.Ordinal) >= 0),
+                    Is.True,
+                    "Folder Move should include nested search paths for Jedi Master/Sith Lord fixes");
+                Assert.That(
+                    component.Instructions[0].Source.Any(source =>
+                        source.IndexOf("sithlord", StringComparison.OrdinalIgnoreCase) >= 0
+                        && source.IndexOf("fixes", StringComparison.OrdinalIgnoreCase) >= 0),
+                    Is.True,
+                    "Folder Move should include slug/fuzzy variants for jedimaster_sithlord fixes");
+            });
+        }
+
+        [Test]
+        public void K2FullGuideFixture_IngestedPrestige_InstallsFromNestedExtractFolder()
+        {
+            string fixturePath = Path.Combine(ResolveRepoRoot(), "src", "ModSync.Tests", "Fixtures", "k2_full_guide.md");
+            Assert.That(File.Exists(fixturePath), Is.True);
+
+            string kotorDir = Path.Combine(_testDirectory, "KOTOR");
+            string modDir = Path.Combine(_testDirectory, "Mods");
+            Directory.CreateDirectory(Path.Combine(kotorDir, "Override"));
+            File.WriteAllText(Path.Combine(kotorDir, "swkotor.exe"), "fake exe");
+            File.WriteAllText(Path.Combine(kotorDir, "dialog.tlk"), "fake dialog");
+            Directory.CreateDirectory(modDir);
+
+            string nestedFolder = Path.Combine(
+                modDir,
+                "TSL_prestige_save_fixes",
+                "TSL_prestige_save_fixes",
+                "jedimaster_sithlord fixes");
+            Directory.CreateDirectory(nestedFolder);
+            File.WriteAllText(Path.Combine(nestedFolder, "prestige_fix.2da"), "2DA V2.0\n");
+
+            string ingestedToml = Path.Combine(_testDirectory, "k2_full_ingested.toml");
+            int convertExit = ModBuildConverter.Run(new[]
+            {
+                "convert",
+                "--input", fixturePath,
+                "-f", "toml",
+                "--parse-directions",
+                "-o", ingestedToml,
+                "--plaintext",
+            });
+
+            Assert.That(convertExit, Is.EqualTo(0));
+
+            StripDependenciesForInstallSmoke(ingestedToml, "Prestige Class Saving Throw Fixes");
+
+            int installExit = ModBuildConverter.Run(new[]
+            {
+                "install",
+                "--input", ingestedToml,
+                "--game-dir", kotorDir,
+                "--source-dir", modDir,
+                "--select", "mod:Prestige Class Saving Throw Fixes",
+                "--skip-validation",
+                "--best-effort",
+                "-y",
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(installExit, Is.EqualTo(0));
+                Assert.That(File.Exists(Path.Combine(kotorDir, "Override", "prestige_fix.2da")), Is.True,
+                    "Folder Move draft should find prestige_fix.2da after extract-style nesting");
+            });
+        }
+
+        [Test]
+        public void K2FullGuideFixture_IngestedMultiModInstallSmoke_InstallsViaModSelect()
+        {
+            string fixturePath = Path.Combine(ResolveRepoRoot(), "src", "ModSync.Tests", "Fixtures", "k2_full_guide.md");
+            Assert.That(File.Exists(fixturePath), Is.True);
+
+            string kotorDir = Path.Combine(_testDirectory, "KOTOR");
+            string modDir = Path.Combine(_testDirectory, "Mods");
+            Directory.CreateDirectory(Path.Combine(kotorDir, "Override"));
+            File.WriteAllText(Path.Combine(kotorDir, "swkotor.exe"), "fake exe");
+            File.WriteAllText(Path.Combine(kotorDir, "dialog.tlk"), "fake dialog");
+            Directory.CreateDirectory(modDir);
+            File.WriteAllText(Path.Combine(modDir, "153sion.dlg"), "silent sion dlg");
+
+            string prestigeFolder = Path.Combine(modDir, "Jedi Master", "Sith Lord fixes");
+            Directory.CreateDirectory(prestigeFolder);
+            File.WriteAllText(Path.Combine(prestigeFolder, "prestige_fix.2da"), "2DA V2.0\n");
+
+            string ingestedToml = Path.Combine(_testDirectory, "k2_full_ingested.toml");
+            int convertExit = ModBuildConverter.Run(new[]
+            {
+                "convert",
+                "--input", fixturePath,
+                "-f", "toml",
+                "--parse-directions",
+                "-o", ingestedToml,
+                "--plaintext",
+            });
+
+            Assert.That(convertExit, Is.EqualTo(0));
+
+            StripDependenciesForInstallSmoke(
+                ingestedToml,
+                "Silent Sion Restoration",
+                "Prestige Class Saving Throw Fixes");
+
+            int installExit = ModBuildConverter.Run(new[]
+            {
+                "install",
+                "--input", ingestedToml,
+                "--game-dir", kotorDir,
+                "--source-dir", modDir,
+                "--select", "mod:Silent Sion Restoration",
+                "--select", "mod:Prestige Class Saving Throw Fixes",
+                "--skip-validation",
+                "--best-effort",
+                "-y",
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(installExit, Is.EqualTo(0));
+                Assert.That(File.Exists(Path.Combine(kotorDir, "Override", "153sion.dlg")), Is.True);
+                Assert.That(File.Exists(Path.Combine(kotorDir, "Override", "prestige_fix.2da")), Is.True);
             });
         }
 
@@ -776,7 +1357,8 @@ Name = ""Paste Cascade Toml Mod""
             GuideIngestResult ingested = GuideIngestService.Instance.IngestFromText(markdown, formatHint: "markdown", parseDirections: true);
 
             Assert.That(ingested.Components.Count, Is.GreaterThanOrEqualTo(100));
-            Assert.That(ingested.DraftResults, Is.Not.Empty, "NLP should draft instructions for at least one K2 Full component");
+            Assert.That(ingested.DraftResults.Count, Is.GreaterThanOrEqualTo(130),
+                "K2 Full fixture should draft instructions for the majority of real mod entries");
 
             foreach (DraftInstructionResult draft in ingested.DraftResults)
             {
@@ -1204,6 +1786,47 @@ ___
             }
 
             throw new DirectoryNotFoundException("Could not locate repository root containing ModSync.sln");
+        }
+
+        /// <summary>
+        /// Install-smoke tests select individual mods via <c>mod:</c> filters; strip dependency edges
+        /// on those mods so the test exercises draft execution without staging the full build graph.
+        /// </summary>
+        private static void StripDependenciesForInstallSmoke(string tomlPath, params string[] modNameFragments)
+        {
+            if (modNameFragments is null || modNameFragments.Length == 0)
+            {
+                throw new ArgumentException("At least one mod name fragment is required.", nameof(modNameFragments));
+            }
+
+            List<ModComponent> components = FileLoadingService.LoadFromFile(tomlPath).ToList();
+            bool changed = false;
+
+            foreach (ModComponent component in components)
+            {
+                if (!modNameFragments.Any(fragment =>
+                        component.Name.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    continue;
+                }
+
+                if (component.Dependencies.Count > 0)
+                {
+                    component.Dependencies.Clear();
+                    changed = true;
+                }
+
+                if (component.Restrictions.Count > 0)
+                {
+                    component.Restrictions.Clear();
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                FileLoadingService.SaveToFile(components, tomlPath);
+            }
         }
     }
 }
