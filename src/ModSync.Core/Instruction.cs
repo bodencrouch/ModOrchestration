@@ -1161,7 +1161,7 @@ namespace ModSync.Core
                     }
 
                     cleanlistPath = fallback;
-                    cleanlistContent = await File.ReadAllTextAsync(fallback).ConfigureAwait(false);
+                    cleanlistContent = await NetFrameworkCompatibility.ReadAllTextAsync(fallback).ConfigureAwait(false);
                     await Logger.LogVerboseAsync(
                         $"[CleanList] Using guide script '{fallback}' (not present in the extract tree).")
                         .ConfigureAwait(false);

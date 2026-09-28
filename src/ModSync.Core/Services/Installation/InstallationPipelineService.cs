@@ -7,7 +7,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +16,7 @@ using JetBrains.Annotations;
 using ModSync.Core.Installation;
 using ModSync.Core.Services.Checkpoints;
 using ModSync.Core.Services.Validation;
+using ModSync.Core.Utility;
 using Newtonsoft.Json;
 
 namespace ModSync.Core.Services.Installation
@@ -507,8 +507,8 @@ namespace ModSync.Core.Services.Installation
                 }
             }
 
-            byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString()));
-            return Convert.ToHexString(hash).ToLowerInvariant();
+            byte[] hash = NetFrameworkCompatibility.HashDataSHA256(Encoding.UTF8.GetBytes(canonical.ToString()));
+            return BitConverter.ToString(hash).Replace("-", string.Empty).ToLowerInvariant();
         }
 
         private static void AppendInstructions(

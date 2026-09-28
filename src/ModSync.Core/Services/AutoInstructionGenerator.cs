@@ -2512,7 +2512,7 @@ namespace ModSync.Core.Services
 
             foreach (string entry in fileList)
             {
-                string[] parts = entry.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+                string[] parts = entry.Replace('\\', '/').Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
                 for (int i = 0; i < parts.Length - 1; i++)
                 {
                     if (!FolderMatchesGuideNames(parts[i], allowlist))
