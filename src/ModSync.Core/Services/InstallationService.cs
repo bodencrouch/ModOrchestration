@@ -1437,6 +1437,25 @@ Exception Type: {ex.GetType().FullName}";
                     await coordinator.CheckpointManager.SaveAsync().ConfigureAwait(false);
                 }
 
+                // DelDuplicate runs once, mid-guide, and only sees duplicates that exist at that
+                // moment; a later component can recreate a duplicate texture pair. Re-apply the
+                // guide's own DelDuplicate purges once after everything has installed.
+                try
+                {
+                    int swept = await Instruction.RunFinalDuplicateSweepAfterInstallAsync(
+                            orderedComponents.Where(c => c.InstallState == ModComponent.ComponentInstallState.Completed))
+                        .ConfigureAwait(false);
+                    if (swept > 0)
+                    {
+                        await Logger.LogAsync($"Final duplicate sweep removed {swept} late-reintroduced duplicate file(s).")
+                            .ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await Logger.LogWarningAsync($"Final duplicate sweep failed: {ex.Message}").ConfigureAwait(false);
+                }
+
                 if (continuedAfterModFailure || skippedDependencyViolations)
                 {
                     return ModComponent.InstallExitCode.CompletedWithFailures;

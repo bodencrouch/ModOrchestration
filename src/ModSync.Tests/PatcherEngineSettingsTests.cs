@@ -110,6 +110,9 @@ namespace ModSync.Tests
                 var fileSystem = new Mock<IFileSystemProvider>(MockBehavior.Strict);
                 // Space-separated: OdyPatcher rejects --flag=value (and quote-collapsed equivalents).
                 const string args = "--install --game-dir game --tslpatchdata mod --cli -y";
+                // Only dry-run providers route the patcher process through the provider; a real
+                // install launches the executable directly.
+                _ = fileSystem.SetupGet(provider => provider.IsDryRun).Returns(true);
                 _ = fileSystem
                     .Setup(provider => provider.ExecuteProcessAsync(tempExe, args))
                     .ReturnsAsync((0, "ok", string.Empty));

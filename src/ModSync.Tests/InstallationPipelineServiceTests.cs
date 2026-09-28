@@ -44,6 +44,9 @@ namespace ModSync.Tests
         [TearDown]
         public void TearDown()
         {
+            // SetUp enables the process-wide NoCheckpoint static; don't leak it into later fixtures.
+            MainConfig.Instance.noCheckpoint = false;
+
             if (Directory.Exists(_tempRoot))
             {
                 Directory.Delete(_tempRoot, recursive: true);
