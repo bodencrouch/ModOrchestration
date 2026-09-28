@@ -9,9 +9,9 @@ name: Mock Install Validation
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [baio/laughing-colden-6090a5, main, master]
   push:
-    branches: [main, master]
+    branches: [baio/laughing-colden-6090a5, main, master]
   workflow_dispatch:
 
 permissions:
