@@ -164,6 +164,62 @@ rename\s+(?<source>[\w\-_.]+?)\s+to\s+(?<destination>[\w\-_.]+)
 '''
 
 [[instruction]]
+id = "nlp_k2_001_move"
+action = "Move"
+options = "IgnoreCase"
+pattern = '''
+install\s+(?:the\s+)?files?\s+(?:within|from|in)\s+(?:the\s+)?(?:included\s+)?override\s+(?:folder|directory)
+'''
+
+[[instruction]]
+id = "nlp_k2_002_move"
+action = "Move"
+options = "IgnoreCase"
+pattern = '''
+install\s+(?:the\s+)?contents?\s+of\s+(?:every|all|each)\s+folders?
+'''
+
+[[instruction]]
+id = "nlp_k2_003_move"
+action = "Move"
+options = "IgnoreCase"
+pattern = '''
+use\s+(?:the\s+)?files?\s+in\s+(?:the\s+)?["'](?<source>[^"']+)["']\s+folder
+'''
+
+[[instruction]]
+id = "nlp_k2_004_move"
+action = "Move"
+options = "IgnoreCase"
+pattern = '''
+go\s+into\s+(?:the\s+)?["']?(?<source>[\w\s\-_]+?)["']?\s+folder\s+and\s+move\s+(?:all\s+)?(?:the\s+)?(?:loose\s+)?files?\s+to\s+(?:the\s+|your\s+)?(?<destination>[\w\s\-_/\\]+)
+'''
+
+[[instruction]]
+id = "nlp_k2_005_move"
+action = "Move"
+options = "IgnoreCase"
+pattern = '''
+(?:files?\s+(?:from\s+this\s+mod\s+)?go\s+in\s+(?:your\s+)?movies\s+folder|(?:move|copy|place|put)\s+(?:the\s+)?(?:files?|contents?|everything)\s+(?:to|into)\s+(?:your\s+)?(?:game'?s?\s+)?movies(?:\s+folder)?)
+'''
+
+[[instruction]]
+id = "nlp_k2_006_move"
+action = "Move"
+options = "IgnoreCase"
+pattern = '''
+(?:before\s+)?mov(?:e|ing)\s+(?:the\s+)?(?:files?|contents?)\s+to\s+(?:your\s+)?(?:game'?s?\s+)?(?<destination>override|movies)(?:\s+(?:folder|directory))?
+'''
+
+[[instruction]]
+id = "nlp_k2_007_move"
+action = "Move"
+options = "IgnoreCase"
+pattern = '''
+download\s+the\s+\.?(?<variant>tpc|tga)\s+variant
+'''
+
+[[instruction]]
 id = "nlp_011_move"
 action = "Move"
 options = "IgnoreCase"
@@ -401,6 +457,46 @@ action = "Patcher"
 options = "IgnoreCase"
 pattern = '''
 run\s+the\s+holopatcher\s+executable(?:\.\s+select\s+the\s+(?<option>.+?)\s+install)?
+'''
+
+[[instruction]]
+id = "nlp_k2_008_patcher"
+action = "Patcher"
+options = "IgnoreCase"
+pattern = '''
+run\s+(?:the\s+)?(?<source>holopatcher|tslpatcher)(?:\s+executable)?
+'''
+
+[[instruction]]
+id = "nlp_k2_009_patcher"
+action = "Patcher"
+options = "IgnoreCase"
+pattern = '''
+run\s+the\s+(?:installer|patcher)\s+first
+'''
+
+[[instruction]]
+id = "nlp_k2_010_patcher"
+action = "Patcher"
+options = "IgnoreCase"
+pattern = '''
+(?:simply\s+)?install\s+(?:the\s+)?["'](?<option>[^"']+)["'](?:\s+option)?
+'''
+
+[[instruction]]
+id = "nlp_k2_011_patcher"
+action = "Patcher"
+options = "IgnoreCase"
+pattern = '''
+use\s+(?:the\s+)?["'](?<option>[^"']+)["']\s+option
+'''
+
+[[instruction]]
+id = "nlp_k2_012_patcher"
+action = "Patcher"
+options = "IgnoreCase"
+pattern = '''
+apply\s+(?:the\s+)?(?<option>main\s+installation|default\s+install|patch|contents?)
 '''
 
 [[instruction]]

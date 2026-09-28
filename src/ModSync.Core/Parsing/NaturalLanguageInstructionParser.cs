@@ -1693,6 +1693,27 @@ namespace ModSync.Core.Parsing
         }
 
         /// <summary>
+        /// Nested post-Extract search paths are only drafted for Move (the K2 loose-file/folder Move
+        /// fix). Delete, Rename and Copy keep the single literal path the guide named so they never
+        /// fan out to same-named files elsewhere in the mod workspace.
+        /// </summary>
+        [NotNull]
+        private static List<string> LooseFileSources([NotNull] string file, Instruction.ActionType actionType)
+        {
+            return actionType == Instruction.ActionType.Move
+                ? DraftInstructionService.BuildLooseFileMoveSources(file)
+                : new List<string> { $"<<modDirectory>>\\{file.Trim().Trim('"', '\'')}" };
+        }
+
+        [NotNull]
+        private static List<string> FolderSources([NotNull] string folder, Instruction.ActionType actionType)
+        {
+            return actionType == Instruction.ActionType.Move
+                ? DraftInstructionService.BuildFolderMoveSources(folder)
+                : new List<string> { $"<<modDirectory>>\\{folder}\\*" };
+        }
+
+        /// <summary>
         /// Extracts source file/folder paths from text.
         /// </summary>
         [NotNull]
@@ -1773,12 +1794,12 @@ namespace ModSync.Core.Parsing
             {
                 string folder = folderMatch.Groups["folder"].Value.Trim();
                 folder = folder.Trim('"', '\'', ' ');
-                sources.AddRange(DraftInstructionService.BuildFolderMoveSources(folder));
+                sources.AddRange(FolderSources(folder, actionType));
 
                 if (folderMatch.Groups["folder2"].Success)
                 {
                     string folder2 = folderMatch.Groups["folder2"].Value.Trim().Trim('"', '\'', ' ');
-                    sources.AddRange(DraftInstructionService.BuildFolderMoveSources(folder2));
+                    sources.AddRange(FolderSources(folder2, actionType));
                 }
                 return sources;
             }
@@ -1791,7 +1812,7 @@ namespace ModSync.Core.Parsing
                 List<string> files = ParseFileList(filesText);
                 foreach (string file in files)
                 {
-                    sources.AddRange(DraftInstructionService.BuildLooseFileMoveSources(file));
+                    sources.AddRange(LooseFileSources(file, actionType));
                 }
 
                 if (sources.Count > 0)
@@ -1814,19 +1835,24 @@ namespace ModSync.Core.Parsing
             if (singleFileMatch.Success)
             {
                 string file = singleFileMatch.Groups["file"].Value.Trim('"', '\'');
-                return DraftInstructionService.BuildLooseFileMoveSources(file);
+                return LooseFileSources(file, actionType);
             }
 
             // === Fallback: treat as folder or pattern ===
             if (!string.IsNullOrWhiteSpace(sourceText))
             {
                 string cleaned = sourceText.Trim('"', '\'', ' ', ',', ';');
-                if (cleaned.Length > 0 && IsValidSourceToken(cleaned))
+                // Delete keeps literal guide wording (reviewed as a draft; see the conditional-clause
+                // tests) and only drops bare pronouns; other actions require a path-like token.
+                bool acceptable = actionType == Instruction.ActionType.Delete
+                    ? !s_invalidSourceTokens.Contains(cleaned)
+                    : IsValidSourceToken(cleaned);
+                if (cleaned.Length > 0 && acceptable)
                 {
                     // Check if it looks like a file (has extension)
                     if (Path.HasExtension(cleaned))
                     {
-                        return DraftInstructionService.BuildLooseFileMoveSources(cleaned);
+                        return LooseFileSources(cleaned, actionType);
                     }
                     // Check if it has wildcards
                     else if (cleaned.Contains("*") || cleaned.Contains("?"))
@@ -1851,8 +1877,29 @@ namespace ModSync.Core.Parsing
                 }
             }
 
+            // The captured source was prose filler ("move all the files ...") that the pronoun/stopword
+            // guard rejected. If the clause names the folder it moves from ("... in the Creatures
+            // folder ..."), draft that folder instead of dropping the Move.
+            if (sources.Count == 0 && actionType == Instruction.ActionType.Move)
+            {
+                Match inFolderMatch = s_inNamedFolderPattern.Match(fullUnit);
+                if (inFolderMatch.Success)
+                {
+                    string folder = inFolderMatch.Groups["folder"].Value.Trim().Trim('"', '\'', ' ');
+                    if (IsValidSourceToken(folder))
+                    {
+                        sources.AddRange(FolderSources(folder, actionType));
+                    }
+                }
+            }
+
             return sources;
         }
+
+        [NotNull]
+        private static readonly Regex s_inNamedFolderPattern = new Regex(
+            @"\b(?:in|inside|within)\s+(?:the\s+)?[""']?(?<folder>[\w\-][\w\s\-]*?)[""']?\s+(?:folder|directory)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>
         /// Rejects pronouns and other non-path tokens guides use in prose ("rename them to …").
@@ -1906,7 +1953,9 @@ namespace ModSync.Core.Parsing
 
             foreach (string segment in remainder.Split('\\', '/'))
             {
-                if (string.IsNullOrEmpty(segment) || segment == "*")
+                // "." / ".." are left for DraftInstructionService's sandbox sanitizer, which owns
+                // traversal handling.
+                if (string.IsNullOrEmpty(segment) || segment == "*" || segment == "." || segment == "..")
                 {
                     continue;
                 }
@@ -1918,7 +1967,13 @@ namespace ModSync.Core.Parsing
                     baseSegment = baseSegment.Substring(0, wildcardIndex);
                 }
 
-                if (!string.IsNullOrEmpty(baseSegment) && !IsValidSourceToken(baseSegment))
+                // Only reject prose pronouns/generic words here ("rename them to ..."). Path segments
+                // are often generated folder slugs (lowercase) or a mod's own Override folder, which
+                // the prose-oriented casing heuristic in IsValidSourceToken would wrongly reject.
+                string cleanedSegment = baseSegment.Trim('"', '\'', ' ', ',', ';', '.');
+                if (cleanedSegment.Length > 0
+                    && s_invalidSourceTokens.Contains(cleanedSegment)
+                    && !string.Equals(cleanedSegment, "override", StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
                 }

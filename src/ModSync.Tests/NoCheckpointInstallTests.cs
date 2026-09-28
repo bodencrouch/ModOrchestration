@@ -22,6 +22,7 @@ namespace ModSync.Tests
         private DirectoryInfo _modDir;
         private MainConfig _previousConfig;
         private List<ModComponent> _previousAll;
+        private bool _previousNoCheckpoint;
 
         [SetUp]
         public void SetUp()
@@ -33,10 +34,16 @@ namespace ModSync.Tests
 
             _previousConfig = MainConfig.Instance;
             _previousAll = MainConfig.AllComponents;
+            _previousNoCheckpoint = MainConfig.NoCheckpoint;
             MainConfig.Instance = new MainConfig
             {
                 destinationPath = _destination,
                 sourcePath = _modDir,
+
+                // NoCheckpoint is process-wide static state that other tests (and CLI
+                // --no-checkpoint runs) can leave set; these tests control checkpoints solely via
+                // the enableGitCheckpoints argument.
+                noCheckpoint = false,
             };
         }
 
@@ -44,6 +51,7 @@ namespace ModSync.Tests
         public void TearDown()
         {
             MainConfig.Instance = _previousConfig;
+            (MainConfig.Instance ?? new MainConfig()).noCheckpoint = _previousNoCheckpoint;
             MainConfig.AllComponents = _previousAll;
             InstallCoordinator.ClearSessionForTests(_destination);
             try

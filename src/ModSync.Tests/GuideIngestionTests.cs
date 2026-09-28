@@ -1197,12 +1197,14 @@ ___
                     AssertInstructionIsSandboxed(instruction);
                 }
 
-                if (escapeResults.Count > 0)
+                // Results are also returned for components whose prose produced no draft (so unparsed
+                // gaps can be surfaced); only an actual draft carries the review flag.
+                if (escapeResults.Count > 0 && escapeResults[0].DraftInstructionCount > 0)
                 {
                     Assert.That(escapeComponent.InstallationWarning, Does.Contain(DraftInstructionService.ReviewFlagMessage));
                 }
 
-                if (bareResults.Count > 0)
+                if (bareResults.Count > 0 && bareResults[0].DraftInstructionCount > 0)
                 {
                     Assert.That(bareDotDot.InstallationWarning, Does.Contain(DraftInstructionService.ReviewFlagMessage));
                 }
