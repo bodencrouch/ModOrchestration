@@ -11,6 +11,8 @@ using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using ModSync.Core;
+using ModSync.Core.Services.Installation;
+using ModSync.Core.Services.Validation;
 using ModSync.Dialogs.WizardPages;
 using Xunit;
 
@@ -184,6 +186,142 @@ namespace ModSync.Tests.HeadlessUITests
                 // in-page Resume/Retry must not be offered after this kind of cancellation.
                 Assert.False(page.IsResumeRetryVisible);
                 Assert.Contains("reopen this wizard", page.FailureSummaryDisplayText, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
+        [AvaloniaFact(DisplayName = "Installing page shows the blocked UI when validation blocks the install")]
+        public async Task InstallingPage_ValidationBlocked_ShowsBlockedRetryUi()
+        {
+            var mod = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "BlockedMod",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { mod });
+            page.PipelineRunner = request =>
+            {
+                InstallationPlan plan = InstallationPipelineService.BuildPlan(request);
+                var validation = new ValidationPipelineResult { IsSuccess = false, ErrorCount = 2 };
+                return Task.FromResult(new InstallationPipelineResult(
+                    plan,
+                    validation,
+                    ModComponent.InstallExitCode.InvalidOperation));
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+
+                Assert.Equal(InstallingPage.TerminalOutcome.Blocked, page.LastOutcome);
+                Assert.False(page.InstallationSucceeded);
+                Assert.Equal(
+                    "Installation blocked. Fix the reported issue and retry.",
+                    page.FindControl<TextBlock>("CurrentModText")?.Text);
+                Assert.Contains("blocked", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("Validation did not pass", page.FailureSummaryDisplayText, StringComparison.Ordinal);
+                Assert.True(page.IsResumeRetryVisible);
+                (bool isValid, string error) = await page.ValidateAsync(CancellationToken.None);
+                Assert.False(isValid);
+                Assert.Contains("Installation blocked", error ?? string.Empty, StringComparison.Ordinal);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
+        [AvaloniaFact(DisplayName = "Installing page blocks a Success-shaped run whose witness PASS failed")]
+        public async Task InstallingPage_WitnessPassFailed_ShowsBlockedNotSuccess()
+        {
+            var mod = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "WitnessMod",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { mod });
+            page.PipelineRunner = request =>
+            {
+                InstallationPlan plan = InstallationPipelineService.BuildPlan(request);
+                mod.InstallState = ModComponent.ComponentInstallState.Completed;
+                return Task.FromResult(new InstallationPipelineResult(
+                    plan,
+                    new ValidationPipelineResult { IsSuccess = true },
+                    ModComponent.InstallExitCode.Success,
+                    WitnessVerdict.PublishedPassFailed));
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+
+                Assert.Equal(InstallingPage.TerminalOutcome.Blocked, page.LastOutcome);
+                Assert.False(page.InstallationSucceeded);
+                Assert.Contains("blocked", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("Completed Successfully", page.FailureSummaryDisplayText, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                await CloseWindowAsync(window);
+            }
+        }
+
+        [AvaloniaFact(DisplayName = "Installing page shows completed-unverified wording, not Failed")]
+        public async Task InstallingPage_CompletedUnverified_ShowsUnverifiedNotFailed()
+        {
+            var done = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "AppliedMod",
+                IsSelected = true,
+            };
+            var failed = new ModComponent
+            {
+                Guid = Guid.NewGuid(),
+                Name = "FailedMod",
+                IsSelected = true,
+            };
+
+            InstallingPage page = await CreatePageAsync(new List<ModComponent> { done, failed });
+            page.PipelineRunner = request =>
+            {
+                InstallationPlan plan = InstallationPipelineService.BuildPlan(request);
+                done.InstallState = ModComponent.ComponentInstallState.Completed;
+                failed.InstallState = ModComponent.ComponentInstallState.Failed;
+                return Task.FromResult(new InstallationPipelineResult(
+                    plan,
+                    new ValidationPipelineResult { IsSuccess = true },
+                    ModComponent.InstallExitCode.CompletedUnverified,
+                    WitnessVerdict.CompletedUnverified,
+                    ModComponent.InstallExitCode.CompletedWithFailures));
+            };
+
+            Window window = await HostInWindowAsync(page);
+            try
+            {
+                await page.OnNavigatedToAsync(CancellationToken.None);
+                await WaitForAsync(() => Task.FromResult(page.IsFailurePanelVisible), TimeSpan.FromSeconds(5));
+
+                Assert.Equal(InstallingPage.TerminalOutcome.CompletedUnverified, page.LastOutcome);
+                Assert.False(page.InstallationSucceeded);
+                Assert.Contains("completed, unverified", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("failed", page.RunStateDisplayText, StringComparison.OrdinalIgnoreCase);
+                Assert.NotEqual("Failed", page.FindControl<TextBlock>("CurrentOperationText")?.Text);
+                Assert.Contains("unverified, with 1 component failure", page.FailureSummaryDisplayText, StringComparison.Ordinal);
+                (bool isValid, string error) = await page.ValidateAsync(CancellationToken.None);
+                Assert.False(isValid);
+                Assert.Contains("unverified", error ?? string.Empty, StringComparison.OrdinalIgnoreCase);
             }
             finally
             {

@@ -61,6 +61,22 @@ namespace ModSync.Dialogs.WizardPages
         private int _checkpointsCreated;
         private Stopwatch _stopwatch;
         private CancellationToken _pageCancellationToken;
+        private TerminalOutcome _lastOutcome = TerminalOutcome.None;
+
+        /// <summary>How the last install run ended; drives the page copy and Next validation.</summary>
+        internal enum TerminalOutcome
+        {
+            None,
+            Succeeded,
+            Failed,
+            Cancelled,
+
+            /// <summary>Validation or the install witness blocked the run (pipeline did not succeed).</summary>
+            Blocked,
+
+            /// <summary>Files were applied, but there is no published install PASS.</summary>
+            CompletedUnverified,
+        }
 
         /// <summary>
         /// Optional install runner for tests. When null (production), the page runs the shared
@@ -73,6 +89,17 @@ namespace ModSync.Dialogs.WizardPages
             CancellationToken,
             Task<ModComponent.InstallExitCode>> InstallRunner
         { get; set; }
+
+        /// <summary>
+        /// Optional pipeline runner for tests. When null (production), the page calls
+        /// <see cref="InstallationPipelineService.RunAsync"/>. Unlike <see cref="InstallRunner"/>, the
+        /// result's validation and witness fields still drive the terminal outcome.
+        /// </summary>
+        [CanBeNull]
+        internal Func<InstallationPipelineRequest, Task<InstallationPipelineResult>> PipelineRunner { get; set; }
+
+        /// <summary>How the last install run ended (for headless tests).</summary>
+        internal TerminalOutcome LastOutcome => _lastOutcome;
 
         public InstallingPage()
             : this(new List<ModComponent>(), new MainConfig(), new CancellationTokenSource())
@@ -140,6 +167,19 @@ namespace ModSync.Dialogs.WizardPages
                 if (_isInstalling)
                 {
                     return Task.FromResult((false, "Installation is still in progress. Please wait for it to complete."));
+                }
+
+                if (_runFinished && _lastOutcome == TerminalOutcome.Blocked)
+                {
+                    return Task.FromResult((false,
+                        "Installation blocked. Fix the reported issue and retry."));
+                }
+
+                if (_runFinished && _lastOutcome == TerminalOutcome.CompletedUnverified)
+                {
+                    return Task.FromResult((false,
+                        "Installation completed, unverified: files were applied, but there is no published install PASS. "
+                        + "Review the report, then re-run a verified install or cancel the wizard."));
                 }
 
                 if (_runFinished)
@@ -267,6 +307,7 @@ namespace ModSync.Dialogs.WizardPages
             _runFinished = false;
             _installationSucceeded = false;
             _canNavigateForward = false;
+            _lastOutcome = TerminalOutcome.None;
             _stopwatch = Stopwatch.StartNew();
             Logger.Logged += OnLogMessage;
             Logger.ExceptionLogged += OnException;
@@ -383,6 +424,7 @@ namespace ModSync.Dialogs.WizardPages
                     });
 
                     ModComponent.InstallExitCode exitCode;
+                    InstallationPipelineResult pipelineResult = null;
                     if (InstallRunner != null)
                     {
                         // Test seam: bypass the pipeline and drive the terminal-outcome UI directly.
@@ -412,32 +454,31 @@ namespace ModSync.Dialogs.WizardPages
                             InstallationProgress = ProgressCallback,
                             CancellationToken = cancellationToken,
                         };
-                        InstallationPipelineResult pipelineResult = await InstallationPipelineService
-                            .RunAsync(pipelineRequest)
+                        pipelineResult = await (PipelineRunner ?? InstallationPipelineService.RunAsync)(
+                                pipelineRequest)
                             .ConfigureAwait(false);
                         exitCode = pipelineResult.ExitCode;
 
-                        if (!pipelineResult.Succeeded)
+                        if (!pipelineResult.Succeeded
+                            && exitCode != ModComponent.InstallExitCode.CompletedUnverified)
                         {
                             await Logger.LogErrorAsync(
                                 $"Installation blocked with exit code: {UtilityHelper.GetEnumDescription(exitCode)}. "
                                 + $"Plan fingerprint: {pipelineResult.Plan.Fingerprint}. No later guide steps were installed.");
-
-                            // Validation or witness policy can block an install whose raw exit code is
-                            // still Success; never let that surface as a successful install.
-                            if (exitCode == ModComponent.InstallExitCode.Success)
-                            {
-                                exitCode = ModComponent.InstallExitCode.InvalidOperation;
-                            }
                         }
                     }
 
-                    if (exitCode == ModComponent.InstallExitCode.Success)
+                    if (exitCode == ModComponent.InstallExitCode.Success
+                        && (pipelineResult == null || pipelineResult.Succeeded))
                     {
                         _installedCount = selectedMods.Count;
                     }
 
-                    await ApplyTerminalOutcomeAsync(exitCode, selectedMods, wasCancelled: false).ConfigureAwait(false);
+                    await ApplyTerminalOutcomeAsync(
+                        exitCode,
+                        selectedMods,
+                        wasCancelled: false,
+                        pipelineResult: pipelineResult).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -472,20 +513,68 @@ namespace ModSync.Dialogs.WizardPages
             }
         }
 
+        /// <summary>
+        /// Classifies how a run ended. With a pipeline result, its <see cref="InstallationPipelineResult.Succeeded"/>,
+        /// <see cref="InstallationPipelineResult.ValidationResult"/> and witness verdict decide the outcome, so a
+        /// run that validation or the witness blocked is never shown as a plain failure or as success.
+        /// </summary>
+        internal static TerminalOutcome ClassifyOutcome(
+            ModComponent.InstallExitCode exitCode,
+            bool wasCancelled,
+            [CanBeNull] InstallationPipelineResult pipelineResult)
+        {
+            if (wasCancelled || exitCode == ModComponent.InstallExitCode.UserCancelledInstall)
+            {
+                return TerminalOutcome.Cancelled;
+            }
+
+            if (exitCode == ModComponent.InstallExitCode.CompletedUnverified
+                || pipelineResult?.Witness == WitnessVerdict.CompletedUnverified)
+            {
+                return TerminalOutcome.CompletedUnverified;
+            }
+
+            if (pipelineResult == null)
+            {
+                return exitCode == ModComponent.InstallExitCode.Success
+                    ? TerminalOutcome.Succeeded
+                    : TerminalOutcome.Failed;
+            }
+
+            if (pipelineResult.Succeeded)
+            {
+                return TerminalOutcome.Succeeded;
+            }
+
+            bool validationBlocked = pipelineResult.ValidationResult != null
+                                     && !pipelineResult.ValidationResult.IsSuccess;
+            bool witnessBlocked = pipelineResult.Witness == WitnessVerdict.PublishedPassFailed
+                                  || pipelineResult.Witness == WitnessVerdict.MidRunSubsetFail
+                                  || pipelineResult.ExitCode == ModComponent.InstallExitCode.Success;
+            return validationBlocked || witnessBlocked
+                ? TerminalOutcome.Blocked
+                : TerminalOutcome.Failed;
+        }
+
         private async Task ApplyTerminalOutcomeAsync(
             ModComponent.InstallExitCode exitCode,
             [NotNull] List<ModComponent> selectedMods,
             bool wasCancelled,
-            [CanBeNull] string exceptionMessage = null)
+            [CanBeNull] string exceptionMessage = null,
+            [CanBeNull] InstallationPipelineResult pipelineResult = null)
         {
             int completed = selectedMods.Count(c =>
                 c.InstallState == ModComponent.ComponentInstallState.Completed ||
                 c.InstallState == ModComponent.ComponentInstallState.Skipped);
             int remaining = selectedMods.Count - completed;
-            bool success = !wasCancelled && exitCode == ModComponent.InstallExitCode.Success;
+            TerminalOutcome outcome = ClassifyOutcome(exitCode, wasCancelled, pipelineResult);
+            bool success = outcome == TerminalOutcome.Succeeded;
 
+            _lastOutcome = outcome;
             _installationSucceeded = success;
             _canNavigateForward = success;
+
+            string exitDescription = UtilityHelper.GetEnumDescription(exitCode)?.ToString() ?? exitCode.ToString();
 
             await UpdateUIAsync(() =>
             {
@@ -536,43 +625,71 @@ namespace ModSync.Dialogs.WizardPages
                 }
                 else
                 {
-                    string outcomeLabel = wasCancelled || exitCode == ModComponent.InstallExitCode.UserCancelledInstall
-                        ? "cancelled"
-                        : "failed";
-
-                    if (_currentModText != null)
+                    bool cancelled = outcome == TerminalOutcome.Cancelled;
+                    string summary;
+                    switch (outcome)
                     {
-                        _currentModText.Text = wasCancelled || exitCode == ModComponent.InstallExitCode.UserCancelledInstall
-                            ? "Installation cancelled"
-                            : "Installation did not complete";
+                        case TerminalOutcome.Blocked:
+                            SetTerminalText(
+                                "Installation blocked. Fix the reported issue and retry.",
+                                "Blocked",
+                                "Status: blocked",
+                                "No later guide steps were installed");
+                            summary = pipelineResult?.ValidationResult != null && !pipelineResult.ValidationResult.IsSuccess
+                                ? $"Validation did not pass ({pipelineResult.ValidationResult.ErrorCount} error(s)), so nothing was installed. "
+                                : "The install witness did not publish a PASS for this run. ";
+                            summary += $"{completed} of {selectedMods.Count} selected mods completed.";
+                            if (exitCode != ModComponent.InstallExitCode.Success)
+                            {
+                                // A witness block can carry a Success-shaped loop exit code; never print
+                                // "Completed Successfully" next to a blocked install.
+                                summary += $" Exit: {exitDescription}.";
+                            }
+
+                            break;
+
+                        case TerminalOutcome.CompletedUnverified:
+                            SetTerminalText(
+                                "Installation completed, unverified",
+                                "Completed (unverified)",
+                                "Status: completed, unverified",
+                                "No published install PASS");
+                            int failedComponents = pipelineResult?.FailedComponentCount
+                                                   ?? selectedMods.Count(c =>
+                                                       c.InstallState == ModComponent.ComponentInstallState.Failed
+                                                       || c.InstallState == ModComponent.ComponentInstallState.Blocked);
+                            int skippedComponents = pipelineResult?.SkippedComponentCount
+                                                    ?? selectedMods.Count(c =>
+                                                        c.InstallState == ModComponent.ComponentInstallState.Skipped);
+                            summary = "Files were applied, but skip-validation, no-checkpoint, or continue-on-failure "
+                                      + "settings mean there is no published install PASS. "
+                                      + $"{completed} of {selectedMods.Count} selected mods completed";
+                            summary += failedComponents > 0
+                                ? $"; unverified, with {failedComponents} component failure(s)"
+                                : string.Empty;
+                            summary += skippedComponents > 0
+                                ? $"; {skippedComponents} skipped for missing archives."
+                                : ".";
+                            break;
+
+                        default:
+                            SetTerminalText(
+                                cancelled ? "Installation cancelled" : "Installation did not complete",
+                                cancelled ? "Cancelled" : "Failed",
+                                cancelled ? "Status: cancelled" : "Status: failed",
+                                cancelled ? "Installation was cancelled" : $"Stopped: {exitDescription}");
+                            summary =
+                                $"{completed} of {selectedMods.Count} selected mods completed; {remaining} remaining. " +
+                                $"Exit: {exitDescription}.";
+                            break;
                     }
 
-                    if (_currentOperationText != null)
-                    {
-                        _currentOperationText.Text = wasCancelled ? "Cancelled" : "Failed";
-                    }
-
-                    if (_runStateText != null)
-                    {
-                        _runStateText.Text = $"Status: {outcomeLabel}";
-                    }
-
-                    if (_checkpointStatusText != null)
-                    {
-                        _checkpointStatusText.Text = wasCancelled
-                            ? "Installation was cancelled"
-                            : $"Stopped: {UtilityHelper.GetEnumDescription(exitCode)}";
-                    }
-
-                    string summary =
-                        $"{completed} of {selectedMods.Count} selected mods completed; {remaining} remaining. " +
-                        $"Exit: {UtilityHelper.GetEnumDescription(exitCode)}.";
                     if (!string.IsNullOrWhiteSpace(exceptionMessage))
                     {
                         summary += $" {exceptionMessage}";
                     }
 
-                    if (remaining <= 0 && !success)
+                    if (remaining <= 0 && outcome == TerminalOutcome.Failed)
                     {
                         summary += " Session resume may be unavailable for further work.";
                     }
@@ -583,10 +700,16 @@ namespace ModSync.Dialogs.WizardPages
                     // running anything, so don't offer in-page retry here -- direct the
                     // player to reopen the wizard, where InstallStartPage offers the same
                     // resume via the on-disk session file instead.
-                    bool canRetryInPage = !wasCancelled;
-                    summary += canRetryInPage
-                        ? " Resume continues remaining mods; it does not restore a pristine game folder."
-                        : " Close and reopen this wizard to resume from where it left off; it does not restore a pristine game folder.";
+                    bool canRetryInPage = !wasCancelled
+                                          && (outcome != TerminalOutcome.CompletedUnverified || remaining > 0);
+                    if (wasCancelled)
+                    {
+                        summary += " Close and reopen this wizard to resume from where it left off; it does not restore a pristine game folder.";
+                    }
+                    else if (canRetryInPage)
+                    {
+                        summary += " Resume continues remaining mods; it does not restore a pristine game folder.";
+                    }
 
                     if (_failurePanel != null)
                     {
@@ -600,7 +723,7 @@ namespace ModSync.Dialogs.WizardPages
 
                     if (_resumeRetryButton != null)
                     {
-                        _resumeRetryButton.IsVisible = canRetryInPage && (remaining > 0 || !success);
+                        _resumeRetryButton.IsVisible = canRetryInPage;
                         _resumeRetryButton.Content = remaining > 0 ? "Resume / Retry" : "Retry";
                     }
                 }
@@ -608,12 +731,53 @@ namespace ModSync.Dialogs.WizardPages
                 UpdateMetrics(selectedMods.Count);
             }).ConfigureAwait(false);
 
-            if (!success)
+            if (outcome == TerminalOutcome.CompletedUnverified)
+            {
+                await Logger.LogWarningAsync(
+                    $"Installation completed, unverified ({completed} completed, {remaining} not completed): "
+                    + "there is no published install PASS."
+                ).ConfigureAwait(false);
+            }
+            else if (outcome == TerminalOutcome.Blocked)
             {
                 await Logger.LogErrorAsync(
-                    $"Installation ended with exit code: {UtilityHelper.GetEnumDescription(exitCode)} " +
+                    $"Installation blocked ({completed} completed, {remaining} not completed). "
+                    + "Fix the reported issue and retry."
+                ).ConfigureAwait(false);
+            }
+            else if (!success)
+            {
+                await Logger.LogErrorAsync(
+                    $"Installation ended with exit code: {exitDescription} " +
                     $"({completed} completed, {remaining} remaining)."
                 ).ConfigureAwait(false);
+            }
+        }
+
+        private void SetTerminalText(
+            [NotNull] string currentMod,
+            [NotNull] string currentOperation,
+            [NotNull] string runState,
+            [NotNull] string checkpointStatus)
+        {
+            if (_currentModText != null)
+            {
+                _currentModText.Text = currentMod;
+            }
+
+            if (_currentOperationText != null)
+            {
+                _currentOperationText.Text = currentOperation;
+            }
+
+            if (_runStateText != null)
+            {
+                _runStateText.Text = runState;
+            }
+
+            if (_checkpointStatusText != null)
+            {
+                _checkpointStatusText.Text = checkpointStatus;
             }
         }
 
